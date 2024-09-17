@@ -20,6 +20,7 @@ export async function POST(req: Request) {
 
     // Print the data
     console.log(await printer.isPrinterConnected());
+    printer.clear();
     printer.alignCenter();
     printer.bold(true);
     printer.setTextDoubleHeight();
@@ -31,9 +32,8 @@ export async function POST(req: Request) {
     printer.drawLine();
     printer.cut();
     await printer.execute();
+    printer.clear();
 
-
-    // You can also add custom logic here to save the data
     return NextResponse.json({ message: "Form submitted successfully", data });
   } catch (error) {
     return NextResponse.json({ message: "Error processing form", error }, { status: 500 });
