@@ -1,0 +1,6 @@
+tunnel: thermal-printer
+
+ingress:
+  - hostname: printer.vicio.ovh
+    service: http://web:3000
+  - service: http_status:404
