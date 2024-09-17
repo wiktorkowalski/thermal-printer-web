@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { BreakLine, ThermalPrinter } from "node-thermal-printer";
+import { BreakLine, CharacterSet, ThermalPrinter } from "node-thermal-printer";
 
 const printer = new ThermalPrinter({
   interface: 'tcp://192.168.123.100',
-  // characterSet: CharacterSet.PC850_MULTILINGUAL,
+  characterSet: CharacterSet.PC850_MULTILINGUAL,
   removeSpecialCharacters: false,
   lineCharacter: "=",
   breakLine: BreakLine.WORD,
