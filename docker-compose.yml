@@ -3,6 +3,8 @@ services:
     build: .
     environment:
       - NODE_ENV=development
+    env_file:
+      - .env
   
   cloudflared:
     image: cloudflare/cloudflared:latest
