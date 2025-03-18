@@ -27,6 +27,17 @@ export async function POST(req: NextRequest) {
     const message = formData.get('message') as string;
     const image: File | null = formData.get('image') as unknown as File | null;
 
+    // Validate image type on the server side
+    if (image instanceof File) {
+      const validTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+      if (!validTypes.includes(image.type)) {
+        return NextResponse.json(
+          { message: "Invalid file type. Only PNG and JPEG images are allowed" },
+          { status: 400 }
+        );
+      }
+    }
+
     console.log("Form submitted:", { name, message, image: image ? image.name : null });
     console.log(formData);
     console.log(image);
@@ -58,6 +69,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: "Form submitted successfully", data: { name, message, image: imageStatus } });
   } catch (error) {
     console.error("Error processing form:", error);
+    printer.clear();
     // newrelic.noticeError(error as Error);
     return NextResponse.json({ message: "Error processing form", error }, { status: 500 });
   }
