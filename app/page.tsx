@@ -18,6 +18,7 @@ import { toast } from "@/hooks/use-toast";
 const formSchema = zod.object({
   name: zod.string().min(1).max(50),
   message: zod.string().min(1).max(5000),
+  image: zod.any(),
 });
 
 export default function Home() {
@@ -26,17 +27,24 @@ export default function Home() {
     defaultValues: {
       name: "",
       message: "",
+      image: null,
     },
   });
 
   const handleSubmit = async (values: zod.infer<typeof formSchema>) => {
     try {
+      const formData = new FormData();
+      formData.append("name", values.name);
+      formData.append("message", values.message);
+      
+      const fileInput = document.getElementById('image') as HTMLInputElement;
+      if (fileInput && fileInput.files && fileInput.files.length > 0) {
+        formData.append("image", fileInput.files[0]);
+      }
+
       const response = await fetch("/api/submit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
+        body: formData,
       });
 
        
@@ -52,6 +60,7 @@ export default function Home() {
           ),
         });
         form.resetField("message");
+        form.resetField("image");
       } else {
         const result = await response.json();
         console.error("Form submission failed:", result);
@@ -113,6 +122,27 @@ export default function Home() {
                     <FormControl>
                       <Input
                         placeholder="Your Message"
+                        {...field}
+                        className="bg-gray-700 text-white border-gray-600"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                );
+              }}
+            />
+            <FormField
+              control={form.control}
+              name="image"
+              render={({ field }) => {
+                return (
+                  <FormItem>
+                    <FormLabel>Image</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="file"
+                        id="image"
+                        accept="image/png, image/jpeg, image/jpg"
                         {...field}
                         className="bg-gray-700 text-white border-gray-600"
                       />

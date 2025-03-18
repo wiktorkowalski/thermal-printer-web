@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { BreakLine, CharacterSet, ThermalPrinter } from "node-thermal-printer";
-import newrelic from 'newrelic';
-import * as zod from "zod";
+// import * as zod from "zod";
+import { NextRequest } from 'next/server';
 
 const printer = new ThermalPrinter({
   interface: 'tcp://192.168.123.100',
@@ -14,23 +14,22 @@ const printer = new ThermalPrinter({
   },
 });
 
-const formSchema = zod.object({
-  name: zod.string().min(1).max(50),
-  message: zod.string().min(1).max(5000),
-});
+// const formSchema = zod.object({
+//   name: zod.string().min(1).max(50),
+//   message: zod.string().min(1).max(5000),
+//   image: zod.any(),
+// });
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const data = await req.json();
+    const formData = await req.formData();
+    const name = formData.get('name') as string;
+    const message = formData.get('message') as string;
+    const image: File | null = formData.get('image') as unknown as File | null;
 
-    const validatedData = formSchema.parse(data);
-
-    if(validatedData.name === "error") {
-      console.log("Error processing form, name is 'error'");
-      newrelic.noticeError(new Error("Error processing form"));
-    }
-
-    console.log("Form submitted:", validatedData);
+    console.log("Form submitted:", { name, message, image: image ? image.name : null });
+    console.log(formData);
+    console.log(image);
 
     console.log(await printer.isPrinterConnected());
     printer.clear();
@@ -39,15 +38,24 @@ export async function POST(req: Request) {
     printer.setTextDoubleHeight();
     printer.setTextDoubleWidth();
     printer.drawLine();
-    printer.println(validatedData.name);
+    printer.println(name);
     printer.drawLine();
-    printer.println(validatedData.message);
+    printer.println(message);
     printer.drawLine();
+
+    let imageStatus = 'not-printed';
+    if (image) {
+      const bytes = await image.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+      await printer.printImageBuffer(buffer);
+      imageStatus = 'printed';
+    }
     printer.cut();
     await printer.execute();
+
     printer.clear();
 
-    return NextResponse.json({ message: "Form submitted successfully", validatedData });
+    return NextResponse.json({ message: "Form submitted successfully", data: { name, message, image: imageStatus } });
   } catch (error) {
     console.error("Error processing form:", error);
     // newrelic.noticeError(error as Error);
