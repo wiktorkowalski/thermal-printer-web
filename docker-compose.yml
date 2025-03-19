@@ -1,8 +1,6 @@
 services:
   web:
     build: .
-    environment:
-      - NODE_ENV=development
     env_file:
       - .env
     restart: unless-stopped
