@@ -24,6 +24,7 @@ const formSchema = zod.object({
 
 function ImageInput({ field }: { field: { value: File | null; onChange: (file: File | null) => void } }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const handleGlobalPaste = (e: ClipboardEvent) => {
@@ -31,6 +32,7 @@ function ImageInput({ field }: { field: { value: File | null; onChange: (file: F
       if (files && files.length > 0) {
         const imageFile = files[0];
         field.onChange(imageFile);
+        setPreviewUrl(URL.createObjectURL(imageFile));
         return;
       }
 
@@ -40,6 +42,7 @@ function ImageInput({ field }: { field: { value: File | null; onChange: (file: F
           if (items[i].type.indexOf("image") !== -1) {
             const blob = items[i].getAsFile();
             field.onChange(blob);
+            setPreviewUrl(blob ? URL.createObjectURL(blob) : null);
             return;
           }
         }
@@ -52,6 +55,11 @@ function ImageInput({ field }: { field: { value: File | null; onChange: (file: F
     };
   }, [field]);
 
+  const handleRemoveImage = () => {
+    field.onChange(null);
+    setPreviewUrl(null);
+  };
+
   return (
     <FormItem>
       <FormLabel>Image</FormLabel>
@@ -59,7 +67,26 @@ function ImageInput({ field }: { field: { value: File | null; onChange: (file: F
         onClick={() => fileInputRef.current?.click()}
         className="relative border border-gray-600 p-4 cursor-pointer text-center"
       >
-        {field.value ? "Image selected" : "Paste an image or click here to select a file"}
+        {previewUrl ? (
+          <div className="relative">
+            <img
+              src={previewUrl}
+              alt="Preview"
+              className="w-[500px] h-[500px] object-cover"
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemoveImage();
+              }}
+              className="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1"
+            >
+              X
+            </button>
+          </div>
+        ) : (
+          "Paste an image or click here to select a file"
+        )}
       </div>
       <FormControl>
         <Input
@@ -68,7 +95,9 @@ function ImageInput({ field }: { field: { value: File | null; onChange: (file: F
           ref={fileInputRef}
           accept="image/*"
           onChange={(e) => {
-            field.onChange(e.target.files?.[0] || null);
+            const file = e.target.files?.[0] || null;
+            field.onChange(file);
+            setPreviewUrl(file ? URL.createObjectURL(file) : null);
           }}
           className="hidden"
         />
