@@ -22,11 +22,15 @@ const formSchema = zod.object({
   image: zod.instanceof(File).nullable(),
 });
 
-function ImageInput({ field }: { field: { value: File | null; onChange: (file: File | null) => void } }) {
+function ImageInput({ field, resetPreviewRef }: { field: { value: File | null; onChange: (file: File | null) => void }, resetPreviewRef: React.MutableRefObject<(() => void) | null> }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    if (resetPreviewRef) {
+      resetPreviewRef.current = () => setPreviewUrl(null);
+    }
+
     const handleGlobalPaste = (e: ClipboardEvent) => {
       const files = e.clipboardData?.files;
       if (files && files.length > 0) {
@@ -53,7 +57,7 @@ function ImageInput({ field }: { field: { value: File | null; onChange: (file: F
     return () => {
       window.removeEventListener("paste", handleGlobalPaste);
     };
-  }, [field]);
+  }, [field, resetPreviewRef]);
 
   const handleRemoveImage = () => {
     field.onChange(null);
@@ -117,7 +121,13 @@ export default function Home() {
     },
   });
 
+  const resetPreviewRef = React.useRef<(() => void) | null>(null);
+
   const handleSubmit = async (values: zod.infer<typeof formSchema>) => {
+    if (resetPreviewRef.current) {
+      resetPreviewRef.current();
+    }
+
     try {
       const formData = new FormData();
       formData.append("name", values.name);
@@ -166,7 +176,7 @@ export default function Home() {
     <main className="relative min-h-screen flex flex-col items-center justify-center bg-gray-900">
       {/* Header Title */}
       <h1 className="relative z-20 text-6xl font-extrabold text-center mb-12 text-white">
-        Vittore&apos;s Printer
+        Vittore's Printer
       </h1>
 
       {/* Form inside the card */}
@@ -210,7 +220,7 @@ export default function Home() {
             <FormField
               control={form.control}
               name="image"
-              render={({ field }) => <ImageInput field={field} />}
+              render={({ field }) => <ImageInput field={field} resetPreviewRef={resetPreviewRef} />}
             />
             <Button type="submit" className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-lg">
               Submit
