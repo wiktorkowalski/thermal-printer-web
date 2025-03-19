@@ -176,7 +176,7 @@ export default function Home() {
     <main className="relative min-h-screen flex flex-col items-center justify-center bg-gray-900">
       {/* Header Title */}
       <h1 className="relative z-20 text-6xl font-extrabold text-center mb-12 text-white">
-        Vittore's Printer
+        Vittore&apos;s Printer
       </h1>
 
       {/* Form inside the card */}

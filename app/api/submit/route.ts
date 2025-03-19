@@ -26,12 +26,10 @@ export async function POST(req: NextRequest) {
     const name = formData.get('name') as string;
     const message = formData.get('message') as string;
     const image: File | null = formData.get('image') as unknown as File | null;
-
-    console.log("Form submitted:", { name, message, image: image ? image.name : null });
+    
     console.log(formData);
     console.log(image);
 
-    console.log(await printer.isPrinterConnected());
     printer.clear();
     printer.alignCenter();
     printer.bold(true);
@@ -64,11 +62,13 @@ export async function POST(req: NextRequest) {
 
     printer.clear();
 
+    console.log(`===============================================================`);
     return NextResponse.json({ message: "Form submitted successfully", data: { name, message, image: imageStatus } });
   } catch (error) {
     console.error("Error processing form:", error);
     printer.clear();
     // newrelic.noticeError(error as Error);
+    console.log(`===============================================================`);
     return NextResponse.json({ message: "Error processing form", error }, { status: 500 });
   }
 }
