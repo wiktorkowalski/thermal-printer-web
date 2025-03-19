@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { BreakLine, CharacterSet, ThermalPrinter } from "node-thermal-printer";
-// import * as zod from "zod";
+import sharp from "sharp";
 import { NextRequest } from 'next/server';
 
 const printer = new ThermalPrinter({
@@ -27,17 +27,6 @@ export async function POST(req: NextRequest) {
     const message = formData.get('message') as string;
     const image: File | null = formData.get('image') as unknown as File | null;
 
-    // Validate image type on the server side
-    if (image instanceof File) {
-      const validTypes = ['image/png', 'image/jpeg', 'image/jpg'];
-      if (!validTypes.includes(image.type)) {
-        return NextResponse.json(
-          { message: "Invalid file type. Only PNG and JPEG images are allowed" },
-          { status: 400 }
-        );
-      }
-    }
-
     console.log("Form submitted:", { name, message, image: image ? image.name : null });
     console.log(formData);
     console.log(image);
@@ -58,8 +47,17 @@ export async function POST(req: NextRequest) {
     if (image) {
       const bytes = await image.arrayBuffer();
       const buffer = Buffer.from(bytes);
-      await printer.printImageBuffer(buffer);
-      imageStatus = 'printed';
+      try {
+        const convertedBuffer = await sharp(buffer)
+        .png({colors: 2})
+        .resize(500,500)
+        .toBuffer();
+        await printer.printImageBuffer(convertedBuffer);
+        imageStatus = 'printed';
+      } catch (err) {
+        console.error("Error converting image:", err);
+        imageStatus = 'conversion-failed';
+      }
     }
     printer.cut();
     await printer.execute();
