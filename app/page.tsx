@@ -24,21 +24,38 @@ const formSchema = zod.object({
 
 function ImageInput({ field }: { field: { value: File | null; onChange: (file: File | null) => void } }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
-    const items = e.clipboardData.items;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf("image") !== -1) {
-        const blob = items[i].getAsFile();
-        field.onChange(blob);
+
+  React.useEffect(() => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files;
+      if (files && files.length > 0) {
+        const imageFile = files[0];
+        field.onChange(imageFile);
+        return;
       }
-    }
-  };
+
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf("image") !== -1) {
+            const blob = items[i].getAsFile();
+            field.onChange(blob);
+            return;
+          }
+        }
+      }
+    };
+
+    window.addEventListener("paste", handleGlobalPaste);
+    return () => {
+      window.removeEventListener("paste", handleGlobalPaste);
+    };
+  }, [field]);
 
   return (
     <FormItem>
       <FormLabel>Image</FormLabel>
       <div
-        onPaste={handlePaste}
         onClick={() => fileInputRef.current?.click()}
         className="relative border border-gray-600 p-4 cursor-pointer text-center"
       >
@@ -77,9 +94,8 @@ export default function Home() {
       formData.append("name", values.name);
       formData.append("message", values.message);
       
-      const fileInput = document.getElementById("image") as HTMLInputElement;
-      if (fileInput && fileInput.files && fileInput.files.length > 0) {
-        formData.append("image", fileInput.files[0]);
+      if (values.image) {
+        formData.append("image", values.image);
       }
 
       const response = await fetch("/api/submit", {
