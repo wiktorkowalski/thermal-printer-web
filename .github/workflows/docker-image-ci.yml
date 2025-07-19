@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: [ "master" ]
   workflow_dispatch:
-    inputs:
-        tag:
-            description: 'Tag to build'
-            required: false
-            default: 'latest'
 
 permissions:
   contents: read
@@ -36,8 +31,8 @@ jobs:
          images: ghcr.io/${{ github.repository }}
          tags: |
            type=sha,prefix=sha-
-           type=ref,event=branch,prefix=
-           latest=true
+           type=ref,event=branch
+           type=raw,value=latest
      - name: Build and push
        uses: docker/build-push-action@v5
        with:
