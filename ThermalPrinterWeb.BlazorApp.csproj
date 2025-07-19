@@ -6,4 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="ESCPOS_NET" Version="3.0.0" />
+  </ItemGroup>
+
 </Project>
