@@ -1,7 +1,6 @@
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
 using ESCPOS_NET;
-using System.Threading.Tasks;
 
 namespace ThermalPrinterWeb
 {
@@ -29,7 +28,19 @@ namespace ThermalPrinterWeb
                 var printer = new ImmediateNetworkPrinter(new ImmediateNetworkPrinterSettings() { ConnectionString = _printerAddress, PrinterName = "ThermalPrinter" });
                 var e = new EPSON();
                 // Print data
-                await printer.WriteAsync(ByteSplicer.Combine(e.PrintLine($"Name: {name}"), e.PrintLine($"Message: {message}"), e.PrintLine("--------------------------------")).ToArray());
+                await printer.WriteAsync(ByteSplicer.Combine(
+                    e.SetStyles(PrintStyle.DoubleWidth | PrintStyle.DoubleHeight),
+                    e.CenterAlign(),
+                    e.PrintLine("========================"),
+                    e.PrintLine(name),
+                    e.PrintLine("========================"),
+                    e.PrintLine(message),
+                    e.PrintLine("========================"),
+                    e.PrintLine(""),
+                    e.PrintLine(""),
+                    e.PrintLine(""),
+                    e.FullCutAfterFeed(10)
+                ).ToArray());
 
                 // Close printer connection
                 _logger.LogInformation("Printing complete");
