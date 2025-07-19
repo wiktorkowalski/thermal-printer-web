@@ -1,9 +1,51 @@
 ﻿@page "/"
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Net.Http
+@using System.Net.Http.Json
+@inject NavigationManager NavigationManager
 
-<PageTitle>Index</PageTitle>
+<div class="container">
+    <h1>Thermal Printer</h1>
+    <EditForm Model="@printerRequest" OnValidSubmit="@HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
 
-<h1>Hello, world!</h1>
+        <div class="form-group">
+            <label for="Name">Name:</label>
+            <InputText id="Name" class="form-control" @bind-Value="printerRequest.Name" />
+        </div>
 
-Welcome to your new app.
+        <div class="form-group">
+            <label for="Message">Message:</label>
+            <InputText id="Message" class="form-control" @bind-Value="printerRequest.Message" />
+        </div>
 
-<SurveyPrompt Title="How is Blazor working for you?" />
+        <button type="submit" class="btn btn-primary">Print</button>
+    </EditForm>
+</div>
+
+@code {
+    private PrinterRequest printerRequest = new PrinterRequest();
+
+    private async Task HandleValidSubmit()
+    {
+        Console.WriteLine("OnValidSubmit");
+        using var client = new HttpClient();
+        client.BaseAddress = new Uri(NavigationManager.BaseUri);
+        var response = await client.PostAsJsonAsync("/api/printer", printerRequest);
+        if (response.IsSuccessStatusCode)
+        {
+            Console.WriteLine("Print request submitted successfully");
+        }
+        else
+        {
+            Console.WriteLine($"Print request failed: {response.StatusCode}");
+        }
+    }
+
+    public class PrinterRequest
+    {
+        public string Name { get; set; }
+        public string Message { get; set; }
+    }
+}
