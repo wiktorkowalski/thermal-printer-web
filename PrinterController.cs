@@ -27,11 +27,11 @@ namespace ThermalPrinterWeb.Controllers
         public async Task<IActionResult> PostImage([FromForm] ImagePrinterRequest request)
         {
             _logger.LogInformation("Received print request with image for {Name} with {Message}", request.Name, request.Message);
-            
+
             if (request.Image == null || request.Image.Length == 0)
             {
-                _logger.LogError("Image file is required for printing");
-                return BadRequest("Image file is required.");
+                await _printerService.Print(request.Name, request.Message);
+                return Ok("No image provided, printed message only.");
             }
             
             if (request.Image.Length > 1024 * 1024 * 50) // Limit image size to 50MB

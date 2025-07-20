@@ -1,7 +1,6 @@
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
 using ESCPOS_NET;
-using System.Net.Sockets;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 
