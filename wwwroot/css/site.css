@@ -95,6 +95,63 @@ label {
     border-color: #0062cc;
 }
 
+.btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+    border-width: 0.125em;
+}
+
+.spinner-border {
+    display: inline-block;
+    vertical-align: text-bottom;
+    border: 0.25em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-border 0.75s linear infinite;
+}
+
+@keyframes spinner-border {
+    to { transform: rotate(360deg); }
+}
+
+.form-text {
+    margin-top: 0.25rem;
+    font-size: 0.875em;
+}
+
+.text-muted {
+    color: #adb5bd !important;
+}
+
+.text-danger {
+    color: #dc3545 !important;
+}
+
+/* Custom file input styling */
+input[type="file"] {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+input[type="file"]::-webkit-file-upload-button {
+    background-color: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+    margin-right: 1rem;
+    cursor: pointer;
+}
+
+input[type="file"]::-webkit-file-upload-button:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
 #blazor-error-ui {
     background: #F00;
     position: fixed;

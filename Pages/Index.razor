@@ -3,6 +3,11 @@
 @using System.Net.Http
 @using System.Net.Http.Json
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@using Microsoft.AspNetCore.Components
+@using System.IO
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
 
 <div class="container">
     <h1>Vittore's Printer</h1>
@@ -20,29 +25,242 @@
             <InputText id="Message" class="form-control" @bind-Value="printerRequest.Message" />
         </div>
 
-        <button type="submit" class="btn btn-primary">Print</button>
+        <div class="form-group">
+            <div @ref="dropZoneElement" class="drop-zone">
+                <label for="Image">Image:</label>
+                <InputFile id="Image" class="form-control" OnChange="LoadImage" accept="image/*" multiple="false" @ref="inputFile" />
+
+                @if (!string.IsNullOrEmpty(uploadMessage))
+                {
+                    <small class="form-text text-muted">@uploadMessage</small>
+                }
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <small class="form-text text-danger">@errorMessage</small>
+                }
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+            @if (isSubmitting)
+            {
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                <text> Printing...</text>
+            }
+            else
+            {
+                <text>Print</text>
+            }
+        </button>
     </EditForm>
 </div>
 
 @code {
     private PrinterRequest printerRequest = new PrinterRequest();
+    private IBrowserFile? selectedFile;
+    private byte[]? imageBytes;
+    private string uploadMessage = string.Empty;
+    private string errorMessage = string.Empty;
+    private bool isSubmitting = false;
+    ElementReference dropZoneElement;
+    InputFile inputFile;
+    IJSObjectReference _module;
+    IJSObjectReference _dropZoneInstance;
+
+    private const long MaxFileSize = 50 * 1024 * 1024; // 50 MB
+    private readonly string[] allowedImageTypes = { 
+        "image/jpeg", "image/jpg", "image/png", "image/gif", 
+        "image/bmp", "image/webp", "image/tiff", "image/svg+xml" 
+    };
+    private readonly string[] allowedImageExtensions = { 
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".svg" 
+    };
+
+    private async Task LoadImage(InputFileChangeEventArgs e)
+    {
+        errorMessage = string.Empty;
+        uploadMessage = string.Empty;
+
+        selectedFile = e.File;
+        if (selectedFile != null)
+        {
+            // Log the actual content type for debugging
+            Console.WriteLine($"File: {selectedFile.Name}, ContentType: '{selectedFile.ContentType}', Size: {selectedFile.Size}");
+
+            // Validate file size
+            if (selectedFile.Size > MaxFileSize)
+            {
+                errorMessage = $"File size ({selectedFile.Size / (1024 * 1024):F2} MB) exceeds the maximum limit of {MaxFileSize / (1024 * 1024)} MB.";
+                selectedFile = null;
+                imageBytes = null;
+                return;
+            }
+
+            // Get file extension
+            var fileExtension = Path.GetExtension(selectedFile.Name).ToLower();
+
+            // Validate file type by both content type and extension
+            bool isValidContentType = !string.IsNullOrEmpty(selectedFile.ContentType) && 
+                                    (allowedImageTypes.Contains(selectedFile.ContentType.ToLower()) ||
+                                     selectedFile.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase));
+
+            bool isValidExtension = allowedImageExtensions.Contains(fileExtension);
+
+            if (!isValidContentType && !isValidExtension)
+            {
+                errorMessage = $"File type is not supported. ContentType: '{selectedFile.ContentType}', Extension: '{fileExtension}'. Please select a valid image file.";
+                selectedFile = null;
+                imageBytes = null;
+                return;
+            }
+
+            try
+            {
+                using (var memoryStream = new MemoryStream())
+                {
+                    await selectedFile.OpenReadStream(MaxFileSize).CopyToAsync(memoryStream);
+                    imageBytes = memoryStream.ToArray();
+                    uploadMessage = $"Image '{selectedFile.Name}' loaded successfully ({selectedFile.Size / 1024:F1} KB).";
+                }
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error loading image: {ex.Message}";
+                selectedFile = null;
+                imageBytes = null;
+            }
+        }
+    }
 
     private async Task HandleValidSubmit()
     {
-        Console.WriteLine("OnValidSubmit");
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri(NavigationManager.BaseUri);
-        var response = await client.PostAsJsonAsync("/api/printer", printerRequest);
-        if (response.IsSuccessStatusCode)
+        if (isSubmitting) return;
+
+        isSubmitting = true;
+        errorMessage = string.Empty;
+
+        try
         {
-            Console.WriteLine("Print request submitted successfully");
+            Console.WriteLine("OnValidSubmit");
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri(NavigationManager.BaseUri);
+
+            var content = new MultipartFormDataContent();
+            content.Add(new StringContent(printerRequest.Name ?? string.Empty), "Name");
+            content.Add(new StringContent(printerRequest.Message ?? string.Empty), "Message");
+
+            if (imageBytes != null && selectedFile != null)
+            {
+                content.Add(new ByteArrayContent(imageBytes), "Image", selectedFile.Name);
+            }
+
+            var response = await client.PostAsync("/api/printer/image", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Console.WriteLine("Print request submitted successfully");
+                uploadMessage = "Print request submitted successfully!";
+
+                // Reset form after successful submission
+                printerRequest.Message = string.Empty;
+                selectedFile = null;
+                imageBytes = null;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Print request failed: {errorContent}";
+                Console.WriteLine($"Print request failed: {errorContent}");
+            }
         }
-        else
+        catch (Exception ex)
         {
-            Console.WriteLine($"Print request failed: {response.StatusCode}");
+            errorMessage = $"An error occurred: {ex.Message}";
+            Console.WriteLine($"Exception during print request: {ex.Message}");
         }
-        
-        printerRequest.Message = string.Empty;
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task HandlePaste(ClipboardEventArgs e)
+    {
+        try
+        {
+            errorMessage = string.Empty;
+            uploadMessage = string.Empty;
+
+            // Use JavaScript interop to get clipboard data
+            var imageData = await JSRuntime.InvokeAsync<string>("getClipboardImage");
+
+            if (!string.IsNullOrEmpty(imageData))
+            {
+                // Convert base64 to byte array
+                var base64Data = imageData.Substring(imageData.IndexOf(',') + 1);
+                imageBytes = Convert.FromBase64String(base64Data);
+
+                // Create a mock file name for the pasted image
+                selectedFile = null; // Clear file selection since this is pasted
+                uploadMessage = $"Image pasted successfully ({imageBytes.Length / 1024:F1} KB).";
+
+                StateHasChanged();
+            }
+            else
+            {
+                errorMessage = "No image found in clipboard. Please copy an image first.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error pasting image: {ex.Message}";
+            Console.WriteLine($"Paste error: {ex.Message}");
+        }
+    }
+
+    private void OnPasteAreaFocus()
+    {
+        // Visual feedback when paste area is focused
+    }
+
+    private void OnPasteAreaBlur()
+    {
+        // Visual feedback when paste area loses focus
+    }
+
+    private void RemoveImage()
+    {
+        imageBytes = null;
+        selectedFile = null;
+        uploadMessage = string.Empty;
+        errorMessage = string.Empty;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Load the JS file
+            _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./paste-support.js");
+
+            // Initialize the drop zone
+            _dropZoneInstance = await _module.InvokeAsync<IJSObjectReference>("initializeFileDropZone", dropZoneElement, inputFile.Element);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_dropZoneInstance != null)
+        {
+            await _dropZoneInstance.InvokeVoidAsync("dispose");
+            await _dropZoneInstance.DisposeAsync();
+        }
+
+        if (_module != null)
+        {
+            await _module.DisposeAsync();
+        }
     }
 
     public class PrinterRequest

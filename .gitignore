@@ -26,4 +26,3 @@ packages/
 *.vs
 *.DotSettings.user
 /node_modules
-/wwwroot/js/
