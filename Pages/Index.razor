@@ -5,7 +5,7 @@
 @inject NavigationManager NavigationManager
 
 <div class="container">
-    <h1>Thermal Printer</h1>
+    <h1>Vittore's Printer</h1>
     <EditForm Model="@printerRequest" OnValidSubmit="@HandleValidSubmit">
         <DataAnnotationsValidator />
         <ValidationSummary />
@@ -41,11 +41,13 @@
         {
             Console.WriteLine($"Print request failed: {response.StatusCode}");
         }
+        
+        printerRequest.Message = string.Empty;
     }
 
     public class PrinterRequest
     {
-        public string Name { get; set; }
-        public string Message { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
     }
 }
