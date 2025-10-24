@@ -71,7 +71,7 @@ public async Task<IActionResult> PrintCustom([FromBody] CustomPrintRequest reque
 {
     try
     {
-        await _printerService.PrintCustomContent(request.Content);
+        await _printerService.PrintCustomContent(request.Content, request.Options);
         return Ok();
     }
     catch (Exception e)
@@ -83,16 +83,67 @@ public async Task<IActionResult> PrintCustom([FromBody] CustomPrintRequest reque
 
 public class CustomPrintRequest
 {
-    public List<CustomPrintContent> Content { get; set; }
-    public string Source { get; set; }
+    public List<CustomPrintContent> Content { get; set; } = new();
+    public string? Source { get; set; }
+    public PrintOptions? Options { get; set; }
+}
+
+public class PrintOptions
+{
+    public string? CodePage { get; set; } // "PC437", "PC858_EURO", "GBK"
+    public int? DefaultLineSpacing { get; set; } // In dots
+    public bool? AutoCut { get; set; } = true;
+    public int? FeedLinesAfterPrint { get; set; } = 3;
 }
 
 public class CustomPrintContent
 {
+    // Common properties
     public CustomPrintContentType Type { get; set; }
-    public string Content { get; set; }
+    public string? Content { get; set; }
     public CustomPrintAlignment Alignment { get; set; } = CustomPrintAlignment.Center;
-    public CustomPrintStyle Style { get; set; } = CustomPrintStyle.Bold | CustomPrintStyle.DoubleHeight | CustomPrintStyle.DoubleWidth;
+
+    // Text-specific
+    public List<CustomPrintStyle>? Style { get; set; }
+
+    // Type-specific options
+    public BarcodeOptions? BarcodeOptions { get; set; }
+    public QRCodeOptions? QRCodeOptions { get; set; }
+    public ImageOptions? ImageOptions { get; set; }
+
+    // LineFeed-specific
+    public int? Lines { get; set; } = 1;
+
+    // Cut-specific
+    public bool? PartialCut { get; set; } = false;
+
+    // Separator-specific
+    public string? SeparatorChar { get; set; } = "=";
+    public int? SeparatorLength { get; set; } = 32;
+}
+
+public class BarcodeOptions
+{
+    public BarcodeType Type { get; set; } = BarcodeType.CODE128;
+    public int? HeightInDots { get; set; } = 100;
+    public BarWidth? Width { get; set; } = BarWidth.Default;
+    public BarLabelPosition? LabelPosition { get; set; } = BarLabelPosition.Below;
+    public bool? UseFontB { get; set; } = false;
+}
+
+public class QRCodeOptions
+{
+    public QRCodeModel Model { get; set; } = QRCodeModel.Model2;
+    public QRCodeSize Size { get; set; } = QRCodeSize.Normal;
+    public QRCodeCorrectionLevel CorrectionLevel { get; set; } = QRCodeCorrectionLevel.Percent7;
+}
+
+public class ImageOptions
+{
+    public int? MaxWidth { get; set; } = 500;
+    public int? MaxHeight { get; set; } = 500;
+    public bool PreserveAspectRatio { get; set; } = true;
+    public bool UseLegacyMode { get; set; } = true;
 }
 
 public enum CustomPrintContentType
@@ -100,7 +151,11 @@ public enum CustomPrintContentType
     Text,
     Image,
     Barcode,
-    Qrcode
+    QRCode,
+    LineFeed,
+    Cut,
+    Separator,
+    CodePage
 }
 
 public enum CustomPrintAlignment
@@ -117,7 +172,59 @@ public enum CustomPrintStyle
     Italic,
     Underline,
     DoubleHeight,
-    DoubleWidth
+    DoubleWidth,
+    FontB
+}
+
+public enum BarcodeType
+{
+    UPC_A,
+    UPC_E,
+    EAN13,
+    EAN8,
+    CODE39,
+    CODE128,
+    ITF,
+    CODABAR,
+    GS1_128,
+    GS1_DATABAR_OMNIDIRECTIONAL
+}
+
+public enum BarWidth
+{
+    Thin,
+    Default,
+    Thick
+}
+
+public enum BarLabelPosition
+{
+    None,
+    Above,
+    Below,
+    Both
+}
+
+public enum QRCodeModel
+{
+    Model1,
+    Model2,
+    Micro
+}
+
+public enum QRCodeSize
+{
+    Normal,
+    Large,
+    ExtraLarge
+}
+
+public enum QRCodeCorrectionLevel
+{
+    Percent7,   // L - 7% recovery
+    Percent15,  // M - 15% recovery
+    Percent25,  // Q - 25% recovery
+    Percent30   // H - 30% recovery
 }
 
 public class PrinterRequest
