@@ -1,42 +1,66 @@
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
 import Home from "./pages/Home";
 import Builder from "./pages/Builder";
 import "./index.css";
+import { Button } from "@/components/ui/button";
+import { Printer } from "lucide-react";
+
+function Navigation() {
+  const location = useLocation();
+
+  return (
+    <nav className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50">
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Printer className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Vittore's Printer</h1>
+              <p className="text-sm text-muted-foreground">Thermal Print Management</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              asChild
+              variant={location.pathname === "/" ? "default" : "ghost"}
+            >
+              <Link to="/">Simple Print</Link>
+            </Button>
+            <Button
+              asChild
+              variant={location.pathname === "/builder" ? "default" : "ghost"}
+            >
+              <Link to="/builder">Template Builder</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+}
 
 function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-background">
-        {/* Navigation */}
-        <nav className="border-b">
-          <div className="container mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold">Vittore's Printer</h1>
-              <div className="flex gap-4">
-                <Link
-                  to="/"
-                  className="px-4 py-2 rounded-md hover:bg-accent transition-colors"
-                >
-                  Simple Print
-                </Link>
-                <Link
-                  to="/builder"
-                  className="px-4 py-2 rounded-md hover:bg-accent transition-colors"
-                >
-                  Template Builder
-                </Link>
-              </div>
-            </div>
-          </div>
-        </nav>
+        <Navigation />
 
         {/* Main Content */}
-        <main className="container mx-auto px-4 py-8">
+        <main className="container mx-auto px-4 py-12">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/builder" element={<Builder />} />
           </Routes>
         </main>
+
+        {/* Footer */}
+        <footer className="border-t mt-auto py-6">
+          <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
+            Thermal Printer Web Interface
+          </div>
+        </footer>
       </div>
     </BrowserRouter>
   );

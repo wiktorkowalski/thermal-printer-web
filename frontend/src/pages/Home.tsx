@@ -1,5 +1,11 @@
 import { useState, useRef, type FormEvent } from "react";
 import { printerApi } from "../lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Printer, Upload, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function Home() {
   const [name, setName] = useState("");
@@ -60,103 +66,112 @@ export default function Home() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6">Simple Print</h1>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">Simple Print</h1>
+        <p className="text-muted-foreground mt-2">
+          Print text and images quickly to your thermal printer
+        </p>
+      </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Name Input */}
-        <div>
-          <label htmlFor="name" className="block text-sm font-medium mb-2">
-            Name
-          </label>
-          <input
-            id="name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-            placeholder="Enter name"
-          />
-        </div>
-
-        {/* Message Input */}
-        <div>
-          <label htmlFor="message" className="block text-sm font-medium mb-2">
-            Message
-          </label>
-          <input
-            id="message"
-            type="text"
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-            placeholder="Enter message"
-          />
-        </div>
-
-        {/* Image Upload */}
-        <div>
-          <label htmlFor="image" className="block text-sm font-medium mb-2">
-            Image (optional)
-          </label>
-          <div
-            className="border-2 border-dashed rounded-md p-8 text-center hover:border-primary transition-colors cursor-pointer"
-            onPaste={handlePaste}
-            tabIndex={0}
-          >
-            <input
-              id="image"
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-            >
-              Choose File
-            </button>
-            <p className="mt-2 text-sm text-muted-foreground">
-              or paste an image (Ctrl+V / Cmd+V)
-            </p>
-          </div>
-
-          {previewUrl && (
-            <div className="mt-4">
-              <img
-                src={previewUrl}
-                alt="Preview"
-                className="max-w-full h-auto max-h-64 mx-auto rounded-md"
+      <Card>
+        <CardHeader>
+          <CardTitle>Print Job</CardTitle>
+          <CardDescription>
+            Enter your details and optionally upload an image to print
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Name Input */}
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter name"
               />
             </div>
-          )}
-        </div>
 
-        {/* Success Message */}
-        {success && (
-          <div className="p-4 bg-green-50 border border-green-200 text-green-800 rounded-md">
-            {success}
-          </div>
-        )}
+            {/* Message Input */}
+            <div className="space-y-2">
+              <Label htmlFor="message">Message</Label>
+              <Input
+                id="message"
+                type="text"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Enter message"
+              />
+            </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-md">
-            {error}
-          </div>
-        )}
+            {/* Image Upload */}
+            <div className="space-y-2">
+              <Label htmlFor="image">Image (optional)</Label>
+              <div
+                className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 hover:bg-accent/5 transition-all cursor-pointer"
+                onPaste={handlePaste}
+                tabIndex={0}
+              >
+                <input
+                  id="image"
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Choose File
+                </Button>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  or paste an image (Ctrl+V / Cmd+V)
+                </p>
+              </div>
 
-        {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? "Printing..." : "Print"}
-        </button>
-      </form>
+              {previewUrl && (
+                <div className="mt-4 p-4 border rounded-lg bg-accent/5">
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    className="max-w-full h-auto max-h-64 mx-auto rounded-md shadow-sm"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Success Message */}
+            {success && (
+              <Alert className="bg-green-50 border-green-200">
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-800">
+                  {success}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Error Message */}
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Submit Button */}
+            <Button type="submit" disabled={loading} className="w-full" size="lg">
+              <Printer className="mr-2 h-5 w-5" />
+              {loading ? "Printing..." : "Print"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

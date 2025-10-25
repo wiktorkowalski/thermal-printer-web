@@ -13,6 +13,35 @@ import {
   BarLabelPosition,
 } from "../types/printer";
 import { printerApi } from "../lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import {
+  Type,
+  Image as ImageIcon,
+  Barcode as BarcodeIcon,
+  QrCode,
+  ArrowDown as LineFeedIcon,
+  Minus,
+  Scissors,
+  Printer,
+  Code2,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 
 export default function Builder() {
   const [blocks, setBlocks] = useState<(CustomPrintContent & { id: number })[]>([]);
@@ -118,197 +147,235 @@ export default function Builder() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6">Template Builder</h1>
+    <div className="max-w-5xl mx-auto">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">Template Builder</h1>
+        <p className="text-muted-foreground mt-2">
+          Create custom print templates with text, images, barcodes, and QR codes
+        </p>
+      </div>
 
       {/* Add Block Buttons */}
-      <div className="bg-card border rounded-lg p-4 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Add Content Blocks</h2>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => addBlock(CustomPrintContentType.Text)}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-          >
-            Add Text
-          </button>
-          <button
-            onClick={() => addBlock(CustomPrintContentType.Image)}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-          >
-            Add Image
-          </button>
-          <button
-            onClick={() => addBlock(CustomPrintContentType.Barcode)}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-          >
-            Add Barcode
-          </button>
-          <button
-            onClick={() => addBlock(CustomPrintContentType.QRCode)}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-          >
-            Add QR Code
-          </button>
-          <button
-            onClick={() => addBlock(CustomPrintContentType.LineFeed)}
-            className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90"
-          >
-            Add Line Feed
-          </button>
-          <button
-            onClick={() => addBlock(CustomPrintContentType.Separator)}
-            className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90"
-          >
-            Add Separator
-          </button>
-          <button
-            onClick={() => addBlock(CustomPrintContentType.Cut)}
-            className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90"
-          >
-            Add Cut
-          </button>
-        </div>
-      </div>
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Add Content Blocks</CardTitle>
+          <CardDescription>
+            Build your print template by adding different types of content
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.Text)}
+              variant="default"
+            >
+              <Type className="mr-2 h-4 w-4" />
+              Add Text
+            </Button>
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.Image)}
+              variant="default"
+            >
+              <ImageIcon className="mr-2 h-4 w-4" />
+              Add Image
+            </Button>
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.Barcode)}
+              variant="default"
+            >
+              <BarcodeIcon className="mr-2 h-4 w-4" />
+              Add Barcode
+            </Button>
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.QRCode)}
+              variant="default"
+            >
+              <QrCode className="mr-2 h-4 w-4" />
+              Add QR Code
+            </Button>
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.LineFeed)}
+              variant="secondary"
+            >
+              <LineFeedIcon className="mr-2 h-4 w-4" />
+              Add Line Feed
+            </Button>
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.Separator)}
+              variant="secondary"
+            >
+              <Minus className="mr-2 h-4 w-4" />
+              Add Separator
+            </Button>
+            <Button
+              onClick={() => addBlock(CustomPrintContentType.Cut)}
+              variant="secondary"
+            >
+              <Scissors className="mr-2 h-4 w-4" />
+              Add Cut
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Content Blocks */}
       {blocks.length === 0 ? (
-        <div className="p-8 text-center border rounded-lg text-muted-foreground">
-          No content blocks added yet. Click a button above to add your first block.
-        </div>
+        <Card>
+          <CardContent className="p-12 text-center">
+            <p className="text-muted-foreground">
+              No content blocks added yet. Click a button above to add your first block.
+            </p>
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-4 mb-6">
           {blocks.map((block, index) => (
-            <div key={block.id} className="border rounded-lg p-4 bg-card">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold">
-                  Block {index + 1}: {block.type}
-                </h3>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => moveBlock(block.id, "up")}
-                    disabled={index === 0}
-                    className="px-2 py-1 border rounded hover:bg-accent disabled:opacity-50"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    onClick={() => moveBlock(block.id, "down")}
-                    disabled={index === blocks.length - 1}
-                    className="px-2 py-1 border rounded hover:bg-accent disabled:opacity-50"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    onClick={() => removeBlock(block.id)}
-                    className="px-2 py-1 bg-destructive text-destructive-foreground rounded hover:bg-destructive/90"
-                  >
-                    Delete
-                  </button>
+            <Card key={block.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline">Block {index + 1}</Badge>
+                    <CardTitle className="text-lg">{block.type}</CardTitle>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => moveBlock(block.id, "up")}
+                      disabled={index === 0}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={() => moveBlock(block.id, "down")}
+                      disabled={index === blocks.length - 1}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={() => removeBlock(block.id)}
+                      variant="destructive"
+                      size="sm"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              </CardHeader>
+              <CardContent>
 
               {/* Block-specific fields */}
               {block.type === CustomPrintContentType.Text && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Content</label>
-                    <input
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Content</Label>
+                    <Input
                       type="text"
                       value={block.content || ""}
                       onChange={(e) => updateBlock(block.id, { content: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-md"
                       placeholder="Enter text"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Alignment</label>
-                    <select
+                  <div className="space-y-2">
+                    <Label>Alignment</Label>
+                    <Select
                       value={block.alignment}
-                      onChange={(e) => updateBlock(block.id, { alignment: e.target.value as CustomPrintAlignment })}
-                      className="w-full px-3 py-2 border rounded-md"
+                      onValueChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
                     >
-                      <option value={CustomPrintAlignment.Left}>Left</option>
-                      <option value={CustomPrintAlignment.Center}>Center</option>
-                      <option value={CustomPrintAlignment.Right}>Right</option>
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={CustomPrintAlignment.Left}>Left</SelectItem>
+                        <SelectItem value={CustomPrintAlignment.Center}>Center</SelectItem>
+                        <SelectItem value={CustomPrintAlignment.Right}>Right</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
 
               {block.type === CustomPrintContentType.Barcode && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Barcode Data</label>
-                    <input
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Barcode Data</Label>
+                    <Input
                       type="text"
                       value={block.content || ""}
                       onChange={(e) => updateBlock(block.id, { content: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-md"
                       placeholder="Enter barcode data"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Type</label>
-                    <select
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select
                       value={block.barcodeOptions?.type}
-                      onChange={(e) =>
+                      onValueChange={(value) =>
                         updateBlock(block.id, {
-                          barcodeOptions: { ...block.barcodeOptions!, type: e.target.value as BarcodeType },
+                          barcodeOptions: { ...block.barcodeOptions!, type: value as BarcodeType },
                         })
                       }
-                      className="w-full px-3 py-2 border rounded-md"
                     >
-                      {Object.values(BarcodeType).map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.values(BarcodeType).map((type) => (
+                          <SelectItem key={type} value={type}>
+                            {type}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
 
               {block.type === CustomPrintContentType.QRCode && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">QR Code Data</label>
-                    <input
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>QR Code Data</Label>
+                    <Input
                       type="text"
                       value={block.content || ""}
                       onChange={(e) => updateBlock(block.id, { content: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-md"
                       placeholder="Enter URL or text"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Size</label>
-                    <select
+                  <div className="space-y-2">
+                    <Label>Size</Label>
+                    <Select
                       value={block.qrCodeOptions?.size}
-                      onChange={(e) =>
+                      onValueChange={(value) =>
                         updateBlock(block.id, {
-                          qrCodeOptions: { ...block.qrCodeOptions!, size: e.target.value as QRCodeSize },
+                          qrCodeOptions: { ...block.qrCodeOptions!, size: value as QRCodeSize },
                         })
                       }
-                      className="w-full px-3 py-2 border rounded-md"
                     >
-                      {Object.values(QRCodeSize).map((size) => (
-                        <option key={size} value={size}>
-                          {size}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.values(QRCodeSize).map((size) => (
+                          <SelectItem key={size} value={size}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
 
               {block.type === CustomPrintContentType.LineFeed && (
-                <div>
-                  <label className="block text-sm font-medium mb-1">Number of Lines</label>
-                  <input
+                <div className="space-y-2">
+                  <Label>Number of Lines</Label>
+                  <Input
                     type="number"
                     value={block.lines || 1}
                     onChange={(e) => updateBlock(block.id, { lines: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 border rounded-md"
                     min="1"
                     max="10"
                   />
@@ -316,82 +383,95 @@ export default function Builder() {
               )}
 
               {block.type === CustomPrintContentType.Separator && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Character</label>
-                    <input
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Character</Label>
+                    <Input
                       type="text"
                       value={block.separatorChar || "="}
                       onChange={(e) => updateBlock(block.id, { separatorChar: e.target.value[0] })}
-                      className="w-full px-3 py-2 border rounded-md"
                       maxLength={1}
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Length</label>
-                    <input
+                  <div className="space-y-2">
+                    <Label>Length</Label>
+                    <Input
                       type="number"
                       value={block.separatorLength || 32}
                       onChange={(e) => updateBlock(block.id, { separatorLength: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-md"
                       min="1"
                       max="48"
                     />
                   </div>
                 </div>
               )}
-            </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
 
       {/* JSON Preview */}
       {showJson && blocks.length > 0 && (
-        <div className="mb-6">
-          <div className="bg-card border rounded-lg p-4">
-            <h3 className="font-semibold mb-2">Generated JSON</h3>
-            <pre className="bg-muted p-4 rounded-md overflow-x-auto text-sm">
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Generated JSON</CardTitle>
+            <CardDescription>
+              Preview the JSON payload that will be sent to the printer
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="bg-muted p-4 rounded-md overflow-x-auto text-sm font-mono">
               {getJsonPreview()}
             </pre>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Messages */}
       {success && (
-        <div className="p-4 bg-green-50 border border-green-200 text-green-800 rounded-md mb-6">
-          {success}
-        </div>
+        <Alert className="bg-green-50 border-green-200 mb-6">
+          <CheckCircle2 className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800">
+            {success}
+          </AlertDescription>
+        </Alert>
       )}
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-md mb-6">
-          {error}
-        </div>
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button
+      <div className="flex flex-wrap gap-3">
+        <Button
           onClick={() => setShowJson(!showJson)}
           disabled={blocks.length === 0}
-          className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 disabled:opacity-50"
+          variant="outline"
+          size="lg"
         >
+          <Code2 className="mr-2 h-5 w-5" />
           {showJson ? "Hide" : "Show"} JSON
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handlePrint}
           disabled={loading || blocks.length === 0}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
+          size="lg"
         >
-          {loading ? "Printing..." : "Print"}
-        </button>
-        <button
+          <Printer className="mr-2 h-5 w-5" />
+          {loading ? "Printing..." : "Print Template"}
+        </Button>
+        <Button
           onClick={() => setBlocks([])}
           disabled={blocks.length === 0}
-          className="px-4 py-2 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50"
+          variant="destructive"
+          size="lg"
         >
+          <Trash2 className="mr-2 h-5 w-5" />
           Clear All
-        </button>
+        </Button>
       </div>
     </div>
   );
