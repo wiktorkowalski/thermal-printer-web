@@ -1,14 +1,21 @@
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Web;
 using ThermalPrinterWeb;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddRazorPages();
 builder.Services.AddControllers();
-builder.Services.AddServerSideBlazor();
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
+
+// Add CORS for React frontend
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReact", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
 
 var app = builder.Build();
 
@@ -18,13 +25,15 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");
 }
 
-
 app.UseStaticFiles();
-
 app.UseRouting();
 
-app.MapBlazorHub();
+// Enable CORS
+app.UseCors("AllowReact");
+
 app.MapControllers();
-app.MapFallbackToPage("/_Host");
+
+// Serve React app in production (from wwwroot)
+app.MapFallbackToFile("index.html");
 
 app.Run();
