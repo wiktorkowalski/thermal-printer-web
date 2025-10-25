@@ -3,6 +3,13 @@ using ThermalPrinterWeb;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configure Kestrel to listen on all interfaces (required for Docker)
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5160";
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.ListenAnyIP(int.Parse(port)); // Listen on all interfaces
+});
+
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

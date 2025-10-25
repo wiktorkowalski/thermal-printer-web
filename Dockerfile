@@ -19,7 +19,13 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 # Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS final
 WORKDIR /app
-EXPOSE 80
-EXPOSE 443
+
+# Set the port environment variable
+ENV PORT=5160
+ENV ASPNETCORE_URLS=http://+:5160
+
+# Expose the application port
+EXPOSE 5160
+
 COPY --from=backend-build /app/publish .
 ENTRYPOINT ["dotnet", "ThermalPrinterWeb.Api.dll"]
