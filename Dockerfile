@@ -1,19 +1,20 @@
-FROM node:20-alpine AS base
-
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS base
 WORKDIR /app
+EXPOSE 80
+EXPOSE 443
 
-COPY package.json package-lock.json ./
-
-RUN npm install --production
-
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+WORKDIR /src
+COPY ["ThermalPrinterWeb.BlazorApp.csproj", "."]
+RUN dotnet restore "./ThermalPrinterWeb.BlazorApp.csproj"
 COPY . .
+WORKDIR "/src/."
+RUN dotnet build "ThermalPrinterWeb.BlazorApp.csproj" -c Release -o /app/build
 
-# RUN npx shadcn@latest init
+FROM build AS publish
+RUN dotnet publish "ThermalPrinterWeb.BlazorApp.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-RUN npm run build
-
-EXPOSE 3000
-
-ENV NODE_ENV=production
-
-CMD ["npm", "start"]
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "ThermalPrinterWeb.BlazorApp.dll"]

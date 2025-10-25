@@ -1,7 +1,5 @@
-node_modules
-npm-debug.log
+**/bin
+**/obj
 .DS_Store
-/build
-.next
-.git
-.env
+*.suo
+*.user
