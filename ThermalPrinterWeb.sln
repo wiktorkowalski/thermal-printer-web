@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThermalPrinterWeb.BlazorApp", "ThermalPrinterWeb.BlazorApp.csproj", "{208A20E4-D207-42C3-A143-E92E610A591C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThermalPrinterWeb.Api", "backend\ThermalPrinterWeb.Api.csproj", "{208A20E4-D207-42C3-A143-E92E610A591C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

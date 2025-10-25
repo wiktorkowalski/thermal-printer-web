@@ -6,16 +6,19 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 
-// Add CORS for React frontend
-builder.Services.AddCors(options =>
+// Add CORS for React frontend (development only)
+if (builder.Environment.IsDevelopment())
 {
-    options.AddPolicy("AllowReact", policy =>
+    builder.Services.AddCors(options =>
     {
-        policy.WithOrigins("http://localhost:5173")
-              .AllowAnyHeader()
-              .AllowAnyMethod();
+        options.AddPolicy("AllowReact", policy =>
+        {
+            policy.WithOrigins("http://localhost:5173")
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        });
     });
-});
+}
 
 var app = builder.Build();
 
@@ -28,12 +31,15 @@ if (!app.Environment.IsDevelopment())
 app.UseStaticFiles();
 app.UseRouting();
 
-// Enable CORS
-app.UseCors("AllowReact");
+// Enable CORS in development only
+if (app.Environment.IsDevelopment())
+{
+    app.UseCors("AllowReact");
+}
 
 app.MapControllers();
 
-// Serve React app in production (from wwwroot)
+// Serve React app SPA (from wwwroot)
 app.MapFallbackToFile("index.html");
 
 app.Run();
