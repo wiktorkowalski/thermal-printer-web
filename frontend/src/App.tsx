@@ -4,6 +4,8 @@ import Builder from "./pages/Builder";
 import "./index.css";
 import { Button } from "@/components/ui/button";
 import { Printer } from "lucide-react";
+import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 function Navigation() {
   const location = useLocation();
@@ -21,7 +23,7 @@ function Navigation() {
               <p className="text-sm text-muted-foreground">Thermal Print Management</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Button
               asChild
               variant={location.pathname === "/" ? "default" : "ghost"}
@@ -34,6 +36,7 @@ function Navigation() {
             >
               <Link to="/builder">Template Builder</Link>
             </Button>
+            <ThemeToggle />
           </div>
         </div>
       </div>
@@ -43,26 +46,28 @@ function Navigation() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-background">
-        <Navigation />
+    <ThemeProvider defaultTheme="system" storageKey="thermal-printer-theme">
+      <BrowserRouter>
+        <div className="min-h-screen bg-background">
+          <Navigation />
 
-        {/* Main Content */}
-        <main className="container mx-auto px-4 py-12">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/builder" element={<Builder />} />
-          </Routes>
-        </main>
+          {/* Main Content */}
+          <main className="container mx-auto px-4 py-12">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/builder" element={<Builder />} />
+            </Routes>
+          </main>
 
-        {/* Footer */}
-        <footer className="border-t mt-auto py-6">
-          <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-            Thermal Printer Web Interface
-          </div>
-        </footer>
-      </div>
-    </BrowserRouter>
+          {/* Footer */}
+          <footer className="border-t mt-auto py-6">
+            <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
+              Thermal Printer Web Interface
+            </div>
+          </footer>
+        </div>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 

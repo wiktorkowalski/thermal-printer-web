@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   CustomPrintContentType,
   CustomPrintAlignment,
@@ -18,14 +18,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { InlineSelect } from "@/components/inline-select";
 import {
   Type,
   Image as ImageIcon,
@@ -41,15 +35,23 @@ import {
   ChevronDown,
   CheckCircle2,
   AlertCircle,
+  Upload,
 } from "lucide-react";
 
+type BlockWithMetadata = CustomPrintContent & {
+  id: number;
+  imageFile?: File;
+  imagePreview?: string;
+};
+
 export default function Builder() {
-  const [blocks, setBlocks] = useState<(CustomPrintContent & { id: number })[]>([]);
+  const [blocks, setBlocks] = useState<BlockWithMetadata[]>([]);
   const [nextId, setNextId] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [success, setSuccess] = useState<string | undefined>();
   const [showJson, setShowJson] = useState(false);
+  const fileInputRefs = useRef<{ [key: number]: HTMLInputElement | null }>({});
 
   const addBlock = (type: CustomPrintContentType) => {
     const newBlock: CustomPrintContent & { id: number } = {
@@ -89,8 +91,37 @@ export default function Builder() {
     setBlocks(blocks.filter((b) => b.id !== id));
   };
 
-  const updateBlock = (id: number, updates: Partial<CustomPrintContent>) => {
+  const updateBlock = (id: number, updates: Partial<BlockWithMetadata>) => {
     setBlocks(blocks.map((b) => (b.id === id ? { ...b, ...updates } : b)));
+  };
+
+  const handleImageChange = (blockId: number, file: File | undefined) => {
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        updateBlock(blockId, {
+          imageFile: file,
+          imagePreview: URL.createObjectURL(file),
+          content: base64,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleImagePaste = (blockId: number, e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.indexOf("image") !== -1) {
+        const file = item.getAsFile();
+        if (file) {
+          handleImageChange(blockId, file);
+        }
+      }
+    }
   };
 
   const moveBlock = (id: number, direction: "up" | "down") => {
@@ -117,7 +148,7 @@ export default function Builder() {
 
     try {
       const request: CustomPrintRequest = {
-        content: blocks.map(({ id, ...block }) => block),
+        content: blocks.map(({ id, imageFile, imagePreview, ...block }) => block),
         source: "Template Builder",
         options: {
           autoCut: true,
@@ -136,7 +167,7 @@ export default function Builder() {
 
   const getJsonPreview = () => {
     const request: CustomPrintRequest = {
-      content: blocks.map(({ id, ...block }) => block),
+      content: blocks.map(({ id, imageFile, imagePreview, ...block }) => block),
       source: "Template Builder",
       options: {
         autoCut: true,
@@ -280,19 +311,72 @@ export default function Builder() {
                   </div>
                   <div className="space-y-2">
                     <Label>Alignment</Label>
-                    <Select
-                      value={block.alignment}
-                      onValueChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
+                    <InlineSelect
+                      value={block.alignment || CustomPrintAlignment.Center}
+                      onChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
+                      options={[
+                        { value: CustomPrintAlignment.Left, label: "Left" },
+                        { value: CustomPrintAlignment.Center, label: "Center" },
+                        { value: CustomPrintAlignment.Right, label: "Right" },
+                      ]}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {block.type === CustomPrintContentType.Image && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor={`image-${block.id}`}>Image</Label>
+                    <div
+                      className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 hover:bg-accent/5 transition-all cursor-pointer"
+                      onPaste={(e) => handleImagePaste(block.id, e)}
+                      tabIndex={0}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={CustomPrintAlignment.Left}>Left</SelectItem>
-                        <SelectItem value={CustomPrintAlignment.Center}>Center</SelectItem>
-                        <SelectItem value={CustomPrintAlignment.Right}>Right</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      <input
+                        id={`image-${block.id}`}
+                        type="file"
+                        ref={(el) => {
+                          fileInputRefs.current[block.id] = el;
+                        }}
+                        accept="image/*"
+                        onChange={(e) => handleImageChange(block.id, e.target.files?.[0])}
+                        className="hidden"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => fileInputRefs.current[block.id]?.click()}
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        Choose File
+                      </Button>
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        or paste an image (Ctrl+V / Cmd+V)
+                      </p>
+                    </div>
+
+                    {block.imagePreview && (
+                      <div className="mt-4 p-4 border rounded-lg bg-accent/5">
+                        <img
+                          src={block.imagePreview}
+                          alt="Preview"
+                          className="max-w-full h-auto max-h-64 mx-auto rounded-md shadow-sm"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Alignment</Label>
+                    <InlineSelect
+                      value={block.alignment || CustomPrintAlignment.Center}
+                      onChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
+                      options={[
+                        { value: CustomPrintAlignment.Left, label: "Left" },
+                        { value: CustomPrintAlignment.Center, label: "Center" },
+                        { value: CustomPrintAlignment.Right, label: "Right" },
+                      ]}
+                    />
                   </div>
                 </div>
               )}
@@ -310,25 +394,18 @@ export default function Builder() {
                   </div>
                   <div className="space-y-2">
                     <Label>Type</Label>
-                    <Select
-                      value={block.barcodeOptions?.type}
-                      onValueChange={(value) =>
+                    <InlineSelect
+                      value={block.barcodeOptions?.type || BarcodeType.CODE128}
+                      onChange={(value) =>
                         updateBlock(block.id, {
                           barcodeOptions: { ...block.barcodeOptions!, type: value as BarcodeType },
                         })
                       }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.values(BarcodeType).map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {type}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={Object.values(BarcodeType).map((type) => ({
+                        value: type,
+                        label: type,
+                      }))}
+                    />
                   </div>
                 </div>
               )}
@@ -346,25 +423,18 @@ export default function Builder() {
                   </div>
                   <div className="space-y-2">
                     <Label>Size</Label>
-                    <Select
-                      value={block.qrCodeOptions?.size}
-                      onValueChange={(value) =>
+                    <InlineSelect
+                      value={block.qrCodeOptions?.size || QRCodeSize.Normal}
+                      onChange={(value) =>
                         updateBlock(block.id, {
                           qrCodeOptions: { ...block.qrCodeOptions!, size: value as QRCodeSize },
                         })
                       }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.values(QRCodeSize).map((size) => (
-                          <SelectItem key={size} value={size}>
-                            {size}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={Object.values(QRCodeSize).map((size) => ({
+                        value: size,
+                        label: size,
+                      }))}
+                    />
                   </div>
                 </div>
               )}
