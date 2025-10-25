@@ -1,4 +1,5 @@
 // TypeScript definitions matching the C# API models
+// Using string values to match C# JsonStringEnumConverter serialization
 
 export const CustomPrintContentType = {
   Text: "Text",

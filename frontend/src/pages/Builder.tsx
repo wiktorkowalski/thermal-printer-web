@@ -36,6 +36,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Upload,
+  Check,
 } from "lucide-react";
 
 type BlockWithMetadata = CustomPrintContent & {
@@ -310,9 +311,47 @@ export default function Builder() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label>Text Styles (select multiple)</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: CustomPrintStyle.Bold, label: "Bold" },
+                        { value: CustomPrintStyle.Italic, label: "Italic" },
+                        { value: CustomPrintStyle.Underline, label: "Underline" },
+                        { value: CustomPrintStyle.DoubleHeight, label: "Double Height" },
+                        { value: CustomPrintStyle.DoubleWidth, label: "Double Width" },
+                        { value: CustomPrintStyle.FontB, label: "Font B (Small)" },
+                      ].map((styleOption) => {
+                        const isSelected = block.style?.includes(styleOption.value as CustomPrintStyle) ?? false;
+                        return (
+                          <button
+                            key={styleOption.value}
+                            type="button"
+                            onClick={() => {
+                              const currentStyles = block.style || [];
+                              const newStyles = isSelected
+                                ? currentStyles.filter((s) => s !== styleOption.value)
+                                : [...currentStyles, styleOption.value as CustomPrintStyle];
+                              updateBlock(block.id, { style: newStyles.length > 0 ? newStyles : undefined });
+                            }}
+                            className={`relative px-4 py-2 rounded-md text-sm font-medium transition-all border-2 hover:bg-accent/50 focus:outline-none focus:ring-2 focus:ring-ring ${
+                              isSelected
+                                ? "bg-primary text-primary-foreground border-primary/30"
+                                : "bg-background text-foreground border-border"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              {styleOption.label}
+                              {isSelected && <Check className="h-4 w-4" />}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
                     <Label>Alignment</Label>
                     <InlineSelect
-                      value={block.alignment || CustomPrintAlignment.Center}
+                      value={block.alignment ?? CustomPrintAlignment.Center}
                       onChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
                       options={[
                         { value: CustomPrintAlignment.Left, label: "Left" },
@@ -369,7 +408,7 @@ export default function Builder() {
                   <div className="space-y-2">
                     <Label>Alignment</Label>
                     <InlineSelect
-                      value={block.alignment || CustomPrintAlignment.Center}
+                      value={block.alignment ?? CustomPrintAlignment.Center}
                       onChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
                       options={[
                         { value: CustomPrintAlignment.Left, label: "Left" },
@@ -395,16 +434,24 @@ export default function Builder() {
                   <div className="space-y-2">
                     <Label>Type</Label>
                     <InlineSelect
-                      value={block.barcodeOptions?.type || BarcodeType.CODE128}
+                      value={block.barcodeOptions?.type ?? BarcodeType.CODE128}
                       onChange={(value) =>
                         updateBlock(block.id, {
                           barcodeOptions: { ...block.barcodeOptions!, type: value as BarcodeType },
                         })
                       }
-                      options={Object.values(BarcodeType).map((type) => ({
-                        value: type,
-                        label: type,
-                      }))}
+                      options={[
+                        { value: BarcodeType.UPC_A, label: "UPC-A" },
+                        { value: BarcodeType.UPC_E, label: "UPC-E" },
+                        { value: BarcodeType.EAN13, label: "EAN13" },
+                        { value: BarcodeType.EAN8, label: "EAN8" },
+                        { value: BarcodeType.CODE39, label: "CODE39" },
+                        { value: BarcodeType.CODE128, label: "CODE128" },
+                        { value: BarcodeType.ITF, label: "ITF" },
+                        { value: BarcodeType.CODABAR, label: "CODABAR" },
+                        { value: BarcodeType.GS1_128, label: "GS1-128" },
+                        { value: BarcodeType.GS1_DATABAR_OMNIDIRECTIONAL, label: "GS1-DataBar" },
+                      ]}
                     />
                   </div>
                 </div>
@@ -424,16 +471,17 @@ export default function Builder() {
                   <div className="space-y-2">
                     <Label>Size</Label>
                     <InlineSelect
-                      value={block.qrCodeOptions?.size || QRCodeSize.Normal}
+                      value={block.qrCodeOptions?.size ?? QRCodeSize.Normal}
                       onChange={(value) =>
                         updateBlock(block.id, {
                           qrCodeOptions: { ...block.qrCodeOptions!, size: value as QRCodeSize },
                         })
                       }
-                      options={Object.values(QRCodeSize).map((size) => ({
-                        value: size,
-                        label: size,
-                      }))}
+                      options={[
+                        { value: QRCodeSize.Normal, label: "Normal" },
+                        { value: QRCodeSize.Large, label: "Large" },
+                        { value: QRCodeSize.ExtraLarge, label: "Extra Large" },
+                      ]}
                     />
                   </div>
                 </div>

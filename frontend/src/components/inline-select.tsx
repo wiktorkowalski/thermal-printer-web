@@ -2,14 +2,14 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface InlineSelectOption {
-  value: string;
+  value: string | number;
   label: string;
 }
 
 interface InlineSelectProps {
   options: InlineSelectOption[];
-  value: string;
-  onChange: (value: string) => void;
+  value: string | number;
+  onChange: (value: string | number) => void;
   className?: string;
 }
 
