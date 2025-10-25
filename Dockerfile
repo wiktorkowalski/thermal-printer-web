@@ -4,7 +4,8 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+# Override the build output directory for Docker
+RUN npm run build -- --outDir=dist
 
 # Stage 2: Build .NET backend
 FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS backend-build
