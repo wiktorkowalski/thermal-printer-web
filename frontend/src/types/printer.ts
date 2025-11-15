@@ -115,12 +115,16 @@ export interface ImageOptions {
 export interface CustomPrintContent {
   type: CustomPrintContentType;
   content?: string;
-  alignment: CustomPrintAlignment;
-  style?: CustomPrintStyle[];
+  alignment?: CustomPrintAlignment;
+  styles?: string[]; // Changed to support array of style strings
+  style?: CustomPrintStyle[]; // Keep for backwards compatibility
+  barcodeType?: BarcodeType; // Added for easier access
   barcodeOptions?: BarcodeOptions;
   qrCodeOptions?: QRCodeOptions;
   imageOptions?: ImageOptions;
+  base64Image?: string; // Added for image data
   lines?: number;
+  length?: number; // Added for separator length
   partialCut?: boolean;
   separatorChar?: string;
   separatorLength?: number;
