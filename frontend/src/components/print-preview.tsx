@@ -2,10 +2,10 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, Printer } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { CustomPrintRequest } from "@/types/printer";
+import type { PrintRequest } from "@/types/printer";
 
 interface PrintPreviewProps {
-  content?: CustomPrintRequest;
+  content?: PrintRequest;
   simplePrint?: {
     name: string;
     message: string;
@@ -16,7 +16,7 @@ interface PrintPreviewProps {
 export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
   const [isExpanded, setIsExpanded] = useState(true);
 
-  const hasContent = content?.content.length || simplePrint;
+  const hasContent = (content?.content?.length ?? 0) > 0 || simplePrint;
 
   if (!hasContent) return null;
 
@@ -35,16 +35,13 @@ export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
 
       {isExpanded && (
         <div className="p-4 border-t-2">
-          {/* Receipt Paper Container */}
           <div className="receipt-paper perforated-top rounded-lg shadow-lg p-6 max-w-[320px] mx-auto">
-            {/* Thermal Printer Header Effect */}
             <div className="text-center mb-4 pb-4 border-b border-dashed border-gray-400">
               <div className="font-mono text-xs opacity-60">
                 ··· PRINT PREVIEW ···
               </div>
             </div>
 
-            {/* Simple Print Content */}
             {simplePrint && (
               <div className="space-y-3 text-center">
                 <div className="text-center opacity-40 my-1">
@@ -68,8 +65,7 @@ export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
               </div>
             )}
 
-            {/* Custom Template Content */}
-            {content && (
+            {content?.content && (
               <div className="space-y-3">
                 {content.content.map((block, index) => {
                   const alignment = block.alignment?.toLowerCase() || 'left';
@@ -79,41 +75,39 @@ export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
 
                   return (
                     <div key={index} className={alignClass}>
-                      {/* Text Block */}
                       {block.type === 'Text' && (
                         <div
                           className={cn(
                             "font-mono",
-                            block.styles?.includes('Bold') && "font-bold",
-                            block.styles?.includes('Italic') && "italic",
-                            block.styles?.includes('Underline') && "underline",
-                            block.styles?.includes('DoubleHeight') && "text-2xl leading-tight",
-                            block.styles?.includes('DoubleWidth') && "tracking-wider",
-                            block.styles?.includes('FontB') && "text-sm"
+                            block.style?.includes('Bold') && "font-bold",
+                            block.style?.includes('Italic') && "italic",
+                            block.style?.includes('Underline') && "underline",
+                            block.style?.includes('DoubleHeight') && "text-2xl leading-tight",
+                            block.style?.includes('DoubleWidth') && "tracking-wider",
+                            block.style?.includes('FontB') && "text-sm",
+                            block.style?.includes('ReverseMode') && "bg-black text-white px-1",
+                            block.style?.includes('UpsideDownMode') && "rotate-180"
                           )}
                         >
                           {block.content}
                         </div>
                       )}
 
-                      {/* Image Block */}
-                      {block.type === 'Image' && block.base64Image && (
+                      {block.type === 'Image' && block.content && (
                         <img
-                          src={`data:image/png;base64,${block.base64Image}`}
+                          src={`data:image/png;base64,${block.content}`}
                           alt="Print image"
                           className="max-w-full rounded border border-gray-300 grayscale contrast-150 brightness-110"
                         />
                       )}
 
-                      {/* Barcode Block */}
                       {block.type === 'Barcode' && (
                         <div className="py-2">
                           <div className="bg-white border-2 border-gray-800 p-2 inline-block">
                             <div className="font-mono text-xs text-center mb-1 text-black">
-                              {block.barcodeType}
+                              {block.barcodeOptions?.type || 'CODE128'}
                             </div>
                             <div className="flex gap-[2px] justify-center">
-                              {/* Simplified barcode visualization */}
                               {Array.from({ length: 12 }).map((_, i) => (
                                 <div
                                   key={i}
@@ -132,12 +126,10 @@ export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
                         </div>
                       )}
 
-                      {/* QR Code Block */}
                       {block.type === 'QRCode' && (
                         <div className="py-2 inline-block">
                           <div className="bg-white border-2 border-gray-800 p-3">
                             <div className="w-24 h-24 bg-black/10 rounded grid grid-cols-8 grid-rows-8 gap-[2px]">
-                              {/* Simplified QR visualization */}
                               {Array.from({ length: 64 }).map((_, i) => (
                                 <div
                                   key={i}
@@ -155,19 +147,16 @@ export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
                         </div>
                       )}
 
-                      {/* Line Feed */}
                       {block.type === 'LineFeed' && (
                         <div style={{ height: `${(block.lines || 1) * 8}px` }} />
                       )}
 
-                      {/* Separator */}
                       {block.type === 'Separator' && (
                         <div className="text-center opacity-40 my-1">
-                          {(block.content || '─').repeat(block.length || 32)}
+                          {(block.separatorChar || '─').repeat(block.separatorLength || 32)}
                         </div>
                       )}
 
-                      {/* Cut Indicator */}
                       {block.type === 'Cut' && (
                         <div className="text-center text-xs opacity-40 my-2">
                           ✂ ─ ─ ─ ─ ─ ─ CUT HERE ─ ─ ─ ─ ─ ─ ✂
@@ -179,7 +168,6 @@ export function PrintPreview({ content, simplePrint }: PrintPreviewProps) {
               </div>
             )}
 
-            {/* Receipt Footer */}
             <div className="text-center mt-6 pt-4 border-t border-dashed border-gray-400">
               <div className="font-mono text-xs opacity-60">
                 ··· END OF PREVIEW ···

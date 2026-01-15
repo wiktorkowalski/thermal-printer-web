@@ -1,7 +1,6 @@
-// TypeScript definitions matching the C# API models
-// Using string values to match C# JsonStringEnumConverter serialization
+// TypeScript types matching C# backend models
 
-export const CustomPrintContentType = {
+export const ContentType = {
   Text: "Text",
   Image: "Image",
   Barcode: "Barcode",
@@ -11,18 +10,16 @@ export const CustomPrintContentType = {
   Separator: "Separator",
   CodePage: "CodePage",
 } as const;
+export type ContentType = (typeof ContentType)[keyof typeof ContentType];
 
-export type CustomPrintContentType = typeof CustomPrintContentType[keyof typeof CustomPrintContentType];
-
-export const CustomPrintAlignment = {
+export const Alignment = {
   Left: "Left",
   Center: "Center",
   Right: "Right",
 } as const;
+export type Alignment = (typeof Alignment)[keyof typeof Alignment];
 
-export type CustomPrintAlignment = typeof CustomPrintAlignment[keyof typeof CustomPrintAlignment];
-
-export const CustomPrintStyle = {
+export const PrintStyle = {
   Normal: "Normal",
   Bold: "Bold",
   Italic: "Italic",
@@ -30,9 +27,10 @@ export const CustomPrintStyle = {
   DoubleHeight: "DoubleHeight",
   DoubleWidth: "DoubleWidth",
   FontB: "FontB",
+  ReverseMode: "ReverseMode",
+  UpsideDownMode: "UpsideDownMode",
 } as const;
-
-export type CustomPrintStyle = typeof CustomPrintStyle[keyof typeof CustomPrintStyle];
+export type PrintStyle = (typeof PrintStyle)[keyof typeof PrintStyle];
 
 export const BarcodeType = {
   UPC_A: "UPC_A",
@@ -46,16 +44,14 @@ export const BarcodeType = {
   GS1_128: "GS1_128",
   GS1_DATABAR_OMNIDIRECTIONAL: "GS1_DATABAR_OMNIDIRECTIONAL",
 } as const;
-
-export type BarcodeType = typeof BarcodeType[keyof typeof BarcodeType];
+export type BarcodeType = (typeof BarcodeType)[keyof typeof BarcodeType];
 
 export const BarWidth = {
   Thin: "Thin",
   Default: "Default",
   Thick: "Thick",
 } as const;
-
-export type BarWidth = typeof BarWidth[keyof typeof BarWidth];
+export type BarWidth = (typeof BarWidth)[keyof typeof BarWidth];
 
 export const BarLabelPosition = {
   None: "None",
@@ -63,24 +59,21 @@ export const BarLabelPosition = {
   Below: "Below",
   Both: "Both",
 } as const;
-
-export type BarLabelPosition = typeof BarLabelPosition[keyof typeof BarLabelPosition];
+export type BarLabelPosition = (typeof BarLabelPosition)[keyof typeof BarLabelPosition];
 
 export const QRCodeModel = {
   Model1: "Model1",
   Model2: "Model2",
   Micro: "Micro",
 } as const;
-
-export type QRCodeModel = typeof QRCodeModel[keyof typeof QRCodeModel];
+export type QRCodeModel = (typeof QRCodeModel)[keyof typeof QRCodeModel];
 
 export const QRCodeSize = {
   Normal: "Normal",
   Large: "Large",
   ExtraLarge: "ExtraLarge",
 } as const;
-
-export type QRCodeSize = typeof QRCodeSize[keyof typeof QRCodeSize];
+export type QRCodeSize = (typeof QRCodeSize)[keyof typeof QRCodeSize];
 
 export const QRCodeCorrectionLevel = {
   Percent7: "Percent7",
@@ -88,8 +81,7 @@ export const QRCodeCorrectionLevel = {
   Percent25: "Percent25",
   Percent30: "Percent30",
 } as const;
-
-export type QRCodeCorrectionLevel = typeof QRCodeCorrectionLevel[keyof typeof QRCodeCorrectionLevel];
+export type QRCodeCorrectionLevel = (typeof QRCodeCorrectionLevel)[keyof typeof QRCodeCorrectionLevel];
 
 export interface BarcodeOptions {
   type: BarcodeType;
@@ -108,23 +100,19 @@ export interface QRCodeOptions {
 export interface ImageOptions {
   maxWidth?: number;
   maxHeight?: number;
-  preserveAspectRatio: boolean;
-  useLegacyMode: boolean;
+  preserveAspectRatio?: boolean;
+  useLegacyMode?: boolean;
 }
 
-export interface CustomPrintContent {
-  type: CustomPrintContentType;
+export interface PrintContent {
+  type: ContentType;
   content?: string;
-  alignment?: CustomPrintAlignment;
-  styles?: string[]; // Changed to support array of style strings
-  style?: CustomPrintStyle[]; // Keep for backwards compatibility
-  barcodeType?: BarcodeType; // Added for easier access
+  alignment?: Alignment;
+  style?: PrintStyle[];
   barcodeOptions?: BarcodeOptions;
   qrCodeOptions?: QRCodeOptions;
   imageOptions?: ImageOptions;
-  base64Image?: string; // Added for image data
   lines?: number;
-  length?: number; // Added for separator length
   partialCut?: boolean;
   separatorChar?: string;
   separatorLength?: number;
@@ -137,17 +125,11 @@ export interface PrintOptions {
   feedLinesAfterPrint?: number;
 }
 
-export interface CustomPrintRequest {
-  content: CustomPrintContent[];
+export interface PrintRequest {
+  name?: string;
+  message?: string;
+  imageBase64?: string;
+  content?: PrintContent[];
   options?: PrintOptions;
   source?: string;
-}
-
-export interface SimplePrintRequest {
-  name: string;
-  message: string;
-}
-
-export interface ImagePrintRequest extends SimplePrintRequest {
-  image?: File;
 }

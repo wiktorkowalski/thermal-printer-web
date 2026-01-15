@@ -51,8 +51,8 @@ export function validateBarcode(data: string, type: string): ValidationResult {
 
   // Basic validation based on barcode type
   const rules: Record<string, { pattern: RegExp; message: string }> = {
-    'UPC-A': { pattern: /^\d{12}$/, message: 'UPC-A requires exactly 12 digits' },
-    'UPC-E': { pattern: /^\d{8}$/, message: 'UPC-E requires exactly 8 digits' },
+    'UPC_A': { pattern: /^\d{12}$/, message: 'UPC-A requires exactly 12 digits' },
+    'UPC_E': { pattern: /^\d{8}$/, message: 'UPC-E requires exactly 8 digits' },
     'EAN13': { pattern: /^\d{13}$/, message: 'EAN13 requires exactly 13 digits' },
     'EAN8': { pattern: /^\d{8}$/, message: 'EAN8 requires exactly 8 digits' },
     'CODE39': { pattern: /^[A-Z0-9\-\.\ \$\/\+\%]+$/, message: 'CODE39 allows A-Z, 0-9, and special chars: -. $/+%' },

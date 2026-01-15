@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using ThermalPrinterWeb;
+using ThermalPrinterWeb.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
