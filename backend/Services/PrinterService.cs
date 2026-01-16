@@ -97,7 +97,7 @@ public class PrinterService : IPrinterService
 
                     case ContentType.Separator:
                         var sep = new string((item.SeparatorChar ?? "=")[0], item.SeparatorLength ?? 32);
-                        byteContent.Add(e.PrintLine(sep));
+                        byteContent.AddRange(BuildStyledTextBytes(e, sep, item.Style));
                         break;
 
                     case ContentType.CodePage:
@@ -133,18 +133,21 @@ public class PrinterService : IPrinterService
     }
 
     private List<byte[]> BuildTextBytes(EPSON e, PrintContent item)
+        => BuildStyledTextBytes(e, item.Content ?? string.Empty, item.Style);
+
+    private List<byte[]> BuildStyledTextBytes(EPSON e, string text, List<Models.PrintStyle>? styles)
     {
         var bytes = new List<byte[]>();
-        var hasReverse = item.Style?.Contains(Models.PrintStyle.ReverseMode) == true;
-        var hasUpsideDown = item.Style?.Contains(Models.PrintStyle.UpsideDownMode) == true;
+        var hasReverse = styles?.Contains(Models.PrintStyle.ReverseMode) == true;
+        var hasUpsideDown = styles?.Contains(Models.PrintStyle.UpsideDownMode) == true;
 
         if (hasReverse)
             bytes.Add(e.ReverseMode(true));
         if (hasUpsideDown)
             bytes.Add(e.UpsideDownMode(true));
 
-        bytes.Add(e.SetStyles(MapPrintStyles(item.Style)));
-        bytes.Add(e.PrintLine(item.Content ?? string.Empty));
+        bytes.Add(e.SetStyles(MapPrintStyles(styles)));
+        bytes.Add(e.PrintLine(text));
         bytes.Add(e.SetStyles(EscPrintStyle.None));
 
         if (hasUpsideDown)
