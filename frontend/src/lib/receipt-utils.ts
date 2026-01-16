@@ -279,3 +279,192 @@ export function createEmptyItem(): ReceiptItem {
     taxCategory: 'A',
   };
 }
+
+// Biedronka-style receipt format
+export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRates): PrintContent[] {
+  const content: PrintContent[] = [];
+  const { store, items, date, kasaNumber, kasjerNumber } = receipt;
+
+  // Header - Biedronka style
+  content.push({
+    type: ContentType.Text,
+    content: 'Biedronka',
+    alignment: Alignment.Center,
+    style: [PrintStyle.Bold, PrintStyle.DoubleWidth],
+  });
+  content.push({
+    type: ContentType.Text,
+    content: 'Codziennie niskie ceny',
+    alignment: Alignment.Center,
+  });
+  content.push({ type: ContentType.LineFeed, lines: 1 });
+
+  // Store address
+  const storeNumStr = store.storeNumber ? `Sklep ${store.storeNumber} ` : '';
+  content.push({
+    type: ContentType.Text,
+    content: `${storeNumStr}${store.addressLine1}`,
+    alignment: Alignment.Center,
+  });
+  content.push({
+    type: ContentType.Text,
+    content: `${store.zipCode} ${store.city}`,
+    alignment: Alignment.Center,
+  });
+
+  // Parent company
+  if (store.parentCompany) {
+    content.push({
+      type: ContentType.Text,
+      content: store.parentCompany,
+      alignment: Alignment.Center,
+    });
+  }
+  if (store.parentAddress) {
+    content.push({
+      type: ContentType.Text,
+      content: store.parentAddress,
+      alignment: Alignment.Center,
+    });
+  }
+
+  // NIP
+  content.push({
+    type: ContentType.Text,
+    content: `NIP ${store.nip}`,
+    alignment: Alignment.Center,
+  });
+
+  content.push({ type: ContentType.LineFeed, lines: 1 });
+
+  // Date and receipt number line
+  const receiptNum = Math.floor(Math.random() * 900000 + 100000).toString();
+  const dateStr = date || formatDate();
+  content.push({
+    type: ContentType.Text,
+    content: formatLine(dateStr, receiptNum),
+  });
+
+  // PARAGON FISKALNY
+  content.push({
+    type: ContentType.Text,
+    content: 'PARAGON FISKALNY',
+    alignment: Alignment.Center,
+    style: [PrintStyle.Bold],
+  });
+
+  // Items - Biedronka format
+  for (const item of items) {
+    const total = calculateItemTotal(item) - (item.discount || 0);
+
+    // First line: name + tax category
+    const nameLine = formatLine(item.name, item.taxCategory);
+    content.push({
+      type: ContentType.Text,
+      content: nameLine,
+    });
+
+    // Second line: qty x price = total + tax category
+    const qtyStr = formatQuantity(item.quantity);
+    const priceStr = formatCurrency(item.unitPrice);
+    const totalStr = formatCurrency(total);
+    const priceLine = `${qtyStr} x${priceStr} ${totalStr}${item.taxCategory}`;
+    content.push({
+      type: ContentType.Text,
+      content: priceLine,
+      alignment: Alignment.Right,
+    });
+
+    // Rabat line if discount exists
+    if (item.discount && item.discount > 0) {
+      content.push({
+        type: ContentType.Text,
+        content: formatLine('   Rabat', `-${formatCurrency(item.discount)}`),
+      });
+      const afterDiscount = total;
+      content.push({
+        type: ContentType.Text,
+        content: formatLine('', `${formatCurrency(afterDiscount)}${item.taxCategory}`),
+      });
+    }
+  }
+
+  content.push({ type: ContentType.Separator, separatorChar: '.', separatorLength: 42 });
+
+  // Tax breakdown - Biedronka style
+  const breakdown = calculateTaxBreakdown(items, taxRates);
+  for (const line of breakdown) {
+    const grossAmount = line.base + line.tax;
+    content.push({
+      type: ContentType.Text,
+      content: formatLine(`SPRZEDAŻ OPODATKOWANA ${line.category}`, formatCurrency(grossAmount)),
+    });
+    content.push({
+      type: ContentType.Text,
+      content: formatLine(`PTU ${line.category} ${line.rate},00 %`, formatCurrency(line.tax)),
+    });
+  }
+
+  const totalTax = calculateTotalTax(breakdown);
+  content.push({
+    type: ContentType.Text,
+    content: formatLine('SUMA PTU', formatCurrency(totalTax)),
+  });
+
+  // Total
+  const totalAfterDiscount = items.reduce((sum, item) => sum + calculateItemTotal(item) - (item.discount || 0), 0);
+  content.push({
+    type: ContentType.Text,
+    content: formatLine('SUMA PLN', formatCurrency(totalAfterDiscount), CHARS_PER_LINE.doubleWidth),
+    style: [PrintStyle.Bold, PrintStyle.DoubleHeight, PrintStyle.DoubleWidth],
+  });
+
+  // Footer - Kasa/Kasjer info
+  const kasa = kasaNumber || '3';
+  const kasjer = kasjerNumber || '9';
+  const footerNum = Math.floor(Math.random() * 90000 + 10000).toString().padStart(5, '0');
+  content.push({
+    type: ContentType.Text,
+    content: formatLine(`${footerNum} #Kasa ${kasa} Kasjer nr ${kasjer}`, dateStr),
+  });
+
+  // Fiscal code (random hex)
+  const fiscalCode = Array.from({ length: 40 }, () =>
+    '0123456789ABCDEF'[Math.floor(Math.random() * 16)]
+  ).join('');
+  content.push({
+    type: ContentType.Text,
+    content: fiscalCode,
+    alignment: Alignment.Center,
+    style: [PrintStyle.FontB],
+  });
+
+  // CCH number
+  const cchNum = Math.floor(Math.random() * 9000000000 + 1000000000).toString();
+  content.push({
+    type: ContentType.Text,
+    content: `CCH ${cchNum}`,
+    alignment: Alignment.Center,
+  });
+
+  // Barcode
+  const barcode = '1000043879950072203475';
+  content.push({
+    type: ContentType.Barcode,
+    content: barcode,
+    barcodeOptions: { type: 'CODE128', width: 'Default', heightInDots: 60 },
+  });
+
+  // Nr sys
+  content.push({
+    type: ContentType.Text,
+    content: 'Nr sys. 9950',
+    alignment: Alignment.Center,
+  });
+
+  // Feed and cut
+  content.push({ type: ContentType.LineFeed, lines: 3 });
+  content.push({ type: ContentType.Cut });
+
+  return content;
+}

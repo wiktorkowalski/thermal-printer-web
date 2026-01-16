@@ -6,7 +6,13 @@ export interface StoreInfo {
   city: string;
   zipCode: string;
   nip: string;
+  // Biedronka-specific: parent company info
+  parentCompany?: string;
+  parentAddress?: string;
+  storeNumber?: string;
 }
+
+export type ReceiptTemplate = 'paragon-fiskalny' | 'biedronka';
 
 export interface ReceiptItem {
   id: string;
@@ -14,6 +20,7 @@ export interface ReceiptItem {
   quantity: number;
   unitPrice: number;
   taxCategory: TaxCategory;
+  discount?: number; // Rabat amount
 }
 
 export type TaxCategory = 'A' | 'B' | 'C' | 'D';
@@ -37,9 +44,13 @@ export interface ReceiptData {
   store: StoreInfo;
   items: ReceiptItem[];
   payment: Payment;
+  template?: ReceiptTemplate;
   title?: string;
   documentNumber?: string;
   date?: string;
+  // Biedronka-specific footer
+  kasaNumber?: string;
+  kasjerNumber?: string;
 }
 
 export interface TaxBreakdownLine {
@@ -63,6 +74,17 @@ export const DEFAULT_STORE: StoreInfo = {
   city: 'Pcim Dolny',
   zipCode: '69-420',
   nip: '1234567890',
+};
+
+export const BIEDRONKA_STORE: StoreInfo = {
+  name: 'Biedronka',
+  storeNumber: '4387',
+  addressLine1: 'ul. Ks. Czesława Majorka 1',
+  city: 'Ostrów Wielkopolski',
+  zipCode: '63-400',
+  parentCompany: 'Jeronimo Martins Polska S.A.',
+  parentAddress: 'ul. Żniwna 5, 62-025 Kostrzyn',
+  nip: '779-10-11-327',
 };
 
 export const TAX_CATEGORY_LABELS: Record<TaxCategory, string> = {
