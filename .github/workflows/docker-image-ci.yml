@@ -47,3 +47,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, homelab]
+
+    steps:
+      - name: Deploy to homelab
+        run: |
+          cd /home/ubuntu/docker/thermal-printer-web
+          docker compose pull
+          docker compose up -d
