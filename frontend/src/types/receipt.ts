@@ -3,7 +3,8 @@
 export interface StoreInfo {
   name: string;
   addressLine1: string;
-  addressLine2: string;
+  city: string;
+  zipCode: string;
   nip: string;
 }
 
@@ -57,10 +58,11 @@ export const DEFAULT_TAX_RATES: TaxRates = {
 };
 
 export const DEFAULT_STORE: StoreInfo = {
-  name: '',
-  addressLine1: '',
-  addressLine2: '',
-  nip: '',
+  name: 'Sklep u Janusza',
+  addressLine1: 'ul. Świętego Mikołaja 42',
+  city: 'Pcim Dolny',
+  zipCode: '69-420',
+  nip: '1234567890',
 };
 
 export const TAX_CATEGORY_LABELS: Record<TaxCategory, string> = {

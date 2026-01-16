@@ -9,6 +9,7 @@ import type {
   TaxCategory,
 } from '../types/receipt';
 import { DEFAULT_TAX_RATES, DEFAULT_STORE } from '../types/receipt';
+import { CHARS_PER_LINE } from './printer-constants';
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -74,6 +75,12 @@ export function formatDate(date?: Date): string {
   return `${day}.${month}.${year} ${hours}:${minutes}`;
 }
 
+// Format left and right text on same line with padding
+export function formatLine(left: string, right: string, width: number = CHARS_PER_LINE.normal): string {
+  const padding = Math.max(1, width - left.length - right.length);
+  return left + ' '.repeat(padding) + right;
+}
+
 // LocalStorage persistence
 export function getDefaultStore(): StoreInfo {
   try {
@@ -136,10 +143,10 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
       alignment: Alignment.Center,
     });
   }
-  if (store.addressLine2) {
+  if (store.city || store.zipCode) {
     content.push({
       type: ContentType.Text,
-      content: store.addressLine2,
+      content: `${store.zipCode} ${store.city}`.trim(),
       alignment: Alignment.Center,
     });
   }
@@ -167,18 +174,28 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
   // Line items
   for (const item of items) {
     const total = calculateItemTotal(item);
-    // Item name
-    content.push({
-      type: ContentType.Text,
-      content: item.name,
-      alignment: Alignment.Left,
-    });
-    // Qty x price = total + tax category
-    content.push({
-      type: ContentType.Text,
-      content: `  ${formatQuantity(item.quantity)} x ${formatCurrency(item.unitPrice)} = ${formatCurrency(total)} ${item.taxCategory}`,
-      alignment: Alignment.Right,
-    });
+    const priceStr = `${formatQuantity(item.quantity)} SZT * ${formatCurrency(item.unitPrice)} = ${formatCurrency(total)} ${item.taxCategory}`;
+
+    // Try to fit on one line, otherwise split
+    if (item.name.length + priceStr.length + 1 <= CHARS_PER_LINE.normal) {
+      // Fits on one line
+      content.push({
+        type: ContentType.Text,
+        content: formatLine(item.name, priceStr),
+      });
+    } else {
+      // Split into two lines
+      content.push({
+        type: ContentType.Text,
+        content: item.name,
+        alignment: Alignment.Left,
+      });
+      content.push({
+        type: ContentType.Text,
+        content: priceStr,
+        alignment: Alignment.Right,
+      });
+    }
   }
 
   content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: 32 });
@@ -188,36 +205,18 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
   for (const line of breakdown) {
     content.push({
       type: ContentType.Text,
-      content: `Sp.op.${line.category}`,
-      alignment: Alignment.Left,
+      content: formatLine(`Sp.op.${line.category}`, formatCurrency(line.base)),
     });
     content.push({
       type: ContentType.Text,
-      content: formatCurrency(line.base),
-      alignment: Alignment.Right,
-    });
-    content.push({
-      type: ContentType.Text,
-      content: `PTU ${line.category}=${line.rate},00%`,
-      alignment: Alignment.Left,
-    });
-    content.push({
-      type: ContentType.Text,
-      content: formatCurrency(line.tax),
-      alignment: Alignment.Right,
+      content: formatLine(`PTU ${line.category}=${line.rate},00%`, formatCurrency(line.tax)),
     });
   }
 
   const totalTax = calculateTotalTax(breakdown);
   content.push({
     type: ContentType.Text,
-    content: 'SUMA PTU',
-    alignment: Alignment.Left,
-  });
-  content.push({
-    type: ContentType.Text,
-    content: formatCurrency(totalTax),
-    alignment: Alignment.Right,
+    content: formatLine('SUMA PTU', formatCurrency(totalTax)),
   });
 
   content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: 32 });
@@ -226,14 +225,7 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
   const subtotal = calculateSubtotal(items);
   content.push({
     type: ContentType.Text,
-    content: 'SUMA PLN',
-    alignment: Alignment.Left,
-    style: [PrintStyle.Bold, PrintStyle.DoubleHeight, PrintStyle.DoubleWidth],
-  });
-  content.push({
-    type: ContentType.Text,
-    content: formatCurrency(subtotal),
-    alignment: Alignment.Right,
+    content: formatLine('SUMA PLN', formatCurrency(subtotal), CHARS_PER_LINE.doubleWidth),
     style: [PrintStyle.Bold, PrintStyle.DoubleHeight, PrintStyle.DoubleWidth],
   });
 
@@ -250,13 +242,7 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
     const cashAmt = payment.cashAmount ?? (payment.method === 'cash' ? subtotal : 0);
     content.push({
       type: ContentType.Text,
-      content: `ZAPLACONO GOTOWKA PLN`,
-      alignment: Alignment.Left,
-    });
-    content.push({
-      type: ContentType.Text,
-      content: formatCurrency(cashAmt),
-      alignment: Alignment.Right,
+      content: formatLine('ZAPLACONO GOTOWKA PLN', formatCurrency(cashAmt)),
     });
   }
 
@@ -264,13 +250,7 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
     const cardAmt = payment.cardAmount ?? (payment.method === 'card' ? subtotal : 0);
     content.push({
       type: ContentType.Text,
-      content: `ZAPLACONO KARTA PLN`,
-      alignment: Alignment.Left,
-    });
-    content.push({
-      type: ContentType.Text,
-      content: formatCurrency(cardAmt),
-      alignment: Alignment.Right,
+      content: formatLine('ZAPLACONO KARTA PLN', formatCurrency(cardAmt)),
     });
   }
 

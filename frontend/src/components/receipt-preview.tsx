@@ -11,6 +11,7 @@ import {
   formatQuantity,
   formatDate,
 } from "@/lib/receipt-utils";
+import { CHARS_PER_LINE } from "@/lib/printer-constants";
 
 interface ReceiptPreviewProps {
   receipt: ReceiptData;
@@ -25,9 +26,7 @@ export function ReceiptPreview({ receipt, taxRates }: ReceiptPreviewProps) {
   const breakdown = calculateTaxBreakdown(items, taxRates);
   const totalTax = calculateTotalTax(breakdown);
 
-  const hasContent = store.name || items.length > 0;
-
-  if (!hasContent) return null;
+  // Always show preview
 
   return (
     <Card className="overflow-hidden border-2">
@@ -51,7 +50,7 @@ export function ReceiptPreview({ receipt, taxRates }: ReceiptPreviewProps) {
                 <div className="font-bold text-base tracking-wide">{store.name}</div>
               )}
               {store.addressLine1 && <div>{store.addressLine1}</div>}
-              {store.addressLine2 && <div>{store.addressLine2}</div>}
+              {(store.city || store.zipCode) && <div>{store.zipCode} {store.city}</div>}
               {store.nip && <div>NIP: {store.nip}</div>}
             </div>
 
@@ -66,15 +65,22 @@ export function ReceiptPreview({ receipt, taxRates }: ReceiptPreviewProps) {
 
             {/* Line items */}
             {items.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-1">
                 {items.map((item) => {
                   const total = calculateItemTotal(item);
-                  return (
+                  const name = item.name || '(no name)';
+                  const priceStr = `${formatQuantity(item.quantity)} SZT * ${formatCurrency(item.unitPrice)} = ${formatCurrency(total)} ${item.taxCategory}`;
+                  const fitsOneLine = name.length + priceStr.length + 1 <= CHARS_PER_LINE.normal;
+
+                  return fitsOneLine ? (
+                    <div key={item.id} className="flex justify-between text-xs">
+                      <span className="truncate">{name}</span>
+                      <span className="ml-2 whitespace-nowrap">{priceStr}</span>
+                    </div>
+                  ) : (
                     <div key={item.id}>
-                      <div className="truncate">{item.name || '(no name)'}</div>
-                      <div className="text-right text-xs">
-                        {formatQuantity(item.quantity)} x {formatCurrency(item.unitPrice)} = {formatCurrency(total)} {item.taxCategory}
-                      </div>
+                      <div className="truncate text-xs">{name}</div>
+                      <div className="text-right text-xs">{priceStr}</div>
                     </div>
                   );
                 })}

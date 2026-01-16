@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
-import { Printer, Plus, Trash2, ChevronDown, ChevronUp, Store, CheckCircle2, AlertCircle } from "lucide-react";
+import { Printer, Plus, Trash2, ChevronDown, ChevronUp, Store, CheckCircle2, AlertCircle, FileText, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { InlineSelect } from "@/components/inline-select";
 import { StatusIndicator } from "@/components/status-indicator";
 import { ReceiptPreview } from "@/components/receipt-preview";
 import { cn } from "@/lib/utils";
@@ -35,6 +34,9 @@ export default function Receipts() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [cashAmount, setCashAmount] = useState<string>('');
   const [cardAmount, setCardAmount] = useState<string>('');
+
+  // Template selection
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('paragon-fiskalny');
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -173,41 +175,50 @@ export default function Receipts() {
               </CardDescription>
             </CardHeader>
             {storeExpanded && (
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className="font-mono text-sm">Store Name</Label>
+              <CardContent className="grid gap-3 sm:grid-cols-4">
+                <div className="sm:col-span-2 space-y-1">
+                  <Label className="font-mono text-xs text-muted-foreground">Store Name</Label>
                   <Input
                     value={store.name}
                     onChange={(e) => updateStore('name', e.target.value)}
                     placeholder="Store name..."
-                    className="font-mono"
+                    className="font-mono h-9"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label className="font-mono text-sm">NIP</Label>
+                <div className="sm:col-span-2 space-y-1">
+                  <Label className="font-mono text-xs text-muted-foreground">NIP</Label>
                   <Input
                     value={store.nip}
                     onChange={(e) => updateStore('nip', e.target.value)}
                     placeholder="1234567890"
-                    className="font-mono"
+                    className="font-mono h-9"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label className="font-mono text-sm">Address Line 1</Label>
+                <div className="sm:col-span-2 space-y-1">
+                  <Label className="font-mono text-xs text-muted-foreground">Street</Label>
                   <Input
                     value={store.addressLine1}
                     onChange={(e) => updateStore('addressLine1', e.target.value)}
-                    placeholder="Street address..."
-                    className="font-mono"
+                    placeholder="ul. Przykładowa 1"
+                    className="font-mono h-9"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label className="font-mono text-sm">Address Line 2</Label>
+                <div className="space-y-1">
+                  <Label className="font-mono text-xs text-muted-foreground">Zip Code</Label>
                   <Input
-                    value={store.addressLine2}
-                    onChange={(e) => updateStore('addressLine2', e.target.value)}
-                    placeholder="City, postal code..."
-                    className="font-mono"
+                    value={store.zipCode}
+                    onChange={(e) => updateStore('zipCode', e.target.value)}
+                    placeholder="00-000"
+                    className="font-mono h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="font-mono text-xs text-muted-foreground">City</Label>
+                  <Input
+                    value={store.city}
+                    onChange={(e) => updateStore('city', e.target.value)}
+                    placeholder="Warszawa"
+                    className="font-mono h-9"
                   />
                 </div>
               </CardContent>
@@ -216,76 +227,68 @@ export default function Receipts() {
 
           {/* Line Items */}
           <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.1s' }}>
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-lg font-mono">Line Items</CardTitle>
-              <CardDescription className="font-mono text-xs">
-                Add products or services to the receipt
-              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2">
               {/* Header row */}
-              <div className="grid grid-cols-12 gap-2 text-xs font-mono text-muted-foreground px-1">
-                <div className="col-span-5">Name</div>
-                <div className="col-span-2 text-center">Qty</div>
-                <div className="col-span-2 text-center">Price</div>
-                <div className="col-span-2 text-center">Tax</div>
-                <div className="col-span-1"></div>
+              <div className="grid grid-cols-[1fr_70px_80px_60px_32px] gap-2 text-xs font-mono text-muted-foreground">
+                <div>Name</div>
+                <div className="text-center">Qty</div>
+                <div className="text-center">Price</div>
+                <div className="text-center">Tax</div>
+                <div></div>
               </div>
 
               {items.map((item) => (
-                <div key={item.id} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-5">
-                    <Input
-                      value={item.name}
-                      onChange={(e) => updateItem(item.id, { name: e.target.value })}
-                      placeholder="Item name..."
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      value={item.quantity}
-                      onChange={(e) => updateItem(item.id, { quantity: parseFloat(e.target.value) || 0 })}
-                      min="0"
-                      step="1"
-                      className="font-mono text-sm text-center"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      value={item.unitPrice || ''}
-                      onChange={(e) => updateItem(item.id, { unitPrice: parseFloat(e.target.value) || 0 })}
-                      min="0"
-                      step="0.01"
-                      placeholder="0,00"
-                      className="font-mono text-sm text-center"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <InlineSelect
-                      value={item.taxCategory}
-                      onChange={(value) => updateItem(item.id, { taxCategory: value as TaxCategory })}
-                      options={[
-                        { value: 'A', label: 'A 23%' },
-                        { value: 'B', label: 'B 8%' },
-                        { value: 'C', label: 'C 5%' },
-                        { value: 'D', label: 'D 0%' },
-                      ]}
-                    />
-                  </div>
-                  <div className="col-span-1 flex justify-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeItem(item.id)}
-                      disabled={items.length === 1}
-                      className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                <div key={item.id} className="grid grid-cols-[1fr_70px_80px_60px_32px] gap-2 items-center">
+                  <Input
+                    value={item.name}
+                    onChange={(e) => updateItem(item.id, { name: e.target.value })}
+                    placeholder="Item name..."
+                    className="font-mono text-sm h-9"
+                  />
+                  <Input
+                    inputMode="decimal"
+                    value={item.quantity || ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(',', '.');
+                      updateItem(item.id, { quantity: parseFloat(val) || 0 });
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="1"
+                    className="font-mono text-sm h-9 text-center"
+                  />
+                  <Input
+                    inputMode="decimal"
+                    value={item.unitPrice || ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(',', '.');
+                      updateItem(item.id, { unitPrice: parseFloat(val) || 0 });
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="0.00"
+                    className="font-mono text-sm h-9 text-center"
+                  />
+                  <select
+                    value={item.taxCategory}
+                    onChange={(e) => updateItem(item.id, { taxCategory: e.target.value as TaxCategory })}
+                    className="h-9 px-2 rounded-md border bg-background font-mono text-sm"
+                  >
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="D">D</option>
+                  </select>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeItem(item.id)}
+                    disabled={items.length === 1}
+                    className="h-9 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
 
@@ -293,7 +296,7 @@ export default function Receipts() {
                 variant="outline"
                 size="sm"
                 onClick={addItem}
-                className="w-full font-mono"
+                className="w-full font-mono h-9"
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Add Item
@@ -301,60 +304,58 @@ export default function Receipts() {
             </CardContent>
           </Card>
 
-          {/* Totals */}
+          {/* Total & Payment */}
           <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.15s' }}>
-            <CardHeader>
-              <CardTitle className="text-lg font-mono">Total</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex justify-between items-center text-2xl font-bold font-mono">
+            <CardContent className="pt-4 space-y-4">
+              <div className="flex justify-between items-center text-xl font-bold font-mono">
                 <span>SUMA PLN</span>
                 <span className="text-[hsl(var(--terminal-green))]">
                   {subtotal.toFixed(2).replace('.', ',')}
                 </span>
               </div>
-            </CardContent>
-          </Card>
 
-          {/* Payment */}
-          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.2s' }}>
-            <CardHeader>
-              <CardTitle className="text-lg font-mono">Payment</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label className="font-mono text-sm">Payment Method</Label>
-                <InlineSelect
-                  value={paymentMethod}
-                  onChange={(value) => setPaymentMethod(value as PaymentMethod)}
-                  options={[
-                    { value: 'cash', label: 'Cash' },
-                    { value: 'card', label: 'Card' },
-                    { value: 'mixed', label: 'Mixed' },
-                  ]}
-                />
+              <div className="flex items-center gap-3">
+                <Label className="font-mono text-xs text-muted-foreground whitespace-nowrap">Payment</Label>
+                <div className="flex gap-1">
+                  {(['cash', 'card', 'mixed'] as const).map((method) => (
+                    <button
+                      key={method}
+                      onClick={() => setPaymentMethod(method)}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-mono rounded border transition-colors",
+                        paymentMethod === method
+                          ? "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10 text-[hsl(var(--terminal-green))]"
+                          : "border-muted hover:border-muted-foreground/50"
+                      )}
+                    >
+                      {method === 'cash' ? 'Gotówka' : method === 'card' ? 'Karta' : 'Mix'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {paymentMethod === 'mixed' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="font-mono text-sm">Cash Amount</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="font-mono text-xs text-muted-foreground">Gotówka</Label>
                     <Input
-                      type="number"
+                      inputMode="decimal"
                       value={cashAmount}
-                      onChange={(e) => setCashAmount(e.target.value)}
+                      onChange={(e) => setCashAmount(e.target.value.replace(',', '.'))}
+                      onFocus={(e) => e.target.select()}
                       placeholder={subtotal.toFixed(2)}
-                      className="font-mono"
+                      className="font-mono h-9"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label className="font-mono text-sm">Card Amount</Label>
+                  <div className="space-y-1">
+                    <Label className="font-mono text-xs text-muted-foreground">Karta</Label>
                     <Input
-                      type="number"
+                      inputMode="decimal"
                       value={cardAmount}
-                      onChange={(e) => setCardAmount(e.target.value)}
+                      onChange={(e) => setCardAmount(e.target.value.replace(',', '.'))}
+                      onFocus={(e) => e.target.select()}
                       placeholder="0.00"
-                      className="font-mono"
+                      className="font-mono h-9"
                     />
                   </div>
                 </div>
@@ -411,9 +412,42 @@ export default function Receipts() {
           </div>
         </div>
 
-        {/* Right Sidebar - Preview */}
+        {/* Right Sidebar - Template & Preview */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="matrix-cascade" style={{ animationDelay: '0.25s' }}>
+          {/* Template Selection */}
+          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.25s' }}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-[hsl(var(--terminal-green))]" />
+                <CardTitle className="text-lg">Receipt Template</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <button
+                onClick={() => setSelectedTemplate('paragon-fiskalny')}
+                className={cn(
+                  "w-full text-left p-3 rounded-lg border-2 transition-all",
+                  "hover:border-[hsl(var(--terminal-green))]/50",
+                  selectedTemplate === 'paragon-fiskalny'
+                    ? "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10"
+                    : "border-muted"
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-mono font-semibold text-sm">Paragon Fiskalny</div>
+                    <div className="text-xs text-muted-foreground">Standard Polish fiscal receipt</div>
+                  </div>
+                  {selectedTemplate === 'paragon-fiskalny' && (
+                    <Check className="h-4 w-4 text-[hsl(var(--terminal-green))]" />
+                  )}
+                </div>
+              </button>
+            </CardContent>
+          </Card>
+
+          {/* Receipt Preview */}
+          <div className="matrix-cascade" style={{ animationDelay: '0.3s' }}>
             <ReceiptPreview receipt={getReceiptData()} taxRates={taxRates} />
           </div>
         </div>
