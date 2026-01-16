@@ -116,6 +116,7 @@ export default function Receipts() {
       await printerApi.printCustom({
         content,
         options: {
+          codePage: 'PC852', // Polish characters (Latin 2)
           autoCut: true,
           feedLinesAfterPrint: 3,
         },
