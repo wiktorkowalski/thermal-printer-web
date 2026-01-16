@@ -9,7 +9,8 @@ import { StatusIndicator } from "@/components/status-indicator";
 import { ReceiptPreview } from "@/components/receipt-preview";
 import { cn } from "@/lib/utils";
 import { printerApi, type PrintError } from "@/lib/api";
-import type { ReceiptData, ReceiptItem, TaxRates, StoreInfo, PaymentMethod, TaxCategory } from "@/types/receipt";
+import type { ReceiptData, ReceiptItem, TaxRates, StoreInfo, PaymentMethod, TaxCategory, ReceiptTemplate } from "@/types/receipt";
+import { BIEDRONKA_STORE } from "@/types/receipt";
 import {
   getDefaultStore,
   saveDefaultStore,
@@ -17,6 +18,7 @@ import {
   calculateSubtotal,
   createEmptyItem,
   receiptToContent,
+  biedronkaReceiptToContent,
 } from "@/lib/receipt-utils";
 
 export default function Receipts() {
@@ -36,7 +38,17 @@ export default function Receipts() {
   const [cardAmount, setCardAmount] = useState<string>('');
 
   // Template selection
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('paragon-fiskalny');
+  const [selectedTemplate, setSelectedTemplate] = useState<ReceiptTemplate>('paragon-fiskalny');
+
+  // Handle template change - switch store defaults
+  const handleTemplateChange = (template: ReceiptTemplate) => {
+    setSelectedTemplate(template);
+    if (template === 'biedronka') {
+      setStore(BIEDRONKA_STORE);
+    } else {
+      setStore(getDefaultStore());
+    }
+  };
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -94,6 +106,7 @@ export default function Receipts() {
       cashAmount: paymentMethod !== 'card' ? (parseFloat(cashAmount) || subtotal) : undefined,
       cardAmount: paymentMethod !== 'cash' ? (parseFloat(cardAmount) || subtotal) : undefined,
     },
+    template: selectedTemplate,
   });
 
   const handlePrint = async () => {
@@ -111,7 +124,9 @@ export default function Receipts() {
 
     try {
       const receipt = getReceiptData();
-      const content = receiptToContent(receipt, taxRates);
+      const content = selectedTemplate === 'biedronka'
+        ? biedronkaReceiptToContent(receipt, taxRates)
+        : receiptToContent(receipt, taxRates);
 
       await printerApi.printCustom({
         content,
@@ -177,7 +192,18 @@ export default function Receipts() {
             </CardHeader>
             {storeExpanded && (
               <CardContent className="grid gap-3 sm:grid-cols-4">
-                <div className="sm:col-span-2 space-y-1">
+                {selectedTemplate === 'biedronka' && (
+                  <div className="space-y-1">
+                    <Label className="font-mono text-xs text-muted-foreground">Store #</Label>
+                    <Input
+                      value={store.storeNumber || ''}
+                      onChange={(e) => updateStore('storeNumber', e.target.value)}
+                      placeholder="4387"
+                      className="font-mono h-9"
+                    />
+                  </div>
+                )}
+                <div className={cn("space-y-1", selectedTemplate === 'biedronka' ? "sm:col-span-1" : "sm:col-span-2")}>
                   <Label className="font-mono text-xs text-muted-foreground">Store Name</Label>
                   <Input
                     value={store.name}
@@ -222,6 +248,28 @@ export default function Receipts() {
                     className="font-mono h-9"
                   />
                 </div>
+                {selectedTemplate === 'biedronka' && (
+                  <>
+                    <div className="sm:col-span-2 space-y-1">
+                      <Label className="font-mono text-xs text-muted-foreground">Parent Company</Label>
+                      <Input
+                        value={store.parentCompany || ''}
+                        onChange={(e) => updateStore('parentCompany', e.target.value)}
+                        placeholder="Jeronimo Martins Polska S.A."
+                        className="font-mono h-9"
+                      />
+                    </div>
+                    <div className="sm:col-span-2 space-y-1">
+                      <Label className="font-mono text-xs text-muted-foreground">Parent Address</Label>
+                      <Input
+                        value={store.parentAddress || ''}
+                        onChange={(e) => updateStore('parentAddress', e.target.value)}
+                        placeholder="ul. Żniwna 5, 62-025 Kostrzyn"
+                        className="font-mono h-9"
+                      />
+                    </div>
+                  </>
+                )}
               </CardContent>
             )}
           </Card>
@@ -425,7 +473,7 @@ export default function Receipts() {
             </CardHeader>
             <CardContent className="space-y-2">
               <button
-                onClick={() => setSelectedTemplate('paragon-fiskalny')}
+                onClick={() => handleTemplateChange('paragon-fiskalny')}
                 className={cn(
                   "w-full text-left p-3 rounded-lg border-2 transition-all",
                   "hover:border-[hsl(var(--terminal-green))]/50",
@@ -440,6 +488,26 @@ export default function Receipts() {
                     <div className="text-xs text-muted-foreground">Standard Polish fiscal receipt</div>
                   </div>
                   {selectedTemplate === 'paragon-fiskalny' && (
+                    <Check className="h-4 w-4 text-[hsl(var(--terminal-green))]" />
+                  )}
+                </div>
+              </button>
+              <button
+                onClick={() => handleTemplateChange('biedronka')}
+                className={cn(
+                  "w-full text-left p-3 rounded-lg border-2 transition-all",
+                  "hover:border-[hsl(var(--terminal-green))]/50",
+                  selectedTemplate === 'biedronka'
+                    ? "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10"
+                    : "border-muted"
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-mono font-semibold text-sm">Biedronka</div>
+                    <div className="text-xs text-muted-foreground">Codziennie niskie ceny</div>
+                  </div>
+                  {selectedTemplate === 'biedronka' && (
                     <Check className="h-4 w-4 text-[hsl(var(--terminal-green))]" />
                   )}
                 </div>
