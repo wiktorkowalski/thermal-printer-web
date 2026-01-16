@@ -7,19 +7,19 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { validateTemplateName } from "@/lib/validation";
-import type { CustomPrintRequest } from "@/types/printer";
+import type { PrintRequest } from "@/types/printer";
 
 interface Template {
   id: string;
   name: string;
-  content: CustomPrintRequest;
+  content: PrintRequest;
   createdAt: string;
   updatedAt: string;
 }
 
 interface TemplateManagerProps {
-  currentTemplate: CustomPrintRequest;
-  onLoadTemplate: (template: CustomPrintRequest) => void;
+  currentTemplate: PrintRequest;
+  onLoadTemplate: (template: PrintRequest) => void;
   className?: string;
 }
 
@@ -64,7 +64,7 @@ export function TemplateManager({ currentTemplate, onLoadTemplate, className }: 
       return;
     }
 
-    if (currentTemplate.content.length === 0) {
+    if (!currentTemplate.content?.length) {
       setError('[ERROR] Cannot save empty template');
       return;
     }
@@ -260,7 +260,7 @@ export function TemplateManager({ currentTemplate, onLoadTemplate, className }: 
                       {template.name}
                     </div>
                     <div className="font-mono text-xs text-muted-foreground">
-                      {new Date(template.updatedAt).toLocaleDateString()} • {template.content.content.length} blocks
+                      {new Date(template.updatedAt).toLocaleDateString()} • {template.content.content?.length ?? 0} blocks
                     </div>
                   </div>
                   <div className="flex gap-1 flex-shrink-0">

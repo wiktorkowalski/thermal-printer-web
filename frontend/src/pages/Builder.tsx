@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  CustomPrintContentType,
-  CustomPrintAlignment,
-  type CustomPrintContent,
-  type CustomPrintRequest,
+  ContentType,
+  Alignment,
+  type PrintContent,
+  type PrintRequest,
+  type PrintStyle,
   BarcodeType,
   QRCodeModel,
   QRCodeSize,
@@ -11,7 +12,7 @@ import {
   BarWidth,
   BarLabelPosition,
 } from "../types/printer";
-import { printerApi, type PrintError } from "../lib/api";
+import { printerApi, fileToBase64, type PrintError } from "../lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ import { StatusIndicator } from "@/components/status-indicator";
 import { PrintPreview } from "@/components/print-preview";
 import { TemplateManager } from "@/components/template-manager";
 import { validateRequired, validateBarcode, validateQRCode, validateImage, validateSeparator } from "@/lib/validation";
+import { getMaxChars, DEFAULT_LINE_WIDTH } from "@/lib/printer-constants";
 import {
   Type,
   Image as ImageIcon,
@@ -37,6 +39,8 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
+  ChevronsUp,
+  ChevronsDown,
   CheckCircle2,
   AlertCircle,
   Upload,
@@ -44,10 +48,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type BlockWithMetadata = CustomPrintContent & {
+type BlockWithMetadata = PrintContent & {
   id: number;
   imageFile?: File;
   imagePreview?: string;
+  barcodeType?: BarcodeType; // UI convenience field
 };
 
 export default function Builder() {
@@ -73,55 +78,35 @@ export default function Builder() {
     }
   }, [success]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + S to save (would trigger template save)
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        // Focus template name input if exists
-        document.getElementById('template-name')?.focus();
-      }
 
-      // Delete key to remove focused block (when not in input)
-      if (e.key === 'Delete' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
-        // Could implement focused block deletion here
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const addBlock = (type: CustomPrintContentType) => {
-    const newBlock: CustomPrintContent & { id: number } = {
+  const addBlock = (type: ContentType) => {
+    const newBlock: PrintContent & { id: number } = {
       id: nextId,
       type,
       content: "",
-      alignment: CustomPrintAlignment.Center,
-      styles: type === CustomPrintContentType.Text ? ["Bold"] : undefined,
+      alignment: Alignment.Center,
+      style: type === ContentType.Text ? ["Bold"] : undefined,
     };
 
     // Set type-specific defaults
-    if (type === CustomPrintContentType.QRCode) {
+    if (type === ContentType.QRCode) {
       newBlock.qrCodeOptions = {
         model: QRCodeModel.Model2,
         size: QRCodeSize.Normal,
         correctionLevel: QRCodeCorrectionLevel.Percent7,
       };
-    } else if (type === CustomPrintContentType.Barcode) {
-      newBlock.barcodeType = BarcodeType.CODE128;
+    } else if (type === ContentType.Barcode) {
       newBlock.barcodeOptions = {
         type: BarcodeType.CODE128,
         heightInDots: 100,
         width: BarWidth.Default,
         labelPosition: BarLabelPosition.Below,
       };
-    } else if (type === CustomPrintContentType.LineFeed) {
+    } else if (type === ContentType.LineFeed) {
       newBlock.lines = 1;
-    } else if (type === CustomPrintContentType.Separator) {
-      newBlock.content = "=";
-      newBlock.length = 32;
+    } else if (type === ContentType.Separator) {
+      newBlock.separatorChar = "=";
+      newBlock.separatorLength = DEFAULT_LINE_WIDTH;
     }
 
     setBlocks([...blocks, newBlock]);
@@ -164,7 +149,7 @@ export default function Builder() {
     });
   };
 
-  const handleImageChange = (blockId: number, file: File | undefined) => {
+  const handleImageChange = async (blockId: number, file: File | undefined) => {
     if (file) {
       const validation = validateImage(file);
       if (!validation.isValid) {
@@ -172,16 +157,12 @@ export default function Builder() {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = (reader.result as string).split(',')[1]; // Remove data:image/...;base64, prefix
-        updateBlock(blockId, {
-          imageFile: file,
-          imagePreview: URL.createObjectURL(file),
-          base64Image: base64,
-        });
-      };
-      reader.readAsDataURL(file);
+      const base64 = await fileToBase64(file);
+      updateBlock(blockId, {
+        imageFile: file,
+        imagePreview: URL.createObjectURL(file),
+        content: base64,
+      });
     }
   };
 
@@ -211,27 +192,45 @@ export default function Builder() {
     setBlocks(newBlocks);
   };
 
+  const moveBlockToTop = (id: number) => {
+    const index = blocks.findIndex((b) => b.id === id);
+    if (index <= 0) return;
+    const newBlocks = [...blocks];
+    const [block] = newBlocks.splice(index, 1);
+    newBlocks.unshift(block);
+    setBlocks(newBlocks);
+  };
+
+  const moveBlockToBottom = (id: number) => {
+    const index = blocks.findIndex((b) => b.id === id);
+    if (index === -1 || index === blocks.length - 1) return;
+    const newBlocks = [...blocks];
+    const [block] = newBlocks.splice(index, 1);
+    newBlocks.push(block);
+    setBlocks(newBlocks);
+  };
+
   const validateBlocks = (): boolean => {
     const errors: Record<number, string> = {};
 
     blocks.forEach(block => {
-      if (block.type === CustomPrintContentType.Text) {
+      if (block.type === ContentType.Text) {
         const validation = validateRequired(block.content || '', 'Text content');
         if (!validation.isValid) errors[block.id] = validation.error!;
       }
-      else if (block.type === CustomPrintContentType.Barcode) {
-        const validation = validateBarcode(block.content || '', block.barcodeType || BarcodeType.CODE128);
+      else if (block.type === ContentType.Barcode) {
+        const validation = validateBarcode(block.content || '', block.barcodeOptions?.type || BarcodeType.CODE128);
         if (!validation.isValid) errors[block.id] = validation.error!;
       }
-      else if (block.type === CustomPrintContentType.QRCode) {
+      else if (block.type === ContentType.QRCode) {
         const validation = validateQRCode(block.content || '');
         if (!validation.isValid) errors[block.id] = validation.error!;
       }
-      else if (block.type === CustomPrintContentType.Image && !block.base64Image) {
+      else if (block.type === ContentType.Image && !block.content) {
         errors[block.id] = '[ERROR] Please select an image';
       }
-      else if (block.type === CustomPrintContentType.Separator) {
-        const validation = validateSeparator(block.content || '=', block.length || 32);
+      else if (block.type === ContentType.Separator) {
+        const validation = validateSeparator(block.separatorChar || '=', block.separatorLength || DEFAULT_LINE_WIDTH);
         if (!validation.isValid) errors[block.id] = validation.error!;
       }
     });
@@ -258,16 +257,15 @@ export default function Builder() {
     setStatus('printing');
 
     try {
-      const request: CustomPrintRequest = {
-        content: blocks.map(({ id, imageFile, imagePreview, ...block }) => block),
-        source: "Template Builder",
+      const content = blocks.map(({ id, imageFile, imagePreview, barcodeType, ...block }) => block);
+
+      await printerApi.printCustom({
+        content,
         options: {
           autoCut: true,
           feedLinesAfterPrint: 3,
         },
-      };
-
-      await printerApi.printCustom(request);
+      });
       setSuccess("[OK] Print job sent successfully!");
       setStatus('success');
     } catch (err) {
@@ -280,12 +278,13 @@ export default function Builder() {
     }
   };
 
-  const handleLoadTemplate = (template: CustomPrintRequest) => {
+  const handleLoadTemplate = (template: PrintRequest) => {
+    if (!template.content) return;
     // Convert template content to blocks with metadata
     const loadedBlocks: BlockWithMetadata[] = template.content.map((block, index) => ({
       ...block,
       id: nextId + index,
-      imagePreview: block.base64Image ? `data:image/png;base64,${block.base64Image}` : undefined,
+      imagePreview: block.content && block.type === ContentType.Image ? `data:image/png;base64,${block.content}` : undefined,
     }));
 
     setBlocks(loadedBlocks);
@@ -293,7 +292,7 @@ export default function Builder() {
     setValidationErrors({});
   };
 
-  const getCurrentTemplate = (): CustomPrintRequest => {
+  const getCurrentTemplate = (): PrintRequest => {
     return {
       content: blocks.map(({ id, imageFile, imagePreview, ...block }) => block),
       source: "Template Builder",
@@ -322,8 +321,8 @@ export default function Builder() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid lg:grid-cols-5 gap-6">
+        <div className="lg:col-span-3 space-y-6">
           {/* Add Block Buttons */}
           <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.05s' }}>
             <CardHeader>
@@ -338,7 +337,7 @@ export default function Builder() {
             <CardContent>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.Text)}
+                  onClick={() => addBlock(ContentType.Text)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -347,7 +346,7 @@ export default function Builder() {
                   Text
                 </Button>
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.Image)}
+                  onClick={() => addBlock(ContentType.Image)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -356,7 +355,7 @@ export default function Builder() {
                   Image
                 </Button>
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.Barcode)}
+                  onClick={() => addBlock(ContentType.Barcode)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -365,7 +364,7 @@ export default function Builder() {
                   Barcode
                 </Button>
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.QRCode)}
+                  onClick={() => addBlock(ContentType.QRCode)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -374,7 +373,7 @@ export default function Builder() {
                   QR Code
                 </Button>
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.LineFeed)}
+                  onClick={() => addBlock(ContentType.LineFeed)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -383,7 +382,7 @@ export default function Builder() {
                   Line Feed
                 </Button>
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.Separator)}
+                  onClick={() => addBlock(ContentType.Separator)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -392,7 +391,7 @@ export default function Builder() {
                   Separator
                 </Button>
                 <Button
-                  onClick={() => addBlock(CustomPrintContentType.Cut)}
+                  onClick={() => addBlock(ContentType.Cut)}
                   variant="outline"
                   size="sm"
                   className="font-mono"
@@ -442,6 +441,15 @@ export default function Builder() {
                           <Copy className="h-4 w-4" />
                         </Button>
                         <Button
+                          onClick={() => moveBlockToTop(block.id)}
+                          disabled={index === 0}
+                          variant="outline"
+                          size="sm"
+                          title="Move to top"
+                        >
+                          <ChevronsUp className="h-4 w-4" />
+                        </Button>
+                        <Button
                           onClick={() => moveBlock(block.id, "up")}
                           disabled={index === 0}
                           variant="outline"
@@ -458,6 +466,15 @@ export default function Builder() {
                           title="Move down"
                         >
                           <ChevronDown className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          onClick={() => moveBlockToBottom(block.id)}
+                          disabled={index === blocks.length - 1}
+                          variant="outline"
+                          size="sm"
+                          title="Move to bottom"
+                        >
+                          <ChevronsDown className="h-4 w-4" />
                         </Button>
                         <Button
                           onClick={() => removeBlock(block.id)}
@@ -482,10 +499,27 @@ export default function Builder() {
                     )}
 
                     {/* TEXT BLOCK */}
-                    {block.type === CustomPrintContentType.Text && (
+                    {block.type === ContentType.Text && (
                       <>
                         <div className="space-y-2">
-                          <Label className="font-mono text-sm">Content</Label>
+                          <div className="flex items-center justify-between">
+                            <Label className="font-mono text-sm">Content</Label>
+                            {(() => {
+                              const styles = block.style || [];
+                              const charsPerLine = getMaxChars(styles);
+                              const length = (block.content || "").length;
+                              const lines = length > 0 ? Math.ceil(length / charsPerLine) : 0;
+                              const hasFontB = styles.includes('FontB');
+                              const hasDoubleWidth = styles.includes('DoubleWidth');
+                              const fontLabel = hasFontB ? 'Compact' : 'Standard';
+                              const widthLabel = hasDoubleWidth ? ' 2x' : '';
+                              return (
+                                <span className="font-mono text-xs text-muted-foreground">
+                                  {length} chars · {lines} {lines === 1 ? 'line' : 'lines'} ({fontLabel}{widthLabel} = {charsPerLine}/line)
+                                </span>
+                              );
+                            })()}
+                          </div>
                           <Input
                             type="text"
                             value={block.content || ""}
@@ -497,20 +531,29 @@ export default function Builder() {
                         <div className="space-y-2">
                           <Label className="font-mono text-sm">Text Styles</Label>
                           <CheckboxGroup
-                            options={["Bold", "Italic", "Underline", "DoubleHeight", "DoubleWidth", "FontB"]}
-                            selected={block.styles || []}
-                            onChange={(styles) => updateBlock(block.id, { styles: styles.length > 0 ? styles : undefined })}
+                            options={[
+                              "Bold",
+                              "Italic",
+                              "Underline",
+                              "DoubleHeight",
+                              "DoubleWidth",
+                              { value: "FontB", label: "Compact" },
+                              "ReverseMode",
+                              "UpsideDownMode"
+                            ]}
+                            selected={block.style || []}
+                            onChange={(styles) => updateBlock(block.id, { style: styles.length > 0 ? styles as PrintStyle[] : undefined })}
                           />
                         </div>
                         <div className="space-y-2">
                           <Label className="font-mono text-sm">Alignment</Label>
                           <InlineSelect
-                            value={block.alignment ?? CustomPrintAlignment.Center}
-                            onChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
+                            value={block.alignment ?? Alignment.Center}
+                            onChange={(value) => updateBlock(block.id, { alignment: value as Alignment })}
                             options={[
-                              { value: CustomPrintAlignment.Left, label: "Left" },
-                              { value: CustomPrintAlignment.Center, label: "Center" },
-                              { value: CustomPrintAlignment.Right, label: "Right" },
+                              { value: Alignment.Left, label: "Left" },
+                              { value: Alignment.Center, label: "Center" },
+                              { value: Alignment.Right, label: "Right" },
                             ]}
                           />
                         </div>
@@ -518,7 +561,7 @@ export default function Builder() {
                     )}
 
                     {/* IMAGE BLOCK */}
-                    {block.type === CustomPrintContentType.Image && (
+                    {block.type === ContentType.Image && (
                       <>
                         <div className="space-y-2">
                           <Label htmlFor={`image-${block.id}`} className="font-mono text-sm">Image</Label>
@@ -571,12 +614,12 @@ export default function Builder() {
                         <div className="space-y-2">
                           <Label className="font-mono text-sm">Alignment</Label>
                           <InlineSelect
-                            value={block.alignment ?? CustomPrintAlignment.Center}
-                            onChange={(value) => updateBlock(block.id, { alignment: value as CustomPrintAlignment })}
+                            value={block.alignment ?? Alignment.Center}
+                            onChange={(value) => updateBlock(block.id, { alignment: value as Alignment })}
                             options={[
-                              { value: CustomPrintAlignment.Left, label: "Left" },
-                              { value: CustomPrintAlignment.Center, label: "Center" },
-                              { value: CustomPrintAlignment.Right, label: "Right" },
+                              { value: Alignment.Left, label: "Left" },
+                              { value: Alignment.Center, label: "Center" },
+                              { value: Alignment.Right, label: "Right" },
                             ]}
                           />
                         </div>
@@ -584,7 +627,7 @@ export default function Builder() {
                     )}
 
                     {/* BARCODE BLOCK */}
-                    {block.type === CustomPrintContentType.Barcode && (
+                    {block.type === ContentType.Barcode && (
                       <>
                         <div className="space-y-2">
                           <Label className="font-mono text-sm">Barcode Data</Label>
@@ -624,7 +667,7 @@ export default function Builder() {
                     )}
 
                     {/* QR CODE BLOCK */}
-                    {block.type === CustomPrintContentType.QRCode && (
+                    {block.type === ContentType.QRCode && (
                       <>
                         <div className="space-y-2">
                           <Label className="font-mono text-sm">QR Code Data</Label>
@@ -656,7 +699,7 @@ export default function Builder() {
                     )}
 
                     {/* LINE FEED BLOCK */}
-                    {block.type === CustomPrintContentType.LineFeed && (
+                    {block.type === ContentType.LineFeed && (
                       <div className="space-y-2">
                         <Label className="font-mono text-sm">Number of Lines</Label>
                         <Input
@@ -671,34 +714,80 @@ export default function Builder() {
                     )}
 
                     {/* SEPARATOR BLOCK */}
-                    {block.type === CustomPrintContentType.Separator && (
+                    {block.type === ContentType.Separator && (
                       <>
                         <div className="space-y-2">
                           <Label className="font-mono text-sm">Character</Label>
                           <Input
                             type="text"
-                            value={block.content || "="}
-                            onChange={(e) => updateBlock(block.id, { content: e.target.value[0] || "=" })}
+                            value={block.separatorChar || "="}
+                            onChange={(e) => updateBlock(block.id, { separatorChar: e.target.value[0] || "=" })}
                             maxLength={1}
                             className="font-mono"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label className="font-mono text-sm">Length</Label>
-                          <Input
-                            type="number"
-                            value={block.length || 32}
-                            onChange={(e) => updateBlock(block.id, { length: parseInt(e.target.value) })}
-                            min="1"
-                            max="48"
-                            className="font-mono"
+                          <Label className="font-mono text-sm">Styles</Label>
+                          <CheckboxGroup
+                            options={[
+                              "Bold",
+                              "DoubleHeight",
+                              "DoubleWidth",
+                              { value: "FontB", label: "Compact" },
+                              "ReverseMode",
+                            ]}
+                            selected={block.style || []}
+                            onChange={(styles) => {
+                              const fullLineForCurrentStyles = getMaxChars(block.style || []);
+                              const fullLineForNewStyles = getMaxChars(styles);
+                              const isFullLine = !block.separatorLength || block.separatorLength === fullLineForCurrentStyles;
+                              updateBlock(block.id, {
+                                style: styles.length > 0 ? styles as PrintStyle[] : undefined,
+                                ...(isFullLine && { separatorLength: fullLineForNewStyles })
+                              });
+                            }}
                           />
                         </div>
+                        {(() => {
+                          const fullLineLength = getMaxChars(block.style || []);
+                          const isFullLine = !block.separatorLength || block.separatorLength === fullLineLength;
+                          return (
+                            <div className="space-y-2">
+                              <Label className="font-mono text-sm">Length</Label>
+                              <div className="flex items-center gap-4">
+                                <InlineSelect
+                                  value={isFullLine ? "full" : "custom"}
+                                  onChange={(value) => {
+                                    if (value === "full") {
+                                      updateBlock(block.id, { separatorLength: fullLineLength });
+                                    } else {
+                                      updateBlock(block.id, { separatorLength: Math.floor(fullLineLength / 2) });
+                                    }
+                                  }}
+                                  options={[
+                                    { value: "full", label: `Full line (${fullLineLength})` },
+                                    { value: "custom", label: "Custom" },
+                                  ]}
+                                />
+                                {!isFullLine && (
+                                  <Input
+                                    type="number"
+                                    value={block.separatorLength}
+                                    onChange={(e) => updateBlock(block.id, { separatorLength: parseInt(e.target.value) || 1 })}
+                                    min="1"
+                                    max={fullLineLength}
+                                    className="font-mono w-24"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </>
                     )}
 
                     {/* CUT BLOCK - no options */}
-                    {block.type === CustomPrintContentType.Cut && (
+                    {block.type === ContentType.Cut && (
                       <p className="text-sm text-muted-foreground font-mono">
                         This block will cut the paper at this position.
                       </p>
@@ -792,7 +881,7 @@ export default function Builder() {
         </div>
 
         {/* Right Sidebar */}
-        <div className="lg:col-span-1 space-y-6">
+        <div className="lg:col-span-2 space-y-6">
           {/* Template Manager */}
           <div className="matrix-cascade" style={{ animationDelay: '0.15s' }}>
             <TemplateManager
@@ -808,18 +897,6 @@ export default function Builder() {
             </div>
           )}
 
-          {/* Keyboard Shortcuts Help */}
-          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.25s' }}>
-            <CardHeader>
-              <CardTitle className="text-sm font-mono">Keyboard Shortcuts</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-xs font-mono">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Save Template</span>
-                <kbd className="px-2 py-1 bg-muted rounded border">Ctrl+S</kbd>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>
