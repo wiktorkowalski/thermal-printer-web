@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
 import Home from "./pages/Home";
 import Builder from "./pages/Builder";
+import Receipts from "./pages/Receipts";
 import "./index.css";
 import { Button } from "@/components/ui/button";
 import { Printer } from "lucide-react";
@@ -39,6 +40,13 @@ function Navigation() {
             >
               <Link to="/builder">Template Builder</Link>
             </Button>
+            <Button
+              asChild
+              variant={location.pathname === "/receipts" ? "default" : "ghost"}
+              className="font-mono"
+            >
+              <Link to="/receipts">Receipts</Link>
+            </Button>
             <ThemeToggle />
           </div>
         </div>
@@ -60,6 +68,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/builder" element={<Builder />} />
+              <Route path="/receipts" element={<Receipts />} />
             </Routes>
           </main>
 

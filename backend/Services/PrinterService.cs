@@ -1,3 +1,4 @@
+using System.Text;
 using ESCPOS_NET;
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
@@ -15,6 +16,12 @@ public class PrinterService : IPrinterService
 {
     private readonly ILogger<PrinterService> _logger;
     private const string PrinterAddress = "192.168.123.100:9100";
+
+    static PrinterService()
+    {
+        // Register code page encoding provider for Windows-1250, CP852, etc.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
 
     public PrinterService(ILogger<PrinterService> logger)
     {
@@ -35,11 +42,16 @@ public class PrinterService : IPrinterService
             var byteContent = new List<byte[]>();
             var hasCutContent = false;
 
+            // Determine text encoding based on code page
+            Encoding textEncoding = Encoding.UTF8; // default
             if (options?.CodePage != null)
             {
                 var codePage = MapCodePage(options.CodePage);
                 if (codePage.HasValue)
+                {
                     byteContent.Add(e.CodePage(codePage.Value));
+                    textEncoding = GetEncodingForCodePage(options.CodePage);
+                }
             }
 
             if (options?.DefaultLineSpacing != null)
@@ -57,7 +69,7 @@ public class PrinterService : IPrinterService
                 switch (item.Type)
                 {
                     case ContentType.Text:
-                        byteContent.AddRange(BuildTextBytes(e, item));
+                        byteContent.AddRange(BuildTextBytes(e, item, textEncoding));
                         break;
 
                     case ContentType.Image:
@@ -97,7 +109,7 @@ public class PrinterService : IPrinterService
 
                     case ContentType.Separator:
                         var sep = new string((item.SeparatorChar ?? "=")[0], item.SeparatorLength ?? 32);
-                        byteContent.AddRange(BuildStyledTextBytes(e, sep, item.Style));
+                        byteContent.AddRange(BuildStyledTextBytes(e, sep, item.Style, textEncoding));
                         break;
 
                     case ContentType.CodePage:
@@ -132,10 +144,10 @@ public class PrinterService : IPrinterService
         }
     }
 
-    private List<byte[]> BuildTextBytes(EPSON e, PrintContent item)
-        => BuildStyledTextBytes(e, item.Content ?? string.Empty, item.Style);
+    private List<byte[]> BuildTextBytes(EPSON e, PrintContent item, Encoding encoding)
+        => BuildStyledTextBytes(e, item.Content ?? string.Empty, item.Style, encoding);
 
-    private List<byte[]> BuildStyledTextBytes(EPSON e, string text, List<Models.PrintStyle>? styles)
+    private List<byte[]> BuildStyledTextBytes(EPSON e, string text, List<Models.PrintStyle>? styles, Encoding encoding)
     {
         var bytes = new List<byte[]>();
         var hasReverse = styles?.Contains(Models.PrintStyle.ReverseMode) == true;
@@ -147,7 +159,12 @@ public class PrinterService : IPrinterService
             bytes.Add(e.UpsideDownMode(true));
 
         bytes.Add(e.SetStyles(MapPrintStyles(styles)));
-        bytes.Add(e.PrintLine(text));
+
+        // Encode text using the specified code page encoding
+        var textBytes = encoding.GetBytes(text);
+        var newLine = new byte[] { 0x0A }; // LF
+        bytes.Add([.. textBytes, .. newLine]);
+
         bytes.Add(e.SetStyles(EscPrintStyle.None));
 
         if (hasUpsideDown)
@@ -316,13 +333,29 @@ public class PrinterService : IPrinterService
         _ => CorrectionLevel2DCode.PERCENT_7
     };
 
-    private CodePage? MapCodePage(string name) => name.ToUpper() switch
+    private static CodePage? MapCodePage(string name) => name.ToUpper() switch
     {
         "PC437" or "PC437_USA" => CodePage.PC437_USA_STANDARD_EUROPE_DEFAULT,
         "PC858" or "PC858_EURO" => CodePage.PC858_EURO,
         "KATAKANA" => CodePage.KATAKANA,
         "PC850" => CodePage.PC850_MULTILINGUAL,
         "WPC1252" => CodePage.WPC1252,
+        // Polish / Central European
+        "PC852" or "LATIN2" => CodePage.PC852_LATIN2,
+        "WPC1250" => CodePage.WPC1250_LATIN2,
+        "ISO8859_2" or "ISO88592" => CodePage.ISO8859_2_LATIN2,
         _ => null
+    };
+
+    private static Encoding GetEncodingForCodePage(string name) => name.ToUpper() switch
+    {
+        "PC852" or "LATIN2" => Encoding.GetEncoding(852),
+        "WPC1250" => Encoding.GetEncoding(1250),
+        "ISO8859_2" or "ISO88592" => Encoding.GetEncoding(28592), // ISO-8859-2
+        "WPC1252" => Encoding.GetEncoding(1252),
+        "PC850" => Encoding.GetEncoding(850),
+        "PC858" or "PC858_EURO" => Encoding.GetEncoding(858),
+        "PC437" or "PC437_USA" => Encoding.GetEncoding(437),
+        _ => Encoding.UTF8
     };
 }
