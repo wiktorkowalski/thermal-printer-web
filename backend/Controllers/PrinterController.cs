@@ -9,6 +9,9 @@ namespace ThermalPrinterWeb.Controllers;
 public class PrinterController(ILogger<PrinterController> logger, IPrinterService printerService) : ControllerBase
 {
     [HttpPost]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Print([FromBody] PrintRequest request)
     {
         logger.LogInformation("Received print request");
