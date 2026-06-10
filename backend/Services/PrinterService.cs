@@ -17,6 +17,10 @@ public class PrinterService : IPrinterService
     private readonly ILogger<PrinterService> _logger;
     private const string PrinterAddress = "192.168.123.100:9100";
 
+    // The printer renders single-byte code pages only; raw UTF-8 prints as garbage
+    // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
+    private const string DefaultCodePage = "PC852";
+
     static PrinterService()
     {
         // Register code page encoding provider for Windows-1250, CP852, etc.
@@ -43,15 +47,18 @@ public class PrinterService : IPrinterService
             var hasCutContent = false;
 
             // Determine text encoding based on code page
-            Encoding textEncoding = Encoding.UTF8; // default
-            if (options?.CodePage != null)
+            var codePageName = options?.CodePage ?? DefaultCodePage;
+            var textEncoding = Encoding.UTF8;
+            var codePage = MapCodePage(codePageName);
+            if (codePage.HasValue)
             {
-                var codePage = MapCodePage(options.CodePage);
-                if (codePage.HasValue)
-                {
-                    byteContent.Add(e.CodePage(codePage.Value));
-                    textEncoding = GetEncodingForCodePage(options.CodePage);
-                }
+                byteContent.Add(e.CodePage(codePage.Value));
+                textEncoding = GetEncodingForCodePage(codePageName);
+                _logger.LogDebug("Using code page {CodePage}", codePageName);
+            }
+            else
+            {
+                _logger.LogWarning("Unknown code page {CodePage}, printing raw UTF-8 bytes", codePageName);
             }
 
             if (options?.DefaultLineSpacing != null)
@@ -117,7 +124,14 @@ public class PrinterService : IPrinterService
                         {
                             var cp = MapCodePage(item.Content);
                             if (cp.HasValue)
+                            {
                                 byteContent.Add(e.CodePage(cp.Value));
+                                textEncoding = GetEncodingForCodePage(item.Content);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Unknown code page {CodePage} in content, keeping current encoding", item.Content);
+                            }
                         }
                         break;
 
@@ -333,29 +347,42 @@ public class PrinterService : IPrinterService
         _ => CorrectionLevel2DCode.PERCENT_7
     };
 
-    private static CodePage? MapCodePage(string name) => name.ToUpper() switch
-    {
-        "PC437" or "PC437_USA" => CodePage.PC437_USA_STANDARD_EUROPE_DEFAULT,
-        "PC858" or "PC858_EURO" => CodePage.PC858_EURO,
-        "KATAKANA" => CodePage.KATAKANA,
-        "PC850" => CodePage.PC850_MULTILINGUAL,
-        "WPC1252" => CodePage.WPC1252,
-        // Polish / Central European
-        "PC852" or "LATIN2" => CodePage.PC852_LATIN2,
-        "WPC1250" => CodePage.WPC1250_LATIN2,
-        "ISO8859_2" or "ISO88592" => CodePage.ISO8859_2_LATIN2,
-        _ => null
-    };
+    // Single source for both the ESC/POS code page command and the .NET encoding
+    // used to produce text bytes — the two must always stay in sync or output
+    // degrades to mojibake. DotNetCodePage null means no matching .NET encoding
+    // exists (text bytes fall back to UTF-8).
+    private static readonly Dictionary<string, (CodePage PrinterCodePage, int? DotNetCodePage)> CodePageMap =
+        new Dictionary<string, (CodePage PrinterCodePage, int? DotNetCodePage)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PC437"] = (CodePage.PC437_USA_STANDARD_EUROPE_DEFAULT, 437),
+            ["PC437_USA"] = (CodePage.PC437_USA_STANDARD_EUROPE_DEFAULT, 437),
+            ["CP437"] = (CodePage.PC437_USA_STANDARD_EUROPE_DEFAULT, 437),
+            ["KATAKANA"] = (CodePage.KATAKANA, null),
+            ["PC850"] = (CodePage.PC850_MULTILINGUAL, 850),
+            ["CP850"] = (CodePage.PC850_MULTILINGUAL, 850),
+            ["PC858"] = (CodePage.PC858_EURO, 858),
+            ["PC858_EURO"] = (CodePage.PC858_EURO, 858),
+            ["CP858"] = (CodePage.PC858_EURO, 858),
+            ["WPC1252"] = (CodePage.WPC1252, 1252),
+            ["CP1252"] = (CodePage.WPC1252, 1252),
+            ["WINDOWS-1252"] = (CodePage.WPC1252, 1252),
+            // Polish / Central European
+            ["PC852"] = (CodePage.PC852_LATIN2, 852),
+            ["LATIN2"] = (CodePage.PC852_LATIN2, 852),
+            ["CP852"] = (CodePage.PC852_LATIN2, 852),
+            ["WPC1250"] = (CodePage.WPC1250_LATIN2, 1250),
+            ["CP1250"] = (CodePage.WPC1250_LATIN2, 1250),
+            ["WINDOWS-1250"] = (CodePage.WPC1250_LATIN2, 1250),
+            ["ISO8859_2"] = (CodePage.ISO8859_2_LATIN2, 28592),
+            ["ISO88592"] = (CodePage.ISO8859_2_LATIN2, 28592),
+            ["ISO-8859-2"] = (CodePage.ISO8859_2_LATIN2, 28592),
+        };
 
-    private static Encoding GetEncodingForCodePage(string name) => name.ToUpper() switch
-    {
-        "PC852" or "LATIN2" => Encoding.GetEncoding(852),
-        "WPC1250" => Encoding.GetEncoding(1250),
-        "ISO8859_2" or "ISO88592" => Encoding.GetEncoding(28592), // ISO-8859-2
-        "WPC1252" => Encoding.GetEncoding(1252),
-        "PC850" => Encoding.GetEncoding(850),
-        "PC858" or "PC858_EURO" => Encoding.GetEncoding(858),
-        "PC437" or "PC437_USA" => Encoding.GetEncoding(437),
-        _ => Encoding.UTF8
-    };
+    private static CodePage? MapCodePage(string name)
+        => CodePageMap.TryGetValue(name, out var entry) ? entry.PrinterCodePage : null;
+
+    private static Encoding GetEncodingForCodePage(string name)
+        => CodePageMap.TryGetValue(name, out var entry) && entry.DotNetCodePage.HasValue
+            ? Encoding.GetEncoding(entry.DotNetCodePage.Value)
+            : Encoding.UTF8;
 }
