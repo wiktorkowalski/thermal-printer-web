@@ -6,8 +6,6 @@ namespace ThermalPrinterWeb.Services.Printing;
 // render identically.
 internal static class SimpleNote
 {
-    private const int SimpleImageMaxSize = 500;
-
     public static List<PrintContent> Build(string name, string message, string? imageBase64 = null)
     {
         List<PrintContent> content =
@@ -35,8 +33,7 @@ internal static class SimpleNote
             content.Add(new PrintContent
             {
                 Type = ContentType.Image,
-                Content = imageBase64,
-                ImageOptions = new ImageOptions { MaxWidth = SimpleImageMaxSize, MaxHeight = SimpleImageMaxSize }
+                Content = imageBase64
             });
             content.Add(new() { Type = ContentType.Separator });
         }
