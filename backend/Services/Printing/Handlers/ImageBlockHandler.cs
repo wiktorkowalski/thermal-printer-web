@@ -6,8 +6,9 @@ namespace ThermalPrinterWeb.Services.Printing.Handlers;
 
 internal sealed class ImageBlockHandler(ILogger<ImageBlockHandler> logger) : IBlockHandler
 {
-    private const int DefaultMaxWidth = 500;
-    private const int DefaultMaxHeight = 500;
+    // 576 = full V330M print-head width (80mm head).
+    private const int DefaultMaxWidth = 576;
+    private const int DefaultMaxHeight = 576;
 
     public ContentType Type => ContentType.Image;
 
@@ -20,7 +21,8 @@ internal sealed class ImageBlockHandler(ILogger<ImageBlockHandler> logger) : IBl
         if (imageBytes != null)
         {
             var legacy = item.ImageOptions?.UseLegacyMode ?? true;
-            ctx.Add(ctx.Emitter.PrintImage(imageBytes, true, isLegacy: legacy));
+            var highDensity = item.ImageOptions?.HighDensity ?? true;
+            ctx.Add(ctx.Emitter.PrintImage(imageBytes, highDensity, isLegacy: legacy));
         }
     }
 
