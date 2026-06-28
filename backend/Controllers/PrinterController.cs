@@ -39,6 +39,18 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
         return Ok(new PrintResponse(true));
     }
 
+    [HttpGet("status")]
+    [ProducesResponseType(typeof(PrinterStatus), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrinterStatus), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetStatus()
+    {
+        var status = await printerService.GetStatusAsync();
+        logger.LogInformation(
+            "Printer status requested: ready={Ready} ({Reason})",
+            status.Ready, status.NotReadyReason ?? "ok");
+        return status.Reachable ? Ok(status) : StatusCode(503, status);
+    }
+
     private static List<PrintContent> BuildSimpleContent(string name, string message, string? imageBase64)
     {
         var content = new List<PrintContent>

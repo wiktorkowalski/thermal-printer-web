@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Text;
 using ESCPOS_NET;
 using ESCPOS_NET.Emitters;
@@ -16,6 +17,9 @@ public class PrinterService : IPrinterService
 {
     private readonly ILogger<PrinterService> _logger;
     private const string PrinterAddress = "192.168.123.100:9100";
+    private const int DefaultPrinterPort = 9100;
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan StatusReadTimeout = TimeSpan.FromSeconds(2);
 
     // The printer renders single-byte code pages only; raw UTF-8 prints as garbage
     // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
@@ -36,6 +40,17 @@ public class PrinterService : IPrinterService
     {
         try
         {
+            // Fire-and-forget writes buffer even when the printer can't print (cover open,
+            // paper out), so a job would falsely report success. Refuse instead of lying.
+            var status = await GetStatusAsync();
+            if (!status.Ready)
+            {
+                _logger.LogWarning(
+                    "Refusing print: printer not ready ({Reason}); status={Raw}",
+                    status.NotReadyReason, status.Raw);
+                return new PrintResult(false, $"Printer not ready: {status.NotReadyReason}");
+            }
+
             _logger.LogInformation("Connecting to printer at {Address}", PrinterAddress);
             var printer = new ImmediateNetworkPrinter(new ImmediateNetworkPrinterSettings
             {
@@ -156,6 +171,81 @@ public class PrinterService : IPrinterService
             _logger.LogError(ex, "Print failed");
             return new PrintResult(false, ex.Message);
         }
+    }
+
+    public async Task<PrinterStatus> GetStatusAsync()
+    {
+        var (host, port) = ParseAddress(PrinterAddress);
+        try
+        {
+            using var client = new TcpClient();
+            using var connectCts = new CancellationTokenSource(ConnectTimeout);
+            await client.ConnectAsync(host, port, connectCts.Token);
+            using var stream = client.GetStream();
+
+            // ESC/POS real-time status (DLE EOT n) — each query returns one byte.
+            var online = true;
+            var coverOpen = false;
+            var paperOut = false;
+            var paperLow = false;
+            var raw = new StringBuilder();
+
+            var printerStatus = await QueryStatusByteAsync(stream, [0x10, 0x04, 0x01]);
+            if (printerStatus.HasValue)
+            {
+                online = (printerStatus.Value & 0x08) == 0; // bit 3 set => offline
+                raw.Append($"n1={printerStatus.Value:x2} ");
+            }
+
+            var offlineStatus = await QueryStatusByteAsync(stream, [0x10, 0x04, 0x02]);
+            if (offlineStatus.HasValue)
+            {
+                coverOpen = (offlineStatus.Value & 0x04) != 0; // bit 2 set => cover open
+                raw.Append($"n2={offlineStatus.Value:x2} ");
+            }
+
+            var paperStatus = await QueryStatusByteAsync(stream, [0x10, 0x04, 0x04]);
+            if (paperStatus.HasValue)
+            {
+                paperOut = (paperStatus.Value & 0x60) == 0x60; // bits 5,6 set => paper end
+                paperLow = (paperStatus.Value & 0x0C) == 0x0C; // bits 2,3 set => paper near-end
+                raw.Append($"n4={paperStatus.Value:x2}");
+            }
+
+            var status = new PrinterStatus(true, online, coverOpen, paperOut, paperLow, raw.ToString().Trim());
+            _logger.LogDebug("Printer status: {Status}", status);
+            return status;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read printer status from {Address}", PrinterAddress);
+            return new PrinterStatus(false, false, false, false, false, ex.Message);
+        }
+    }
+
+    // Sends one real-time status query and reads its single-byte reply, or null on timeout.
+    private static async Task<byte?> QueryStatusByteAsync(NetworkStream stream, byte[] query)
+    {
+        await stream.WriteAsync(query);
+        using var cts = new CancellationTokenSource(StatusReadTimeout);
+        var buffer = new byte[1];
+        try
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, 1), cts.Token);
+            return read == 1 ? buffer[0] : null;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private static (string Host, int Port) ParseAddress(string address)
+    {
+        var parts = address.Split(':');
+        return parts.Length > 1 && int.TryParse(parts[1], out var port)
+            ? (parts[0], port)
+            : (parts[0], DefaultPrinterPort);
     }
 
     private List<byte[]> BuildTextBytes(EPSON e, PrintContent item, Encoding encoding)
