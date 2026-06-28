@@ -20,6 +20,10 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
     private const string DefaultCodePage = "PC852";
 
+    // ESC B n t (1B 42): buzzer - n beeps each of length t. Both clamp to 1..9.
+    private const int BuzzerMin = 1;
+    private const int BuzzerMax = 9;
+
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
         try
@@ -152,6 +156,29 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             logger.LogWarning(ex, "Failed to read printer status from {Address}", PrinterAddress);
             return new PrinterStatus(false, false, false, false, false, ex.Message);
+        }
+    }
+
+    public async Task<bool> BeepAsync(int count, int duration)
+    {
+        var n = Math.Clamp(count, BuzzerMin, BuzzerMax);
+        var t = Math.Clamp(duration, BuzzerMin, BuzzerMax);
+        var (host, port) = ParseAddress(PrinterAddress);
+        try
+        {
+            using var client = new TcpClient();
+            using var connectCts = new CancellationTokenSource(ConnectTimeout);
+            await client.ConnectAsync(host, port, connectCts.Token);
+            using var stream = client.GetStream();
+            byte[] command = [0x1B, 0x42, (byte)n, (byte)t]; // ESC B n t
+            await stream.WriteAsync(command);
+            logger.LogInformation("Buzzer beeped {Count} time(s), duration {Duration}", n, t);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Buzzer beep failed ({Address})", PrinterAddress);
+            return false;
         }
     }
 
