@@ -51,4 +51,15 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
             status.Ready, status.NotReadyReason ?? "ok");
         return status.Reachable ? Ok(status) : StatusCode(503, status);
     }
+
+    [HttpPost("beep")]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Beep([FromQuery] int count = 1, [FromQuery] int duration = 1)
+    {
+        var ok = await printerService.BeepAsync(count, duration);
+        return ok
+            ? Ok(new PrintResponse(true))
+            : StatusCode(503, new PrintResponse(false, "Printer unreachable", "printer"));
+    }
 }

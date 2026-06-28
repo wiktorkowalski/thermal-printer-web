@@ -30,6 +30,17 @@ public static class PrinterTools
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 
+    [McpServerTool(Name = "beep")]
+    [Description("Sound the printer's buzzer without printing - an audible way to get Wiktor's attention. count = number of beeps (1-9), duration = length of each (1-9).")]
+    public static async Task<string> BeepAsync(
+        IPrinterService printer,
+        [Description("Number of beeps, 1-9.")] int count = 1,
+        [Description("Duration of each beep, 1-9.")] int duration = 1)
+    {
+        var ok = await printer.BeepAsync(count, duration);
+        return ok ? $"Beeped {count}x." : "Beep failed: printer unreachable.";
+    }
+
     [McpServerTool(Name = "print")]
     [Description("Print a custom document: an ordered list of content blocks (Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage). Use for full control over styling, barcodes, QR codes and images.")]
     public static async Task<string> PrintAsync(
