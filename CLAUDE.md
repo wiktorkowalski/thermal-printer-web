@@ -238,9 +238,9 @@ The `POST /api/printer` endpoint accepts print jobs in two modes:
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/docker-image-ci.yml`) builds and pushes Docker images to GitHub Container Registry on:
-- Push to master branch
-- Pull requests to master
+GitHub Actions workflow (`.github/workflows/docker-image-ci.yml`) calls the shared reusable workflow `wiktorkowalski/github-workflows/.github/workflows/dotnet-docker-deploy.yml@master`, which builds + pushes the Docker image to GitHub Container Registry, then deploys via `docker compose` on the self-hosted homelab runner. Triggers:
+- Push to master branch (build + push + deploy)
+- Pull requests to master (build only, no push/deploy)
 - Manual workflow dispatch
 
-Images are tagged with: `sha-<commit>`, branch name, and `latest`.
+Images are tagged with: `<commit>` (full SHA) and `latest`. Build cache uses GitHub Actions cache (`type=gha`). The homelab compose references `:latest`.
