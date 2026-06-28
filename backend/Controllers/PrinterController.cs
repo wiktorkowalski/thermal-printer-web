@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Controllers;
 
@@ -24,7 +25,7 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
         }
         else if (!string.IsNullOrEmpty(request.Name) && !string.IsNullOrEmpty(request.Message))
         {
-            content = BuildSimpleContent(request.Name, request.Message, request.ImageBase64);
+            content = SimpleNote.Build(request.Name, request.Message, request.ImageBase64);
         }
         else
         {
@@ -49,44 +50,5 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
             "Printer status requested: ready={Ready} ({Reason})",
             status.Ready, status.NotReadyReason ?? "ok");
         return status.Reachable ? Ok(status) : StatusCode(503, status);
-    }
-
-    private static List<PrintContent> BuildSimpleContent(string name, string message, string? imageBase64)
-    {
-        var content = new List<PrintContent>
-        {
-            new() { Type = ContentType.Separator, SeparatorChar = "=", SeparatorLength = 32 },
-            new()
-            {
-                Type = ContentType.Text,
-                Content = name,
-                Alignment = Alignment.Center,
-                Style = [PrintStyle.DoubleWidth, PrintStyle.DoubleHeight]
-            },
-            new() { Type = ContentType.Separator },
-            new()
-            {
-                Type = ContentType.Text,
-                Content = message,
-                Alignment = Alignment.Center
-            },
-            new() { Type = ContentType.Separator }
-        };
-
-        if (!string.IsNullOrEmpty(imageBase64))
-        {
-            content.Add(new PrintContent
-            {
-                Type = ContentType.Image,
-                Content = imageBase64,
-                ImageOptions = new ImageOptions { MaxWidth = 500, MaxHeight = 500 }
-            });
-            content.Add(new() { Type = ContentType.Separator });
-        }
-
-        content.Add(new() { Type = ContentType.LineFeed, Lines = 3 });
-        content.Add(new() { Type = ContentType.Cut });
-
-        return content;
     }
 }
