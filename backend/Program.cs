@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Printing;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +18,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
+builder.Services.AddPrinterBlockHandlers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
