@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="ESCPOS_NET" Version="3.0.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
     <PackageReference Include="SixLabors.ImageSharp" Version="2.1.10" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.4" />
   </ItemGroup>

@@ -19,6 +19,11 @@ builder.Services.AddControllers()
     });
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
+
+// MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
+builder.Services.AddMcpServer()
+    .WithHttpTransport(o => o.Stateless = true)
+    .WithToolsFromAssembly();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -57,6 +62,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapMcp("/mcp");
 
 // Serve React app SPA (from wwwroot)
 app.MapFallbackToFile("index.html");
