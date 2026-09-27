@@ -55,7 +55,7 @@ export function AlignmentControl({ value, onChange }: { value?: Alignment; onCha
   return (
     <Segmented
       label="Alignment"
-      value={value ?? Alignment.Left}
+      value={value ?? Alignment.Center}
       onChange={onChange}
       options={[
         { value: Alignment.Left, label: <AlignLeft className="mx-auto size-4" aria-label="Left" /> },
@@ -128,28 +128,34 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
     }
     case "Separator":
       body = (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Character" htmlFor={`${id}-char`}>
-            <input
-              id={`${id}-char`}
-              maxLength={1}
-              value={block.separatorChar ?? "-"}
-              onChange={(e) => onUpdate({ separatorChar: e.target.value.slice(-1) || "-" })}
-              className={cn(inputClass, "font-mono")}
-            />
-          </Field>
-          <Field label="Length" htmlFor={`${id}-len`}>
-            <input
-              id={`${id}-len`}
-              type="number"
-              min={1}
-              max={textMetrics(block.style).maxChars}
-              value={block.separatorLength ?? CHARS_PER_LINE.normal}
-              onChange={(e) => onUpdate({ separatorLength: Number(e.target.value) || 1 })}
-              className={cn(inputClass, "font-mono")}
-            />
-          </Field>
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Character" htmlFor={`${id}-char`}>
+              <input
+                id={`${id}-char`}
+                maxLength={1}
+                value={block.separatorChar ?? "-"}
+                onChange={(e) => onUpdate({ separatorChar: e.target.value.slice(-1) || "-" })}
+                className={cn(inputClass, "font-mono")}
+              />
+            </Field>
+            <Field label="Length" htmlFor={`${id}-len`}>
+              <input
+                id={`${id}-len`}
+                type="number"
+                min={1}
+                max={textMetrics(block.style).maxChars}
+                value={block.separatorLength ?? CHARS_PER_LINE.normal}
+                onChange={(e) => onUpdate({ separatorLength: Number(e.target.value) || 1 })}
+                className={cn(inputClass, "font-mono")}
+              />
+            </Field>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            <span className={fieldLabelClass}>Alignment</span>
+            <AlignmentControl value={block.alignment} onChange={(alignment) => onUpdate({ alignment })} />
+          </div>
+        </>
       );
       break;
     case "Image":

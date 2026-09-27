@@ -1,18 +1,19 @@
 import type { ReactNode } from "react";
 import type { PrintContent } from "@/types/printer";
 import { cn } from "@/lib/utils";
+import { DEFAULT_ALIGNMENT } from "@/lib/paper";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView } from "./graphic-views";
 import { CutRow, FeedSpace, PaperRow, TearEdge } from "./paper-strip";
 
 /** Static rendering of one print block, without editing affordances. */
 export function StaticBlock({ block }: { block: PrintContent }) {
-  const align = (block.alignment ?? "Left").toLowerCase() as "left" | "center" | "right";
+  const align = (block.alignment ?? DEFAULT_ALIGNMENT).toLowerCase() as "left" | "center" | "right";
   switch (block.type) {
     case "Text":
       return <PaperText text={block.content ?? ""} style={block.style} alignment={block.alignment} />;
     case "Separator":
-      return <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(block.separatorLength ?? 32)} style={block.style} />;
+      return <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(block.separatorLength ?? 32)} style={block.style} alignment={block.alignment} />;
     case "Image":
       return block.content ? (
         <div style={{ textAlign: align }}>

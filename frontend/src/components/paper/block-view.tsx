@@ -3,7 +3,7 @@ import { ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
 import { validateImage } from "@/lib/validation";
-import { HEAD_DOTS, countPrintedLines, longestLine, textMetrics } from "@/lib/paper";
+import { DEFAULT_ALIGNMENT, HEAD_DOTS, countPrintedLines, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView, type BarcodeRender } from "./graphic-views";
@@ -47,7 +47,7 @@ export function BlockView(props: BlockViewProps) {
   const onSize = useCallback((size: { height: number }) => onImageSize(size.height), [onImageSize]);
   const label = BLOCK_LABELS[block.type];
   const error = blockError(block);
-  const align = (block.alignment ?? "Left").toLowerCase() as "left" | "center" | "right";
+  const align = (block.alignment ?? DEFAULT_ALIGNMENT).toLowerCase() as "left" | "center" | "right";
 
   const handle = (
     <button
@@ -148,7 +148,7 @@ export function BlockView(props: BlockViewProps) {
     }
     case "Separator": {
       const length = block.separatorLength ?? 32;
-      content = <PaperText text={(block.separatorChar || "-").slice(0, 1).repeat(length)} style={block.style} />;
+      content = <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(length)} style={block.style} alignment={block.alignment} />;
       right = <span>{length}/{textMetrics(block.style).maxChars}</span>;
       break;
     }

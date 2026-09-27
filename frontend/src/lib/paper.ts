@@ -18,6 +18,9 @@ export const QR_MODULE_DOTS = { Normal: 4, Large: 5, ExtraLarge: 6 } as const;
 export const BAR_MODULE_DOTS = { Thin: 3, Default: 4, Thick: 5 } as const;
 export const DEFAULT_BARCODE_HEIGHT_DOTS = 162;
 
+// PrinterService sends ESC a 1 (center) for blocks without an alignment.
+export const DEFAULT_ALIGNMENT = "Center" as const;
+
 export function dotsToCh(dots: number): string {
   return `${dots / DOTS_PER_CH}ch`;
 }

@@ -51,9 +51,9 @@ export function FloatingToolbar({ block, onToggleStyle, onAlign }: FloatingToolb
           key={value}
           type="button"
           aria-label={name}
-          aria-pressed={(block.alignment ?? Alignment.Left) === value}
+          aria-pressed={(block.alignment ?? Alignment.Center) === value}
           onClick={() => onAlign(value)}
-          className={cn(button, (block.alignment ?? Alignment.Left) === value && "bg-on-ink/15")}
+          className={cn(button, (block.alignment ?? Alignment.Center) === value && "bg-on-ink/15")}
         >
           <Icon className="size-4" aria-hidden="true" />
         </button>
