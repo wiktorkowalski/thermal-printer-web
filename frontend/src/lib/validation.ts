@@ -55,10 +55,10 @@ export function validateBarcode(data: string, type: string): ValidationResult {
     'UPC_E': { pattern: /^\d{8}$/, message: 'UPC-E requires exactly 8 digits' },
     'EAN13': { pattern: /^\d{13}$/, message: 'EAN13 requires exactly 13 digits' },
     'EAN8': { pattern: /^\d{8}$/, message: 'EAN8 requires exactly 8 digits' },
-    'CODE39': { pattern: /^[A-Z0-9\-\.\ \$\/\+\%]+$/, message: 'CODE39 allows A-Z, 0-9, and special chars: -. $/+%' },
+    'CODE39': { pattern: /^[A-Z0-9\-. $/+%]+$/, message: 'CODE39 allows A-Z, 0-9, and special chars: -. $/+%' },
     'CODE128': { pattern: /.+/, message: 'CODE128 accepts any ASCII characters' },
     'ITF': { pattern: /^\d+$/, message: 'ITF requires numeric digits only' },
-    'CODABAR': { pattern: /^[A-D][0-9\-\$\:\/\.\+]+[A-D]$/, message: 'CODABAR must start/end with A-D' },
+    'CODABAR': { pattern: /^[A-D][0-9\-$:/.+]+[A-D]$/, message: 'CODABAR must start/end with A-D' },
     'GS1_128': { pattern: /^[\x20-\x7E]+$/, message: 'GS1-128 accepts printable ASCII only' },
     'GS1_DATABAR_OMNIDIRECTIONAL': { pattern: /^\d{13}$/, message: 'GS1 DataBar requires exactly 13 digits (GTIN without check digit)' },
   };
