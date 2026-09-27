@@ -139,7 +139,8 @@ export function QrView({ data, options }: { data: string; options?: QRCodeOption
 // Barcode: JsBarcode draws in dots (1 unit = 1 dot); CSS scales it to paper.
 
 const BARCODE_FORMAT: Record<string, { format: string; ean128?: boolean }> = {
-  CODE128: { format: "CODE128" },
+  // ESCPOS_NET sends CODE128 in code set B; auto mode would pack digits (set C) and draw it narrower.
+  CODE128: { format: "CODE128B" },
   CODE39: { format: "CODE39" },
   EAN13: { format: "EAN13" },
   EAN8: { format: "EAN8" },

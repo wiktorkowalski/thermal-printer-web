@@ -12,7 +12,7 @@ import {
 } from "@/types/printer";
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
-import { HEAD_DOTS, longestLine, textMetrics } from "@/lib/paper";
+import { HEAD_DOTS, LINE_DOTS, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { SectionLabel, Segmented, Switch, ToggleChip, fieldLabelClass, inputClass, quietButtonClass } from "./controls";
 
@@ -342,7 +342,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
     }
     case "LineFeed":
       body = (
-        <Field label="Lines" htmlFor={`${id}-lines`} hint={<span className="font-mono text-xs text-ink-2">≈ {((block.lines ?? 1) * 30) / 8} mm</span>}>
+        <Field label="Lines" htmlFor={`${id}-lines`} hint={<span className="font-mono text-xs text-ink-2">≈ {(((block.lines ?? 1) * LINE_DOTS) / 8).toFixed(1)} mm</span>}>
           <input
             id={`${id}-lines`}
             type="number"

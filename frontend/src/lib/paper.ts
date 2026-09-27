@@ -9,9 +9,10 @@ export const DOTS_PER_CH = 12;
 export const PAPER_WIDTH_CH = (CHARS_PER_LINE.normal * 80) / 72;
 export const MARGIN_CH = (PAPER_WIDTH_CH - CHARS_PER_LINE.normal) / 2;
 
-// Default ESC/POS line pitch; double height adds a second 24-dot cell.
-const LINE_DOTS = 30;
-const DOUBLE_HEIGHT_LINE_DOTS = 54;
+// Line pitch measured on paper (2026-09-27): 11 lines = 40 mm, so 29 dots.
+// Double height adds a second 24-dot cell.
+export const LINE_DOTS = 29;
+const DOUBLE_HEIGHT_LINE_DOTS = LINE_DOTS + 24;
 
 // ESCPOS_NET Size2DCode and BarWidth enum values = module width in dots.
 export const QR_MODULE_DOTS = { Normal: 4, Large: 5, ExtraLarge: 6 } as const;
