@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-ink/30" />
+      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/35" />
       <section
         role="dialog"
         aria-modal="true"

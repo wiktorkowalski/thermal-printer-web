@@ -58,7 +58,7 @@ export function TrayDrawer({ open, onClose, printer }: { open: boolean; onClose:
 
   return (
     <div className="fixed inset-0 z-50">
-      <button type="button" aria-label="Close tray" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-ink/25" />
+      <button type="button" aria-label="Close tray" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-black/30" />
       <section
         role="dialog"
         aria-modal="true"
