@@ -8,7 +8,7 @@ This is a thermal printer web application with two main components:
 - **Backend**: ASP.NET Core 10.0 Web API (C#) that interfaces with thermal printers via network connection
 - **Frontend**: React + TypeScript + Vite application with TailwindCSS
 
-The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale and edited in place. Note and Template modes share one block editor (text, images, barcodes, QR codes, separators, feeds, cuts); Receipt mode builds Polish fiscal receipts.
+The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale and edited in place. Note and Template modes share one block editor (text, images, barcodes, QR codes, separators, feeds, cuts); Receipt mode builds Polish fiscal receipts on the same paper. Every print lands in a browser-side tray for reprinting.
 
 ## Project Structure
 
@@ -36,7 +36,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── components/
 │   │   │   ├── paper/          # 1:1 paper strip, printer body, block renderers
 │   │   │   └── editor/         # Insert rail, inspector, toolbar, template panel
-│   │   ├── hooks/              # usePrinterStatus (polls /api/printer/status)
+│   │   ├── hooks/              # usePrinterStatus, usePrintJob, useTray, useIsDesktop
 │   │   ├── lib/                # API client, paper geometry, validation
 │   │   └── types/
 │   └── package.json
@@ -68,12 +68,14 @@ Located in `frontend/` directory.
 
 **Structure**:
 - `frontend/src/pages/Editor.tsx` - Paper-first block editor; `mode` is `note` or `template`
-- `frontend/src/pages/Receipts.tsx` - Receipt generator
+- `frontend/src/pages/Receipts.tsx` - Receipt on paper; lines come from `lib/receipt-utils.ts` (`receiptLayout` also returns which blocks belong to which item)
 - `frontend/src/editor/document.ts` - Block model, reducer, conversion to `PrintContent[]`
 - `frontend/src/lib/paper.ts` - Printer geometry: 576 dots, 8 dots/mm, 1 `ch` = 12 dots
 - `frontend/src/types/printer.ts` - TypeScript types matching backend models
 - TailwindCSS v4 with theme tokens in `src/index.css` (light + dark); fonts Instrument Serif / Instrument Sans / DM Mono
-- Saved templates live in localStorage under `thermal-printer-templates`; editor drafts under `thermal-printer-draft-<mode>`
+- `frontend/src/components/paper/` - `PaperDocument` renders any `PrintContent[]` read-only (receipts, tray thumbnails)
+- localStorage keys: `thermal-printer-templates` (saved templates), `thermal-printer-draft-<note|template|receipt>` (drafts), `thermal-printer-tray` (last 20 prints)
+- Status polls every 30 s only while the tab is visible; the Print button is disabled while the printer reports paper out / cover open / offline
 
 **Routing**: React Router: `/` (Note), `/template` (Template), `/receipt` (Receipt). Old paths `/builder` and `/receipts` redirect.
 

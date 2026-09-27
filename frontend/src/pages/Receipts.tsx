@@ -1,524 +1,546 @@
-import { useState, useEffect } from "react";
-import { Printer, Plus, Trash2, ChevronDown, ChevronUp, Store, CheckCircle2, AlertCircle, FileText, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { StatusIndicator } from "@/components/status-indicator";
-import { ReceiptPreview } from "@/components/receipt-preview";
+import { useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Store, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { printerApi, type PrintError } from "@/lib/api";
-import type { ReceiptData, ReceiptItem, TaxRates, StoreInfo, PaymentMethod, TaxCategory, ReceiptTemplate } from "@/types/receipt";
+import type { PaymentMethod, ReceiptData, ReceiptItem, ReceiptSerials, ReceiptTemplate, StoreInfo, TaxCategory, TaxRates } from "@/types/receipt";
 import { BIEDRONKA_STORE } from "@/types/receipt";
 import {
-  getDefaultStore,
-  saveDefaultStore,
-  getTaxRates,
+  calculateItemTotal,
   calculateSubtotal,
+  calculateTaxBreakdown,
+  calculateTotalTax,
   createEmptyItem,
-  receiptToContent,
-  biedronkaReceiptToContent,
+  estimateItemLine,
+  formatCurrency,
+  getDefaultStore,
+  getTaxRates,
+  newSerials,
+  receiptLayout,
+  saveDefaultStore,
 } from "@/lib/receipt-utils";
+import { estimateLengthMm } from "@/lib/paper";
+import { isBlocked, printerLight } from "@/lib/printer-light";
+import type { PrinterStatusState } from "@/hooks/use-printer-status";
+import { usePrintJob } from "@/hooks/use-print-job";
+import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { PaperDocument } from "@/components/paper/paper-document";
+import { PaperRow, PaperRuler, PrinterBody } from "@/components/paper/paper-strip";
+import { PrintDock, PrinterAlert, Toast, roundButtonClass } from "@/components/print-chrome";
+import { Sheet } from "@/components/sheet";
+import { SectionLabel, Segmented, fieldLabelClass, inputClass, quietButtonClass } from "@/components/editor/controls";
 
-export default function Receipts() {
-  // Store info
-  const [store, setStore] = useState<StoreInfo>(getDefaultStore);
-  const [storeExpanded, setStoreExpanded] = useState(true);
+const PRINT_OPTIONS = { codePage: "PC852", autoCut: true, feedLinesAfterPrint: 3 };
+const TAX_CATEGORIES: TaxCategory[] = ["A", "B", "C", "D"];
 
-  // Tax rates
+const DRAFT_KEY = "thermal-printer-draft-receipt";
+
+interface ReceiptDraft {
+  template: ReceiptTemplate;
+  store: StoreInfo;
+  items: ReceiptItem[];
+  payment: PaymentMethod;
+  cashAmount: string;
+  cardAmount: string;
+}
+
+function loadReceiptDraft(): ReceiptDraft | null {
+  try {
+    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "null") as ReceiptDraft | null;
+    return draft?.items?.length ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Accepts "18,99" and "18.99". */
+function parseAmount(value: string): number {
+  return parseFloat(value.replace(",", ".")) || 0;
+}
+
+export default function Receipts({ printer }: { printer: PrinterStatusState }) {
+  const [draft] = useState(loadReceiptDraft);
+  const [template, setTemplate] = useState<ReceiptTemplate>(draft?.template ?? "paragon-fiskalny");
+  const [store, setStore] = useState<StoreInfo>(() => draft?.store ?? getDefaultStore());
   const [taxRates] = useState<TaxRates>(getTaxRates);
+  const [items, setItems] = useState<ReceiptItem[]>(() => draft?.items ?? [createEmptyItem()]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [payment, setPayment] = useState<PaymentMethod>(draft?.payment ?? "card");
+  const [cashAmount, setCashAmount] = useState(draft?.cashAmount ?? "");
+  const [cardAmount, setCardAmount] = useState(draft?.cardAmount ?? "");
+  const [serials, setSerials] = useState<ReceiptSerials>(newSerials);
+  const [sheet, setSheet] = useState<"item" | "store" | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const job = usePrintJob(printer);
+  const desktop = useIsDesktop();
 
-  // Line items
-  const [items, setItems] = useState<ReceiptItem[]>([createEmptyItem()]);
-
-  // Payment
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [cashAmount, setCashAmount] = useState<string>('');
-  const [cardAmount, setCardAmount] = useState<string>('');
-
-  // Template selection
-  const [selectedTemplate, setSelectedTemplate] = useState<ReceiptTemplate>('paragon-fiskalny');
-
-  // Handle template change - switch store defaults
-  const handleTemplateChange = (template: ReceiptTemplate) => {
-    setSelectedTemplate(template);
-    if (template === 'biedronka') {
-      setStore(BIEDRONKA_STORE);
-    } else {
-      setStore(getDefaultStore());
-    }
-  };
-
-  // UI state
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const [errorDetails, setErrorDetails] = useState<string | undefined>();
-  const [success, setSuccess] = useState<string | undefined>();
-  const [status, setStatus] = useState<'idle' | 'printing' | 'success' | 'error'>('idle');
-
-  // Auto-save store defaults when changed
+  // Store details double as defaults for the next visit (paragon only).
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      saveDefaultStore(store);
-    }, 1000);
-    return () => clearTimeout(timeout);
-  }, [store]);
+    if (template !== "paragon-fiskalny") return;
+    const timer = window.setTimeout(() => saveDefaultStore(store), 800);
+    return () => window.clearTimeout(timer);
+  }, [store, template]);
 
-  // Auto-clear success
   useEffect(() => {
-    if (success) {
-      const timer = setTimeout(() => {
-        setSuccess(undefined);
-        setStatus('idle');
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [success]);
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ template, store, items, payment, cashAmount, cardAmount } satisfies ReceiptDraft));
+      } catch {
+        // Storage full or blocked: the draft is lost on reload, nothing else breaks.
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [template, store, items, payment, cashAmount, cardAmount]);
 
-  const subtotal = calculateSubtotal(items);
+  useEffect(() => {
+    if (!confirmClear) return;
+    const timer = window.setTimeout(() => setConfirmClear(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [confirmClear]);
 
-  const updateStore = (field: keyof StoreInfo, value: string) => {
-    setStore(prev => ({ ...prev, [field]: value }));
-  };
+  // A row with neither name nor price is a blank left for typing; it never prints.
+  const filled = items.filter((i) => i.name.trim() !== "" || i.unitPrice > 0);
+  const subtotal = calculateSubtotal(filled);
+  const totalTax = calculateTotalTax(calculateTaxBreakdown(filled, taxRates));
+
+  const receipt = (list: ReceiptItem[]): ReceiptData => ({
+    store,
+    items: list,
+    template,
+    serials,
+    payment: {
+      method: payment,
+      cashAmount: payment !== "card" ? parseAmount(cashAmount) || subtotal : undefined,
+      cardAmount: payment !== "cash" ? parseAmount(cardAmount) || subtotal : undefined,
+    },
+  });
+
+  // The paper shows unnamed items too, so a new row is visible and clickable.
+  const preview = receiptLayout(receipt(items.map((i) => (i.name.trim() ? i : { ...i, name: "[new item]" }))), taxRates);
+  const lengthMm = estimateLengthMm(preview.content, PRINT_OPTIONS);
+  const selectedIndex = items.findIndex((i) => i.id === selectedId);
+  const selected = selectedIndex >= 0 ? items[selectedIndex] : null;
+
+  const updateItem = (id: string, patch: Partial<ReceiptItem>) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
 
   const addItem = () => {
-    setItems(prev => [...prev, createEmptyItem()]);
+    const item = createEmptyItem();
+    setItems((prev) => [...prev, item]);
+    setSelectedId(item.id);
+    if (!desktop) setSheet("item");
+    window.setTimeout(() => nameRef.current?.focus(), 0);
   };
 
   const removeItem = (id: string) => {
-    if (items.length > 1) {
-      setItems(prev => prev.filter(item => item.id !== id));
-    }
+    const index = items.findIndex((i) => i.id === id);
+    const next = items.length > 1 ? items.filter((i) => i.id !== id) : [createEmptyItem()];
+    setItems(next);
+    setSelectedId(next[Math.min(index, next.length - 1)]?.id ?? null);
   };
 
-  const updateItem = (id: string, updates: Partial<ReceiptItem>) => {
-    setItems(prev => prev.map(item =>
-      item.id === id ? { ...item, ...updates } : item
-    ));
+  const step = (delta: number) => {
+    const next = items[selectedIndex + delta];
+    if (next) setSelectedId(next.id);
   };
 
-  const getReceiptData = (): ReceiptData => ({
-    store,
-    items: items.filter(item => item.name.trim() !== ''),
-    payment: {
-      method: paymentMethod,
-      cashAmount: paymentMethod !== 'card' ? (parseFloat(cashAmount) || subtotal) : undefined,
-      cardAmount: paymentMethod !== 'cash' ? (parseFloat(cardAmount) || subtotal) : undefined,
-    },
-    template: selectedTemplate,
-  });
+  const changeTemplate = (next: ReceiptTemplate) => {
+    setTemplate(next);
+    setStore(next === "biedronka" ? BIEDRONKA_STORE : getDefaultStore());
+  };
 
-  const handlePrint = async () => {
-    const validItems = items.filter(item => item.name.trim() !== '');
-    if (validItems.length === 0) {
-      setError("[ERROR] Add at least one item with a name");
+  const print = async () => {
+    if (filled.length === 0) {
+      job.notify("Add at least one item with a name.", "error");
       return;
     }
-
-    setError(undefined);
-    setErrorDetails(undefined);
-    setSuccess(undefined);
-    setLoading(true);
-    setStatus('printing');
-
-    try {
-      const receipt = getReceiptData();
-      const content = selectedTemplate === 'biedronka'
-        ? biedronkaReceiptToContent(receipt, taxRates)
-        : receiptToContent(receipt, taxRates);
-
-      await printerApi.printCustom({
-        content,
-        options: {
-          codePage: 'PC852', // Polish characters (Latin 2)
-          autoCut: true,
-          feedLinesAfterPrint: 3,
-        },
-      });
-
-      setSuccess("[OK] Receipt printed successfully!");
-      setStatus('success');
-    } catch (err) {
-      const printError = err as PrintError;
-      setError(printError.message || "[ERROR] Failed to print");
-      setErrorDetails(printError.details);
-      setStatus('error');
-    } finally {
-      setLoading(false);
+    const unnamed = filled.find((i) => !i.name.trim());
+    if (unnamed) {
+      setSelectedId(unnamed.id);
+      job.notify(`Item ${items.indexOf(unnamed) + 1} has a price but no name.`, "error");
+      return;
     }
+    const request = { content: receiptLayout(receipt(filled), taxRates).content, options: PRINT_OPTIONS, source: "web/receipt" };
+    const ok = await job.print(request, `${store.name || "Receipt"} · ${formatCurrency(subtotal)} zł`, "receipt");
+    // A new receipt gets new fiscal numbers.
+    if (ok) setSerials(newSerials());
   };
 
-  const clearAll = () => {
-    if (confirm("Clear all items?")) {
-      setItems([createEmptyItem()]);
-      setCashAmount('');
-      setCardAmount('');
-    }
-  };
+  const light = printerLight(printer, job.phase);
+
+  const itemEditor = selected && (
+    <ItemInspector
+      item={selected}
+      index={selectedIndex}
+      count={items.length}
+      biedronka={template === "biedronka"}
+      taxRates={taxRates}
+      nameRef={nameRef}
+      onChange={(patch) => updateItem(selected.id, patch)}
+      onRemove={() => removeItem(selected.id)}
+      onStep={step}
+    />
+  );
+
+  const storePanel = (
+    <StorePanel
+      template={template}
+      store={store}
+      payment={payment}
+      cashAmount={cashAmount}
+      cardAmount={cardAmount}
+      subtotal={subtotal}
+      taxRates={taxRates}
+      onTemplate={changeTemplate}
+      onStore={(patch) => setStore((prev) => ({ ...prev, ...patch }))}
+      onPayment={setPayment}
+      onCash={setCashAmount}
+      onCard={setCardAmount}
+    />
+  );
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-8 matrix-cascade">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Receipt Generator</h1>
-            <p className="text-muted-foreground mt-2 font-mono text-sm">
-              Generate Polish fiscal receipts (paragon fiskalny)
-            </p>
+    <div className="stage-glow mx-auto grid max-w-[1600px] grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_300px] xl:gap-4">
+      {desktop && <aside className="sticky top-[72px] h-[calc(100vh-72px)] overflow-y-auto px-6 py-6">{storePanel}</aside>}
+
+      <main className="flex min-w-0 flex-col items-center px-2.5 pt-3 pb-40">
+        <h1 className="sr-only">Receipt</h1>
+        <PrinterAlert printer={printer} />
+        <PrinterBody tone={light.tone} label={light.label} />
+        <div
+          className={cn(
+            "paper-font -mt-2 flex flex-col drop-shadow-[0_18px_24px_var(--paper-shadow)]",
+            job.phase === "printing" && "strip-printing",
+            job.phase === "torn" && "strip-torn",
+          )}
+        >
+          <PaperRuler />
+          <PaperDocument
+            content={preview.content}
+            feedLines={PRINT_OPTIONS.feedLinesAfterPrint}
+            autoCut={PRINT_OPTIONS.autoCut}
+            groups={preview.items.map((g) => ({ ...g, label: String(items.findIndex((i) => i.id === g.id) + 1) }))}
+            selectedGroup={selectedId}
+            onSelectGroup={(id) => {
+              setSelectedId(id);
+              if (!desktop) setSheet("item");
+            }}
+            afterGroups={
+              <PaperRow paperClassName="py-1">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="flex h-8 w-full items-center justify-center gap-1.5 rounded border border-dashed border-paper-rule font-sans text-xs text-paper-faint hover:border-paper-faint hover:text-paper-ink"
+                >
+                  <Plus className="size-3.5" aria-hidden="true" />
+                  add item
+                </button>
+              </PaperRow>
+            }
+            cutNote={<span>≈ {lengthMm} mm</span>}
+          />
+        </div>
+      </main>
+
+      {desktop && (
+          <aside className="sticky top-[72px] flex h-[calc(100vh-72px)] flex-col gap-6 overflow-y-auto px-6 pt-6 pb-32">
+          {itemEditor ?? (
+            <div className="flex flex-col gap-3 rounded-xl border border-dashed border-line-strong p-5 text-[13px] text-ink-2">
+              <SectionLabel>No item selected</SectionLabel>
+              <p>Click a line on the receipt to edit it, or add an item below the list.</p>
+            </div>
+          )}
+          <div className="mt-auto flex flex-col gap-2 rounded-xl border border-line p-4 text-[13px]">
+            <div className="flex justify-between">
+              <span className="text-ink-2">Items</span>
+              <span className="font-mono">{filled.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink-2">SUMA PTU</span>
+              <span className="font-mono">{formatCurrency(totalTax)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink-2">Paper</span>
+              <span className="font-mono">≈ {lengthMm} mm</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmClear) return setConfirmClear(true);
+                setItems([createEmptyItem()]);
+                setSelectedId(null);
+                setConfirmClear(false);
+              }}
+              className="mt-1 h-10 text-left text-danger-text hover:underline"
+            >
+              {confirmClear ? "Click again to clear all items" : "Clear all items"}
+            </button>
           </div>
-          <StatusIndicator status={status} />
+        </aside>
+      )}
+
+      <PrintDock
+        printing={job.printing}
+        blocked={isBlocked(printer)}
+        label="Print receipt"
+        onPrint={() => void print()}
+        meta={
+          <>
+            <span className="font-serif text-[30px] leading-none text-ink">{formatCurrency(subtotal)} zł</span>
+            <span className="text-xs">
+              {filled.length} {filled.length === 1 ? "item" : "items"} · PTU {formatCurrency(totalTax)} · {payment === "cash" ? "cash" : payment === "card" ? "card" : "mixed"}
+            </span>
+          </>
+        }
+        leading={
+          <>
+            <button type="button" onClick={() => setSheet("store")} aria-label="Store and payment" className={roundButtonClass}>
+              <Store className="size-5" aria-hidden="true" />
+            </button>
+            <button type="button" onClick={addItem} aria-label="Add item" className={roundButtonClass}>
+              <Plus className="size-[22px]" aria-hidden="true" />
+            </button>
+            {selected && (
+              <button type="button" onClick={() => setSheet("item")} aria-label="Edit selected item" className={roundButtonClass}>
+                <Pencil className="size-5" aria-hidden="true" />
+              </button>
+            )}
+          </>
+        }
+      />
+      <Toast notice={job.notice} onDismiss={job.dismiss} />
+
+      {sheet && !desktop && (
+        <Sheet title={sheet === "item" ? "Edit item" : "Store & payment"} onClose={() => setSheet(null)}>
+          {sheet === "item" ? itemEditor : storePanel}
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+interface ItemInspectorProps {
+  item: ReceiptItem;
+  index: number;
+  count: number;
+  biedronka: boolean;
+  taxRates: TaxRates;
+  nameRef: React.RefObject<HTMLInputElement | null>;
+  onChange: (patch: Partial<ReceiptItem>) => void;
+  onRemove: () => void;
+  onStep: (delta: number) => void;
+}
+
+function ItemInspector({ item, index, count, biedronka, taxRates, nameRef, onChange, onRemove, onStep }: ItemInspectorProps) {
+  const id = `item-${item.id}`;
+  const line = estimateItemLine(item, biedronka);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <span className="font-serif text-[24px]">
+          Item {index + 1} <span className="text-ink-3">of {count}</span>
+        </span>
+        <div className="flex gap-1">
+          <button type="button" onClick={() => onStep(-1)} disabled={index === 0} aria-label="Previous item" className={cn(quietButtonClass, "w-11 rounded-full px-0")}>
+            <ArrowUp className="size-4" aria-hidden="true" />
+          </button>
+          <button type="button" onClick={() => onStep(1)} disabled={index === count - 1} aria-label="Next item" className={cn(quietButtonClass, "w-11 rounded-full px-0")}>
+            <ArrowDown className="size-4" aria-hidden="true" />
+          </button>
         </div>
       </div>
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          {/* Store Info */}
-          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.05s' }}>
-            <CardHeader
-              className="cursor-pointer"
-              onClick={() => setStoreExpanded(!storeExpanded)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Store className="h-5 w-5 text-[hsl(var(--terminal-green))]" />
-                  <CardTitle className="text-lg">Store Information</CardTitle>
-                </div>
-                {storeExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </div>
-              <CardDescription className="font-mono text-xs">
-                Saved automatically as defaults
-              </CardDescription>
-            </CardHeader>
-            {storeExpanded && (
-              <CardContent className="grid gap-3 sm:grid-cols-4">
-                {selectedTemplate === 'biedronka' && (
-                  <div className="space-y-1">
-                    <Label className="font-mono text-xs text-muted-foreground">Store #</Label>
-                    <Input
-                      value={store.storeNumber || ''}
-                      onChange={(e) => updateStore('storeNumber', e.target.value)}
-                      placeholder="4387"
-                      className="font-mono h-9"
-                    />
-                  </div>
-                )}
-                <div className={cn("space-y-1", selectedTemplate === 'biedronka' ? "sm:col-span-1" : "sm:col-span-2")}>
-                  <Label className="font-mono text-xs text-muted-foreground">Store Name</Label>
-                  <Input
-                    value={store.name}
-                    onChange={(e) => updateStore('name', e.target.value)}
-                    placeholder="Store name..."
-                    className="font-mono h-9"
-                  />
-                </div>
-                <div className="sm:col-span-2 space-y-1">
-                  <Label className="font-mono text-xs text-muted-foreground">NIP</Label>
-                  <Input
-                    value={store.nip}
-                    onChange={(e) => updateStore('nip', e.target.value)}
-                    placeholder="1234567890"
-                    className="font-mono h-9"
-                  />
-                </div>
-                <div className="sm:col-span-2 space-y-1">
-                  <Label className="font-mono text-xs text-muted-foreground">Street</Label>
-                  <Input
-                    value={store.addressLine1}
-                    onChange={(e) => updateStore('addressLine1', e.target.value)}
-                    placeholder="ul. Przykładowa 1"
-                    className="font-mono h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-xs text-muted-foreground">Zip Code</Label>
-                  <Input
-                    value={store.zipCode}
-                    onChange={(e) => updateStore('zipCode', e.target.value)}
-                    placeholder="00-000"
-                    className="font-mono h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-xs text-muted-foreground">City</Label>
-                  <Input
-                    value={store.city}
-                    onChange={(e) => updateStore('city', e.target.value)}
-                    placeholder="Warszawa"
-                    className="font-mono h-9"
-                  />
-                </div>
-                {selectedTemplate === 'biedronka' && (
-                  <>
-                    <div className="sm:col-span-2 space-y-1">
-                      <Label className="font-mono text-xs text-muted-foreground">Parent Company</Label>
-                      <Input
-                        value={store.parentCompany || ''}
-                        onChange={(e) => updateStore('parentCompany', e.target.value)}
-                        placeholder="Jeronimo Martins Polska S.A."
-                        className="font-mono h-9"
-                      />
-                    </div>
-                    <div className="sm:col-span-2 space-y-1">
-                      <Label className="font-mono text-xs text-muted-foreground">Parent Address</Label>
-                      <Input
-                        value={store.parentAddress || ''}
-                        onChange={(e) => updateStore('parentAddress', e.target.value)}
-                        placeholder="ul. Żniwna 5, 62-025 Kostrzyn"
-                        className="font-mono h-9"
-                      />
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            )}
-          </Card>
-
-          {/* Line Items */}
-          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.1s' }}>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg font-mono">Line Items</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {/* Header row */}
-              <div className="grid grid-cols-[1fr_70px_80px_60px_32px] gap-2 text-xs font-mono text-muted-foreground">
-                <div>Name</div>
-                <div className="text-center">Qty</div>
-                <div className="text-center">Price</div>
-                <div className="text-center">Tax</div>
-                <div></div>
-              </div>
-
-              {items.map((item) => (
-                <div key={item.id} className="grid grid-cols-[1fr_70px_80px_60px_32px] gap-2 items-center">
-                  <Input
-                    value={item.name}
-                    onChange={(e) => updateItem(item.id, { name: e.target.value })}
-                    placeholder="Item name..."
-                    className="font-mono text-sm h-9"
-                  />
-                  <Input
-                    inputMode="decimal"
-                    value={item.quantity || ''}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(',', '.');
-                      updateItem(item.id, { quantity: parseFloat(val) || 0 });
-                    }}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="1"
-                    className="font-mono text-sm h-9 text-center"
-                  />
-                  <Input
-                    inputMode="decimal"
-                    value={item.unitPrice || ''}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(',', '.');
-                      updateItem(item.id, { unitPrice: parseFloat(val) || 0 });
-                    }}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="0.00"
-                    className="font-mono text-sm h-9 text-center"
-                  />
-                  <select
-                    value={item.taxCategory}
-                    onChange={(e) => updateItem(item.id, { taxCategory: e.target.value as TaxCategory })}
-                    className="h-9 px-2 rounded-md border bg-background font-mono text-sm"
-                  >
-                    <option value="A">A</option>
-                    <option value="B">B</option>
-                    <option value="C">C</option>
-                    <option value="D">D</option>
-                  </select>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeItem(item.id)}
-                    disabled={items.length === 1}
-                    className="h-9 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={addItem}
-                className="w-full font-mono h-9"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Item
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Total & Payment */}
-          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.15s' }}>
-            <CardContent className="pt-4 space-y-4">
-              <div className="flex justify-between items-center text-xl font-bold font-mono">
-                <span>SUMA PLN</span>
-                <span className="text-[hsl(var(--terminal-green))]">
-                  {subtotal.toFixed(2).replace('.', ',')}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Label className="font-mono text-xs text-muted-foreground whitespace-nowrap">Payment</Label>
-                <div className="flex gap-1">
-                  {(['cash', 'card', 'mixed'] as const).map((method) => (
-                    <button
-                      key={method}
-                      onClick={() => setPaymentMethod(method)}
-                      className={cn(
-                        "px-3 py-1.5 text-xs font-mono rounded border transition-colors",
-                        paymentMethod === method
-                          ? "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10 text-[hsl(var(--terminal-green))]"
-                          : "border-muted hover:border-muted-foreground/50"
-                      )}
-                    >
-                      {method === 'cash' ? 'Gotówka' : method === 'card' ? 'Karta' : 'Mix'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {paymentMethod === 'mixed' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="font-mono text-xs text-muted-foreground">Gotówka</Label>
-                    <Input
-                      inputMode="decimal"
-                      value={cashAmount}
-                      onChange={(e) => setCashAmount(e.target.value.replace(',', '.'))}
-                      onFocus={(e) => e.target.select()}
-                      placeholder={subtotal.toFixed(2)}
-                      className="font-mono h-9"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="font-mono text-xs text-muted-foreground">Karta</Label>
-                    <Input
-                      inputMode="decimal"
-                      value={cardAmount}
-                      onChange={(e) => setCardAmount(e.target.value.replace(',', '.'))}
-                      onFocus={(e) => e.target.select()}
-                      placeholder="0.00"
-                      className="font-mono h-9"
-                    />
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Messages */}
-          {success && (
-            <Alert variant="success" className="paper-feed">
-              <CheckCircle2 className="h-4 w-4" />
-              <AlertDescription className="glow-green">
-                {success}
-              </AlertDescription>
-            </Alert>
-          )}
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                <div className="font-bold">{error}</div>
-                {errorDetails && (
-                  <div className="text-xs mt-1 opacity-90">{errorDetails}</div>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Actions */}
-          <div className="flex flex-wrap gap-3 pb-6">
-            <Button
-              onClick={handlePrint}
-              disabled={loading}
-              size="lg"
-              className={cn(
-                "border-2 transition-all font-mono",
-                "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10 text-[hsl(var(--terminal-green))]",
-                "hover:bg-[hsl(var(--terminal-green))]/20 hover:box-glow-green",
-                loading && "opacity-50 cursor-not-allowed"
-              )}
-            >
-              <Printer className="mr-2 h-5 w-5" />
-              {loading ? "PRINTING..." : "PRINT RECEIPT"}
-            </Button>
-            <Button
-              onClick={clearAll}
-              variant="outline"
-              size="lg"
-              className="font-mono text-destructive border-destructive/50 hover:bg-destructive/10"
-            >
-              <Trash2 className="mr-2 h-5 w-5" />
-              Clear Items
-            </Button>
-          </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${id}-name`} className={fieldLabelClass}>
+          Name
+        </label>
+        <input
+          ref={nameRef}
+          id={`${id}-name`}
+          value={item.name}
+          placeholder="Kawa ziarnista 1kg"
+          onChange={(e) => onChange({ name: e.target.value })}
+          className={cn(inputClass, "font-mono")}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2.5">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${id}-qty`} className={fieldLabelClass}>
+            Quantity
+          </label>
+          <input
+            id={`${id}-qty`}
+            inputMode="decimal"
+            defaultValue={String(item.quantity).replace(".", ",")}
+            key={`${item.id}-qty`}
+            onChange={(e) => onChange({ quantity: parseAmount(e.target.value) })}
+            onFocus={(e) => e.target.select()}
+            className={cn(inputClass, "font-mono")}
+          />
         </div>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${id}-price`} className={fieldLabelClass}>
+            Unit price
+          </label>
+          <input
+            id={`${id}-price`}
+            inputMode="decimal"
+            defaultValue={item.unitPrice ? formatCurrency(item.unitPrice) : ""}
+            key={`${item.id}-price`}
+            placeholder="0,00"
+            onChange={(e) => onChange({ unitPrice: parseAmount(e.target.value) })}
+            onFocus={(e) => e.target.select()}
+            className={cn(inputClass, "font-mono")}
+          />
+        </div>
+      </div>
+      {biedronka && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${id}-discount`} className={fieldLabelClass}>
+            Rabat
+          </label>
+          <input
+            id={`${id}-discount`}
+            inputMode="decimal"
+            defaultValue={item.discount ? formatCurrency(item.discount) : ""}
+            key={`${item.id}-discount`}
+            placeholder="0,00"
+            onChange={(e) => onChange({ discount: parseAmount(e.target.value) || undefined })}
+            className={cn(inputClass, "font-mono")}
+          />
+        </div>
+      )}
+      <div className="flex flex-col gap-1.5">
+        <span className={fieldLabelClass}>PTU</span>
+        <Segmented
+          label="PTU"
+          value={item.taxCategory}
+          onChange={(taxCategory) => onChange({ taxCategory })}
+          options={TAX_CATEGORIES.map((c) => ({ value: c, label: <span className="font-mono">{c} {taxRates[c]}%</span> }))}
+        />
+      </div>
+      <div className="flex justify-between font-mono text-xs text-ink-2">
+        <span>
+          = {formatCurrency(calculateItemTotal(item) - (item.discount ?? 0))} {item.taxCategory}
+        </span>
+        <span className={line.fits ? undefined : "text-warn"}>{line.fits ? "one line · fits" : "splits into two lines"}</span>
+      </div>
+      <button type="button" onClick={onRemove} className={cn(quietButtonClass, "text-danger-text")}>
+        <Trash2 className="size-4" aria-hidden="true" />
+        Remove item
+      </button>
+    </div>
+  );
+}
 
-        {/* Right Sidebar - Template & Preview */}
-        <div className="lg:col-span-1 space-y-6">
-          {/* Template Selection */}
-          <Card className="border-2 matrix-cascade" style={{ animationDelay: '0.25s' }}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-[hsl(var(--terminal-green))]" />
-                <CardTitle className="text-lg">Receipt Template</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <button
-                onClick={() => handleTemplateChange('paragon-fiskalny')}
-                className={cn(
-                  "w-full text-left p-3 rounded-lg border-2 transition-all",
-                  "hover:border-[hsl(var(--terminal-green))]/50",
-                  selectedTemplate === 'paragon-fiskalny'
-                    ? "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10"
-                    : "border-muted"
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-mono font-semibold text-sm">Paragon Fiskalny</div>
-                    <div className="text-xs text-muted-foreground">Standard Polish fiscal receipt</div>
-                  </div>
-                  {selectedTemplate === 'paragon-fiskalny' && (
-                    <Check className="h-4 w-4 text-[hsl(var(--terminal-green))]" />
-                  )}
-                </div>
-              </button>
-              <button
-                onClick={() => handleTemplateChange('biedronka')}
-                className={cn(
-                  "w-full text-left p-3 rounded-lg border-2 transition-all",
-                  "hover:border-[hsl(var(--terminal-green))]/50",
-                  selectedTemplate === 'biedronka'
-                    ? "border-[hsl(var(--terminal-green))] bg-[hsl(var(--terminal-green))]/10"
-                    : "border-muted"
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-mono font-semibold text-sm">Biedronka</div>
-                    <div className="text-xs text-muted-foreground">Codziennie niskie ceny</div>
-                  </div>
-                  {selectedTemplate === 'biedronka' && (
-                    <Check className="h-4 w-4 text-[hsl(var(--terminal-green))]" />
-                  )}
-                </div>
-              </button>
-            </CardContent>
-          </Card>
+interface StorePanelProps {
+  template: ReceiptTemplate;
+  store: StoreInfo;
+  payment: PaymentMethod;
+  cashAmount: string;
+  cardAmount: string;
+  subtotal: number;
+  taxRates: TaxRates;
+  onTemplate: (template: ReceiptTemplate) => void;
+  onStore: (patch: Partial<StoreInfo>) => void;
+  onPayment: (method: PaymentMethod) => void;
+  onCash: (value: string) => void;
+  onCard: (value: string) => void;
+}
 
-          {/* Receipt Preview */}
-          <div className="matrix-cascade" style={{ animationDelay: '0.3s' }}>
-            <ReceiptPreview receipt={getReceiptData()} taxRates={taxRates} />
+function StorePanel(props: StorePanelProps) {
+  const { template, store, payment, cashAmount, cardAmount, subtotal, taxRates, onTemplate, onStore, onPayment, onCash, onCard } = props;
+  const biedronka = template === "biedronka";
+  const field = (key: keyof StoreInfo, label: string, mono = false) => (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={`store-${key}`} className="text-xs text-ink-2">
+        {label}
+      </label>
+      <input
+        id={`store-${key}`}
+        value={store[key] ?? ""}
+        onChange={(e) => onStore({ [key]: e.target.value })}
+        className={cn("h-10 w-full min-w-0 border-0 border-b border-line bg-transparent px-0 text-sm outline-none focus:border-accent", mono && "font-mono")}
+      />
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <SectionLabel>Format</SectionLabel>
+        <Segmented
+          label="Receipt format"
+          value={template}
+          onChange={onTemplate}
+          options={[
+            { value: "paragon-fiskalny", label: "Paragon fiskalny" },
+            { value: "biedronka", label: "Biedronka" },
+          ]}
+        />
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4">
+        <div className="flex items-baseline justify-between">
+          <SectionLabel>Store</SectionLabel>
+          {!biedronka && <span className="text-xs text-ink-2">saved as default</span>}
+        </div>
+        <label htmlFor="store-name" className="sr-only">
+          Store name
+        </label>
+        <input
+          id="store-name"
+          value={store.name}
+          onChange={(e) => onStore({ name: e.target.value })}
+          className="border-0 border-b border-line bg-transparent py-1 font-serif text-[22px] outline-none focus:border-accent"
+        />
+        {biedronka && field("storeNumber", "Store number", true)}
+        {field("addressLine1", "Street")}
+        <div className="grid grid-cols-[90px_1fr] gap-3">
+          {field("zipCode", "Zip code", true)}
+          {field("city", "City")}
+        </div>
+        {field("nip", "NIP", true)}
+        {biedronka && field("parentCompany", "Parent company")}
+        {biedronka && field("parentAddress", "Parent address")}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <SectionLabel>Payment</SectionLabel>
+        <Segmented
+          label="Payment"
+          value={payment}
+          onChange={onPayment}
+          options={[
+            { value: "cash", label: "Cash" },
+            { value: "card", label: "Card" },
+            { value: "mixed", label: "Mixed" },
+          ]}
+        />
+        {payment === "mixed" && (
+          <div className="grid grid-cols-2 gap-2.5 pt-1">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="pay-cash" className="text-xs text-ink-2">
+                Cash
+              </label>
+              <input id="pay-cash" inputMode="decimal" value={cashAmount} placeholder={formatCurrency(subtotal)} onChange={(e) => onCash(e.target.value)} className={cn(inputClass, "font-mono")} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="pay-card" className="text-xs text-ink-2">
+                Card
+              </label>
+              <input id="pay-card" inputMode="decimal" value={cardAmount} placeholder="0,00" onChange={(e) => onCard(e.target.value)} className={cn(inputClass, "font-mono")} />
+            </div>
           </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <SectionLabel>PTU rates</SectionLabel>
+        <div className="grid grid-cols-4 gap-1.5 font-mono text-xs">
+          {TAX_CATEGORIES.map((c) => (
+            <div key={c} className="flex h-11 flex-col items-center justify-center rounded-lg border border-line">
+              <span className="font-medium">{c}</span>
+              <span className="text-ink-2">{taxRates[c]}%</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

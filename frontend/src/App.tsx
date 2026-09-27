@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Editor from "./pages/Editor";
 import Receipts from "./pages/Receipts";
@@ -6,11 +6,16 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AppHeader } from "@/components/app-header";
 import { describeStatus, usePrinterStatus } from "@/hooks/use-printer-status";
 import { printerApi, type PrintError } from "@/lib/api";
+import { TrayDrawer } from "@/components/tray-drawer";
+import { useTray } from "@/hooks/use-tray";
 
 function Shell() {
   const printer = usePrinterStatus();
   const status = describeStatus(printer);
   const [beepError, setBeepError] = useState<string | null>(null);
+  const [trayOpen, setTrayOpen] = useState(false);
+  const tray = useTray();
+  const closeTray = useCallback(() => setTrayOpen(false), []);
 
   useEffect(() => {
     if (!beepError) return;
@@ -28,7 +33,15 @@ function Shell() {
 
   return (
     <div className="min-h-screen bg-bg text-ink">
-      <AppHeader tone={status.tone} label={status.label} detail={status.detail} onBeep={() => void beep()} />
+      <AppHeader
+        tone={status.tone}
+        label={status.label}
+        detail={status.detail}
+        onBeep={() => void beep()}
+        trayCount={tray.length}
+        onOpenTray={() => setTrayOpen(true)}
+      />
+      <TrayDrawer open={trayOpen} onClose={closeTray} printer={printer} />
       {beepError && (
         <div role="alert" className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 lg:bottom-10 rounded-xl bg-danger px-4 py-3 text-sm text-white shadow-lg">
           Beep failed. {beepError}
@@ -40,11 +53,7 @@ function Shell() {
         <Route path="/template" element={<Editor key="template" mode="template" printer={printer} />} />
         <Route
           path="/receipt"
-          element={
-            <div className="mx-auto max-w-6xl px-4 py-10">
-              <Receipts />
-            </div>
-          }
+          element={<Receipts printer={printer} />}
         />
         <Route path="/builder" element={<Navigate to="/template" replace />} />
         <Route path="/receipts" element={<Navigate to="/receipt" replace />} />

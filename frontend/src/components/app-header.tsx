@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
-import { Bell, Moon, Sun } from "lucide-react";
+import { Bell, Inbox, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/hooks/use-theme";
 import type { StatusTone } from "@/hooks/use-printer-status";
 
 const MODES = [
@@ -22,6 +22,8 @@ interface AppHeaderProps {
   label: string;
   detail: string;
   onBeep: () => void;
+  trayCount: number;
+  onOpenTray: () => void;
 }
 
 export function ModeSwitch({ className }: { className?: string }) {
@@ -46,7 +48,7 @@ export function ModeSwitch({ className }: { className?: string }) {
   );
 }
 
-export function AppHeader({ tone, label, detail, onBeep }: AppHeaderProps) {
+export function AppHeader({ tone, label, detail, onBeep, trayCount, onOpenTray }: AppHeaderProps) {
   const { theme, setTheme } = useTheme();
   const isDark =
     theme === "dark" || (theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -73,6 +75,20 @@ export function AppHeader({ tone, label, detail, onBeep }: AppHeaderProps) {
             <span>{label}</span>
             <span className="hidden lg:inline">· {detail}</span>
           </div>
+          <button
+            type="button"
+            onClick={onOpenTray}
+            aria-label={`Open tray, ${trayCount} ${trayCount === 1 ? "print" : "prints"}`}
+            title="Tray: recent prints"
+            className="relative flex size-11 items-center justify-center rounded-full border border-line hover:bg-well"
+          >
+            <Inbox className="size-[18px]" aria-hidden="true" />
+            {trayCount > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 font-mono text-[10px] text-on-accent" aria-hidden="true">
+                {trayCount}
+              </span>
+            )}
+          </button>
           <button
             type="button"
             onClick={onBeep}

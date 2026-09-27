@@ -7,6 +7,7 @@ import type {
   TaxBreakdownLine,
   StoreInfo,
   TaxCategory,
+  ReceiptSerials,
 } from '../types/receipt';
 import { DEFAULT_TAX_RATES, DEFAULT_STORE } from '../types/receipt';
 import { CHARS_PER_LINE } from './printer-constants';
@@ -124,7 +125,28 @@ export function saveTaxRates(rates: TaxRates): void {
 
 // Convert receipt to PrintContent[] for API
 export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): PrintContent[] {
+  return paragonLayout(receipt, taxRates).content;
+}
+
+/** Which printed blocks belong to which line item, so the UI can select them on paper. */
+export interface ItemRange {
+  id: string;
+  start: number;
+  end: number;
+}
+
+export interface ReceiptLayout {
+  content: PrintContent[];
+  items: ItemRange[];
+}
+
+export function receiptLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayout {
+  return receipt.template === 'biedronka' ? biedronkaLayout(receipt, taxRates) : paragonLayout(receipt, taxRates);
+}
+
+function paragonLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayout {
   const content: PrintContent[] = [];
+  const ranges: ItemRange[] = [];
   const { store, items, payment, title, date } = receipt;
 
   // Header - Store info (centered)
@@ -169,12 +191,12 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
     style: [PrintStyle.Bold, PrintStyle.DoubleHeight, PrintStyle.DoubleWidth],
   });
 
-  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: 32 });
+  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: CHARS_PER_LINE.normal });
 
   // Line items
   for (const item of items) {
-    const total = calculateItemTotal(item);
-    const priceStr = `${formatQuantity(item.quantity)} SZT * ${formatCurrency(item.unitPrice)} = ${formatCurrency(total)} ${item.taxCategory}`;
+    const start = content.length;
+    const priceStr = paragonPriceText(item);
 
     // Try to fit on one line, otherwise split
     if (item.name.length + priceStr.length + 1 <= CHARS_PER_LINE.normal) {
@@ -196,9 +218,10 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
         alignment: Alignment.Right,
       });
     }
+    ranges.push({ id: item.id, start, end: content.length });
   }
 
-  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: 32 });
+  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: CHARS_PER_LINE.normal });
 
   // Tax breakdown
   const breakdown = calculateTaxBreakdown(items, taxRates);
@@ -219,7 +242,7 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
     content: formatLine('SUMA PTU', formatCurrency(totalTax)),
   });
 
-  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: 32 });
+  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: CHARS_PER_LINE.normal });
 
   // Total
   const subtotal = calculateSubtotal(items);
@@ -229,7 +252,7 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
     style: [PrintStyle.Bold, PrintStyle.DoubleHeight, PrintStyle.DoubleWidth],
   });
 
-  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: 32 });
+  content.push({ type: ContentType.Separator, separatorChar: '-', separatorLength: CHARS_PER_LINE.normal });
 
   // Payment
   content.push({
@@ -266,7 +289,18 @@ export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): Prin
   content.push({ type: ContentType.LineFeed, lines: 3 });
   content.push({ type: ContentType.Cut });
 
-  return content;
+  return { content, items: ranges };
+}
+
+function paragonPriceText(item: ReceiptItem): string {
+  const total = calculateItemTotal(item);
+  return `${formatQuantity(item.quantity)} SZT * ${formatCurrency(item.unitPrice)} = ${formatCurrency(total)} ${item.taxCategory}`;
+}
+
+/** Whether an item prints as one line (paragon) or its name line fits (Biedronka). */
+export function estimateItemLine(item: ReceiptItem, biedronka: boolean): { fits: boolean } {
+  if (biedronka) return { fits: item.name.length + 2 <= CHARS_PER_LINE.normal };
+  return { fits: item.name.length + paragonPriceText(item).length + 1 <= CHARS_PER_LINE.normal };
 }
 
 // Create new empty item
@@ -282,7 +316,13 @@ export function createEmptyItem(): ReceiptItem {
 
 // Biedronka-style receipt format
 export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRates): PrintContent[] {
+  return biedronkaLayout(receipt, taxRates).content;
+}
+
+function biedronkaLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayout {
   const content: PrintContent[] = [];
+  const ranges: ItemRange[] = [];
+  const serials = receipt.serials ?? newSerials();
   const { store, items, date, kasaNumber, kasjerNumber } = receipt;
 
   // Header - Biedronka style
@@ -338,7 +378,7 @@ export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRat
   content.push({ type: ContentType.LineFeed, lines: 1 });
 
   // Date and receipt number line
-  const receiptNum = Math.floor(Math.random() * 900000 + 100000).toString();
+  const receiptNum = serials.receiptNumber;
   const dateStr = date || formatDate();
   content.push({
     type: ContentType.Text,
@@ -355,6 +395,7 @@ export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRat
 
   // Items - Biedronka format
   for (const item of items) {
+    const start = content.length;
     const total = calculateItemTotal(item) - (item.discount || 0);
 
     // First line: name + tax category
@@ -387,9 +428,10 @@ export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRat
         content: formatLine('', `${formatCurrency(afterDiscount)}${item.taxCategory}`),
       });
     }
+    ranges.push({ id: item.id, start, end: content.length });
   }
 
-  content.push({ type: ContentType.Separator, separatorChar: '.', separatorLength: 42 });
+  content.push({ type: ContentType.Separator, separatorChar: '.', separatorLength: CHARS_PER_LINE.normal });
 
   // Tax breakdown - Biedronka style
   const breakdown = calculateTaxBreakdown(items, taxRates);
@@ -422,16 +464,14 @@ export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRat
   // Footer - Kasa/Kasjer info
   const kasa = kasaNumber || '3';
   const kasjer = kasjerNumber || '9';
-  const footerNum = Math.floor(Math.random() * 90000 + 10000).toString().padStart(5, '0');
+  const footerNum = serials.footerNumber;
   content.push({
     type: ContentType.Text,
     content: formatLine(`${footerNum} #Kasa ${kasa} Kasjer nr ${kasjer}`, dateStr),
   });
 
   // Fiscal code (random hex)
-  const fiscalCode = Array.from({ length: 40 }, () =>
-    '0123456789ABCDEF'[Math.floor(Math.random() * 16)]
-  ).join('');
+  const fiscalCode = serials.fiscalCode;
   content.push({
     type: ContentType.Text,
     content: fiscalCode,
@@ -440,7 +480,7 @@ export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRat
   });
 
   // CCH number
-  const cchNum = Math.floor(Math.random() * 9000000000 + 1000000000).toString();
+  const cchNum = serials.cchNumber;
   content.push({
     type: ContentType.Text,
     content: `CCH ${cchNum}`,
@@ -466,5 +506,15 @@ export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRat
   content.push({ type: ContentType.LineFeed, lines: 3 });
   content.push({ type: ContentType.Cut });
 
-  return content;
+  return { content, items: ranges };
+}
+
+/** Fake fiscal serials for the Biedronka layout. Kept in state so the preview does not flicker. */
+export function newSerials(): ReceiptSerials {
+  return {
+    receiptNumber: Math.floor(Math.random() * 900000 + 100000).toString(),
+    footerNumber: Math.floor(Math.random() * 90000 + 10000).toString().padStart(5, '0'),
+    fiscalCode: Array.from({ length: 40 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join(''),
+    cchNumber: Math.floor(Math.random() * 9000000000 + 1000000000).toString(),
+  };
 }

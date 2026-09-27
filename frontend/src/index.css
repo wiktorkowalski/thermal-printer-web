@@ -33,11 +33,6 @@
   --paper-shadow: rgba(60, 45, 20, 0.14);
   --stage-glow: transparent;
 
-  /* Legacy tokens still read by the receipt page (HSL triplets). */
-  --terminal-green: 142 49% 36%;
-  --terminal-amber: 38 83% 43%;
-  --destructive-hsl: 11 76% 43%;
-
   color-scheme: light;
 }
 
@@ -58,9 +53,6 @@
   --paper: #e9e3d6;
   --paper-shadow: rgba(0, 0, 0, 0.6);
   --stage-glow: #2b271f;
-
-  --terminal-green: 142 55% 60%;
-  --terminal-amber: 38 90% 60%;
 
   color-scheme: dark;
 }
@@ -91,26 +83,6 @@
   --color-paper-ink: var(--paper-ink);
   --color-paper-faint: var(--paper-faint);
   --color-paper-rule: var(--paper-rule);
-
-  /* shadcn/ui names, used by the receipt page. */
-  --color-background: var(--bg);
-  --color-foreground: var(--ink);
-  --color-card: var(--surface);
-  --color-card-foreground: var(--ink);
-  --color-popover: var(--surface);
-  --color-popover-foreground: var(--ink);
-  --color-primary: var(--ink);
-  --color-primary-foreground: var(--on-ink);
-  --color-secondary: var(--well);
-  --color-secondary-foreground: var(--ink);
-  --color-muted: var(--well);
-  --color-muted-foreground: var(--ink-3);
-  --color-accent-foreground: var(--ink);
-  --color-destructive: var(--danger);
-  --color-destructive-foreground: var(--on-accent);
-  --color-border: var(--line);
-  --color-input: var(--line);
-  --color-ring: var(--accent);
 }
 
 @layer base {
@@ -186,24 +158,11 @@
   .stage-glow {
     background: radial-gradient(ellipse 560px 760px at 50% 45%, var(--stage-glow), transparent 72%);
   }
-
-  /* Legacy receipt page helpers. */
-  .receipt-paper {
-    background-color: var(--paper);
-    color: var(--paper-ink);
-  }
 }
 
 @layer utilities {
   .pixelated {
     image-rendering: pixelated;
-  }
-
-  .box-glow-green,
-  .box-glow-amber,
-  .box-glow-red,
-  .glow-green {
-    box-shadow: none;
   }
 
   @keyframes paper-feed-in {
@@ -215,10 +174,6 @@
     animation: paper-feed-in 0.4s cubic-bezier(0.3, 0.1, 0.3, 1);
   }
 
-  .matrix-cascade {
-    animation: paper-feed-in 0.3s ease-out;
-  }
-
   @keyframes blink {
     50% { opacity: 0.3; }
   }
@@ -227,10 +182,32 @@
     animation: blink 0.9s steps(2) infinite;
   }
 
+  /* The strip shivers while the head works, then tears off and a fresh one feeds out. */
+  @keyframes strip-shiver {
+    from { transform: translateY(0); }
+    to { transform: translateY(3px); }
+  }
+
+  @keyframes strip-tear {
+    0% { transform: translateY(0) rotate(0); opacity: 1; }
+    40% { transform: translateY(70px) rotate(1.5deg); opacity: 0; }
+    41% { transform: translateY(-28px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+
+  .strip-printing {
+    animation: strip-shiver 0.18s ease-in-out infinite alternate;
+  }
+
+  .strip-torn {
+    animation: strip-tear 0.9s cubic-bezier(0.3, 0.1, 0.3, 1);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .paper-feed,
-    .matrix-cascade,
-    .blink {
+    .blink,
+    .strip-printing,
+    .strip-torn {
       animation: none;
     }
   }
