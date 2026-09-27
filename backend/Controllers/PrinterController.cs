@@ -46,9 +46,6 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
     public async Task<IActionResult> GetStatus()
     {
         var status = await printerService.GetStatusAsync();
-        logger.LogInformation(
-            "Printer status requested: ready={Ready} ({Reason})",
-            status.Ready, status.NotReadyReason ?? "ok");
         return status.Reachable ? Ok(status) : StatusCode(503, status);
     }
 

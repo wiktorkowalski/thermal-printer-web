@@ -8,6 +8,7 @@ import type {
   StoreInfo,
   TaxCategory,
   ReceiptSerials,
+  ReceiptTemplate,
 } from '../types/receipt';
 import { DEFAULT_TAX_RATES, DEFAULT_STORE } from '../types/receipt';
 import { CHARS_PER_LINE } from './printer-constants';
@@ -23,8 +24,18 @@ export function calculateItemTotal(item: ReceiptItem): number {
   return item.quantity * item.unitPrice;
 }
 
+/** What the customer pays for the item: gross total minus its rabat. */
+export function calculateItemNet(item: ReceiptItem): number {
+  return calculateItemTotal(item) - (item.discount ?? 0);
+}
+
 export function calculateSubtotal(items: ReceiptItem[]): number {
-  return items.reduce((sum, item) => sum + calculateItemTotal(item), 0);
+  return items.reduce((sum, item) => sum + calculateItemNet(item), 0);
+}
+
+/** Only the Biedronka layout prints a rabat; other templates ignore a leftover discount. */
+export function itemsForTemplate(items: ReceiptItem[], template: ReceiptTemplate): ReceiptItem[] {
+  return template === 'biedronka' ? items : items.map((item) => (item.discount ? { ...item, discount: undefined } : item));
 }
 
 export function calculateTaxBreakdown(items: ReceiptItem[], rates: TaxRates): TaxBreakdownLine[] {
@@ -33,7 +44,7 @@ export function calculateTaxBreakdown(items: ReceiptItem[], rates: TaxRates): Ta
     if (!acc[cat]) {
       acc[cat] = { base: 0, rate: rates[cat] };
     }
-    acc[cat].base += calculateItemTotal(item);
+    acc[cat].base += calculateItemNet(item);
     return acc;
   }, {} as Record<TaxCategory, { base: number; rate: number }>);
 
@@ -141,7 +152,9 @@ export interface ReceiptLayout {
 }
 
 export function receiptLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayout {
-  return receipt.template === 'biedronka' ? biedronkaLayout(receipt, taxRates) : paragonLayout(receipt, taxRates);
+  return receipt.template === 'biedronka'
+    ? biedronkaLayout(receipt, taxRates)
+    : paragonLayout({ ...receipt, items: itemsForTemplate(receipt.items, 'paragon-fiskalny') }, taxRates);
 }
 
 function paragonLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayout {
@@ -396,7 +409,7 @@ function biedronkaLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayou
   // Items - Biedronka format
   for (const item of items) {
     const start = content.length;
-    const total = calculateItemTotal(item) - (item.discount || 0);
+    const total = calculateItemTotal(item);
 
     // First line: name + tax category
     const nameLine = formatLine(item.name, item.taxCategory);
@@ -422,10 +435,9 @@ function biedronkaLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayou
         type: ContentType.Text,
         content: formatLine('   Rabat', `-${formatCurrency(item.discount)}`),
       });
-      const afterDiscount = total;
       content.push({
         type: ContentType.Text,
-        content: formatLine('', `${formatCurrency(afterDiscount)}${item.taxCategory}`),
+        content: formatLine('', `${formatCurrency(calculateItemNet(item))}${item.taxCategory}`),
       });
     }
     ranges.push({ id: item.id, start, end: content.length });
@@ -454,7 +466,7 @@ function biedronkaLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayou
   });
 
   // Total
-  const totalAfterDiscount = items.reduce((sum, item) => sum + calculateItemTotal(item) - (item.discount || 0), 0);
+  const totalAfterDiscount = calculateSubtotal(items);
   content.push({
     type: ContentType.Text,
     content: formatLine('SUMA PLN', formatCurrency(totalAfterDiscount), CHARS_PER_LINE.doubleWidth),
