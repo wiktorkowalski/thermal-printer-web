@@ -59,6 +59,8 @@ export function validateBarcode(data: string, type: string): ValidationResult {
     'CODE128': { pattern: /.+/, message: 'CODE128 accepts any ASCII characters' },
     'ITF': { pattern: /^\d+$/, message: 'ITF requires numeric digits only' },
     'CODABAR': { pattern: /^[A-D][0-9\-\$\:\/\.\+]+[A-D]$/, message: 'CODABAR must start/end with A-D' },
+    'GS1_128': { pattern: /^[\x20-\x7E]+$/, message: 'GS1-128 accepts printable ASCII only' },
+    'GS1_DATABAR_OMNIDIRECTIONAL': { pattern: /^\d{13}$/, message: 'GS1 DataBar requires exactly 13 digits (GTIN without check digit)' },
   };
 
   const rule = rules[type];
