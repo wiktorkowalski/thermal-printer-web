@@ -134,11 +134,6 @@ export function saveTaxRates(rates: TaxRates): void {
   }
 }
 
-// Convert receipt to PrintContent[] for API
-export function receiptToContent(receipt: ReceiptData, taxRates: TaxRates): PrintContent[] {
-  return paragonLayout(receipt, taxRates).content;
-}
-
 /** Which printed blocks belong to which line item, so the UI can select them on paper. */
 export interface ItemRange {
   id: string;
@@ -325,11 +320,6 @@ export function createEmptyItem(): ReceiptItem {
     unitPrice: 0,
     taxCategory: 'A',
   };
-}
-
-// Biedronka-style receipt format
-export function biedronkaReceiptToContent(receipt: ReceiptData, taxRates: TaxRates): PrintContent[] {
-  return biedronkaLayout(receipt, taxRates).content;
 }
 
 function biedronkaLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayout {
