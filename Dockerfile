@@ -21,9 +21,9 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS final
 WORKDIR /app
 
-# Set the port environment variable
+# Program.cs binds Kestrel to $PORT. Clear the base image's HTTP_PORTS=8080 so ASP.NET does not warn about overriding it.
 ENV PORT=5160
-ENV ASPNETCORE_URLS=http://+:5160
+ENV ASPNETCORE_HTTP_PORTS=
 
 # Expose the application port
 EXPOSE 5160
