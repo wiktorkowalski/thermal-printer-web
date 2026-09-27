@@ -19,6 +19,10 @@ export const QR_MODULE_DOTS = { Normal: 4, Large: 5, ExtraLarge: 6 } as const;
 export const BAR_MODULE_DOTS = { Thin: 3, Default: 4, Thick: 5 } as const;
 export const DEFAULT_BARCODE_HEIGHT_DOTS = 162;
 
+// The cutter sits past the head, so every cut strip starts with blank paper.
+// Measured 2026-09-27: 17 mm from the paper edge to a first "=" line, minus ~1.5 mm to its glyph.
+export const CUTTER_OFFSET_DOTS = 124;
+
 // PrinterService sends ESC a 1 (center) for blocks without an alignment.
 export const DEFAULT_ALIGNMENT = "Center" as const;
 
@@ -93,5 +97,6 @@ export function estimateLengthMm(content: PrintContent[], options: JobOptions, i
   });
   const hasCut = content.some((b) => b.type === "Cut");
   if (options.autoCut && !hasCut) dots += options.feedLinesAfterPrint * LINE_DOTS;
+  if (options.autoCut || hasCut) dots += CUTTER_OFFSET_DOTS;
   return Math.round(dots / DOTS_PER_MM);
 }

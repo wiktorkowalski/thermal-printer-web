@@ -193,7 +193,8 @@ export function BarcodeView({
         displayValue: label !== "None",
         textPosition: label === "Above" ? "top" : "bottom",
         font: "DM Mono",
-        fontSize: options?.useFontB ? 17 : 24,
+        // DM Mono advances 0.6 em; the printed HRI is Font A at 12 dots per char (Font B: 9).
+        fontSize: options?.useFontB ? 15 : 20,
         textMargin: 4,
         background: "transparent",
         lineColor: "currentColor",
