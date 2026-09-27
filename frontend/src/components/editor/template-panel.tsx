@@ -181,7 +181,7 @@ export function TemplatePanel(props: TemplatePanelProps) {
                 >
                   <span className="grip shrink-0 cursor-grab" aria-hidden="true" />
                   <span className={cn("w-5 font-mono text-[11px]", active ? "text-accent-text" : "text-ink-3")}>{String(index + 1).padStart(2, "0")}</span>
-                  <span className={cn("grow", active && "font-semibold")}>{BLOCK_LABELS[block.type]}</span>
+                  <span className={cn("grow whitespace-nowrap", active && "font-semibold")}>{BLOCK_LABELS[block.type]}</span>
                   <span className="max-w-[90px] truncate font-mono text-[11px] text-ink-3">{summary(block)}</span>
                 </button>
               </li>

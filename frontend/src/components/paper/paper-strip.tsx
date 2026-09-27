@@ -2,7 +2,7 @@ import { useContext, type ReactNode } from "react";
 import { Scissors } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
-import { MARGIN_CH, PAPER_WIDTH_CH } from "@/lib/paper";
+import { DOTS_PER_CH, LINE_DOTS, MARGIN_CH, PAPER_WIDTH_CH } from "@/lib/paper";
 import { PaperGutters } from "./paper-context";
 
 export type LightTone = "ready" | "busy" | "error" | "unknown";
@@ -103,7 +103,7 @@ export function PaperRuler() {
 
 /** Blank paper for `lines` line feeds. */
 export function FeedSpace({ lines }: { lines: number }) {
-  return <div style={{ height: `${lines * 2.5}ch` }} />;
+  return <div style={{ height: `${(lines * LINE_DOTS) / DOTS_PER_CH}ch` }} />;
 }
 
 export function CutRow({ left, right }: { left?: ReactNode; right?: ReactNode }) {

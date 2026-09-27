@@ -1,7 +1,7 @@
 import type { CSSProperties, Ref } from "react";
 import type { Alignment, PrintStyle } from "@/types/printer";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
-import { DOTS_PER_CH, countPrintedLines, textMetrics } from "@/lib/paper";
+import { DEFAULT_ALIGNMENT, DOTS_PER_CH, countPrintedLines, textMetrics } from "@/lib/paper";
 
 interface PaperTextProps {
   text: string;
@@ -19,7 +19,7 @@ interface PaperTextProps {
  * `maxChars` columns and then scaled so it always fills the 48ch printable
  * width, which is how DoubleWidth and Font B behave on the printer.
  */
-export function PaperText({ text, style = [], alignment = "Left", placeholder, onChange, textareaRef, label }: PaperTextProps) {
+export function PaperText({ text, style = [], alignment = DEFAULT_ALIGNMENT, placeholder, onChange, textareaRef, label }: PaperTextProps) {
   const m = textMetrics(style);
   const shown = text || placeholder || "";
   const lines = countPrintedLines(shown, m.maxChars);
