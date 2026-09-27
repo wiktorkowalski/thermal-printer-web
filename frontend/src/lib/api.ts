@@ -119,7 +119,41 @@ export async function fileToBase64(file: File): Promise<string> {
   });
 }
 
+export interface PrinterStatus {
+  reachable: boolean;
+  online: boolean;
+  coverOpen: boolean;
+  paperOut: boolean;
+  paperLow: boolean;
+  ready: boolean;
+  notReadyReason: string | null;
+}
+
 export const printerApi = {
+  /**
+   * Printer readiness. The backend answers 503 with the same body when the
+   * printer is unreachable, so every status code is a valid answer here.
+   */
+  async getStatus(): Promise<PrinterStatus> {
+    const response = await api.get<PrinterStatus>("/printer/status", {
+      validateStatus: () => true,
+      timeout: 10000,
+    });
+    if (!response.data || typeof response.data.ready !== "boolean") {
+      throw parseError(new Error(`Unexpected status response (HTTP ${response.status})`));
+    }
+    return response.data;
+  },
+
+  /** Sound the buzzer without printing. */
+  async beep(count: number = 1, duration: number = 1): Promise<void> {
+    try {
+      await api.post("/printer/beep", null, { params: { count, duration } });
+    } catch (error) {
+      throw parseError(error);
+    }
+  },
+
   /**
    * Single print endpoint - all JSON
    */
