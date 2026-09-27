@@ -18,6 +18,7 @@ import {
   newSerials,
   receiptLayout,
   saveDefaultStore,
+  saveTaxRates,
 } from "@/lib/receipt-utils";
 import { estimateLengthMm } from "@/lib/paper";
 import { isBlocked, printerLight } from "@/lib/printer-light";
@@ -54,6 +55,11 @@ function loadReceiptDraft(): ReceiptDraft | null {
 }
 
 /** Accepts "18,99" and "18.99". */
+/** Whole percent 0-99: the receipt prints rates as `23,00 %`. */
+function parseRate(value: string): number {
+  return Math.min(99, parseInt(value.replace(/\D/g, ""), 10) || 0);
+}
+
 function parseAmount(value: string): number {
   return parseFloat(value.replace(",", ".")) || 0;
 }
@@ -62,7 +68,7 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
   const [draft] = useState(loadReceiptDraft);
   const [template, setTemplate] = useState<ReceiptTemplate>(draft?.template ?? "paragon-fiskalny");
   const [store, setStore] = useState<StoreInfo>(() => draft?.store ?? getDefaultStore());
-  const [taxRates] = useState<TaxRates>(getTaxRates);
+  const [taxRates, setTaxRates] = useState<TaxRates>(getTaxRates);
   const [items, setItems] = useState<ReceiptItem[]>(() => draft?.items ?? [createEmptyItem()]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [payment, setPayment] = useState<PaymentMethod>(draft?.payment ?? "card");
@@ -81,6 +87,8 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
     const timer = window.setTimeout(() => saveDefaultStore(store), 800);
     return () => window.clearTimeout(timer);
   }, [store, template]);
+
+  useEffect(() => saveTaxRates(taxRates), [taxRates]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -197,6 +205,7 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
       onTemplate={changeTemplate}
       onStore={(patch) => setStore((prev) => ({ ...prev, ...patch }))}
       onPayment={setPayment}
+      onTaxRate={(category, rate) => setTaxRates((prev) => ({ ...prev, [category]: rate }))}
       onCash={setCashAmount}
       onCard={setCardAmount}
     />
@@ -448,10 +457,11 @@ interface StorePanelProps {
   onPayment: (method: PaymentMethod) => void;
   onCash: (value: string) => void;
   onCard: (value: string) => void;
+  onTaxRate: (category: TaxCategory, rate: number) => void;
 }
 
 function StorePanel(props: StorePanelProps) {
-  const { template, store, payment, cashAmount, cardAmount, subtotal, taxRates, onTemplate, onStore, onPayment, onCash, onCard } = props;
+  const { template, store, payment, cashAmount, cardAmount, subtotal, taxRates, onTemplate, onStore, onPayment, onCash, onCard, onTaxRate } = props;
   const biedronka = template === "biedronka";
   const field = (key: keyof StoreInfo, label: string, mono = false) => (
     <div className="flex flex-col gap-1">
@@ -538,13 +548,27 @@ function StorePanel(props: StorePanelProps) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <SectionLabel>PTU rates</SectionLabel>
+        <div className="flex items-baseline justify-between">
+          <SectionLabel>PTU rates</SectionLabel>
+          <span className="text-xs text-ink-2">saved as default</span>
+        </div>
         <div className="grid grid-cols-4 gap-1.5 font-mono text-xs">
           {TAX_CATEGORIES.map((c) => (
-            <div key={c} className="flex h-11 flex-col items-center justify-center rounded-lg border border-line">
+            <label key={c} htmlFor={`ptu-${c}`} className="flex h-11 flex-col items-center justify-center rounded-lg border border-line focus-within:border-accent">
               <span className="font-medium">{c}</span>
-              <span className="text-ink-2">{taxRates[c]}%</span>
-            </div>
+              <span className="flex items-baseline text-ink-2">
+                <input
+                  id={`ptu-${c}`}
+                  inputMode="numeric"
+                  aria-label={`PTU rate ${c}`}
+                  value={taxRates[c]}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => onTaxRate(c, parseRate(e.target.value))}
+                  className="w-[3ch] border-0 bg-transparent p-0 text-right text-ink-2 outline-none"
+                />
+                %
+              </span>
+            </label>
           ))}
         </div>
       </div>
