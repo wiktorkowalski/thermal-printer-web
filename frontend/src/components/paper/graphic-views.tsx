@@ -8,6 +8,12 @@ import { BAR_MODULE_DOTS, DEFAULT_BARCODE_HEIGHT_DOTS, HEAD_DOTS, QR_MODULE_DOTS
 // Image: resized like the backend (max 576x576, aspect kept) and dithered to
 // 1-bit so the preview shows what the thermal head can actually do.
 
+const STUCKI: [number, number, number][] = [
+  [1, 0, 8], [2, 0, 4],
+  [-2, 1, 2], [-1, 1, 4], [0, 1, 8], [1, 1, 4], [2, 1, 2],
+  [-2, 2, 1], [-1, 2, 2], [0, 2, 4], [1, 2, 2], [2, 2, 1],
+];
+
 function ditherToCanvas(img: HTMLImageElement, canvas: HTMLCanvasElement, maxWidth: number, maxHeight: number) {
   const scale = Math.min(1, maxWidth / img.naturalWidth, maxHeight / img.naturalHeight);
   const width = Math.max(1, Math.round(img.naturalWidth * scale));
@@ -25,17 +31,17 @@ function ditherToCanvas(img: HTMLImageElement, canvas: HTMLCanvasElement, maxWid
   for (let i = 0; i < lum.length; i++) {
     lum[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
   }
+  // Stucki error diffusion, the same kernel ESCPOS_NET applies before printing.
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
       const value = lum[i] < 128 ? 0 : 255;
       const err = lum[i] - value;
       lum[i] = value;
-      if (x + 1 < width) lum[i + 1] += (err * 7) / 16;
-      if (y + 1 < height) {
-        if (x > 0) lum[i + width - 1] += (err * 3) / 16;
-        lum[i + width] += (err * 5) / 16;
-        if (x + 1 < width) lum[i + width + 1] += err / 16;
+      for (const [dx, dy, weight] of STUCKI) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && nx < width && ny < height) lum[ny * width + nx] += (err * weight) / 42;
       }
     }
   }
