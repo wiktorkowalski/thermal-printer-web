@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { PaymentMethod, ReceiptData, ReceiptItem, ReceiptSerials, ReceiptTemplate, StoreInfo, TaxCategory, TaxRates } from "@/types/receipt";
 import { BIEDRONKA_STORE } from "@/types/receipt";
 import {
+  calculateItemNet,
   calculateItemTotal,
   calculateSubtotal,
   calculateTaxBreakdown,
@@ -13,6 +14,7 @@ import {
   formatCurrency,
   getDefaultStore,
   getTaxRates,
+  itemsForTemplate,
   newSerials,
   receiptLayout,
   saveDefaultStore,
@@ -98,7 +100,10 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
   }, [confirmClear]);
 
   // A row with neither name nor price is a blank left for typing; it never prints.
-  const filled = items.filter((i) => i.name.trim() !== "" || i.unitPrice > 0);
+  const filled = itemsForTemplate(
+    items.filter((i) => i.name.trim() !== "" || i.unitPrice > 0),
+    template,
+  );
   const subtotal = calculateSubtotal(filled);
   const totalTax = calculateTotalTax(calculateTaxBreakdown(filled, taxRates));
 
@@ -418,7 +423,7 @@ function ItemInspector({ item, index, count, biedronka, taxRates, nameRef, onCha
       </div>
       <div className="flex justify-between font-mono text-xs text-ink-2">
         <span>
-          = {formatCurrency(calculateItemTotal(item) - (item.discount ?? 0))} {item.taxCategory}
+          = {formatCurrency(biedronka ? calculateItemNet(item) : calculateItemTotal(item))} {item.taxCategory}
         </span>
         <span className={line.fits ? undefined : "text-warn"}>{line.fits ? "one line · fits" : "splits into two lines"}</span>
       </div>
