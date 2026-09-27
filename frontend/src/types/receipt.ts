@@ -51,6 +51,14 @@ export interface ReceiptData {
   // Biedronka-specific footer
   kasaNumber?: string;
   kasjerNumber?: string;
+  serials?: ReceiptSerials;
+}
+
+export interface ReceiptSerials {
+  receiptNumber: string;
+  footerNumber: string;
+  fiscalCode: string;
+  cchNumber: string;
 }
 
 export interface TaxBreakdownLine {

@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import { Scissors } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
 import { MARGIN_CH, PAPER_WIDTH_CH } from "@/lib/paper";
+import { PaperGutters } from "./paper-context";
 
 export type LightTone = "ready" | "busy" | "error" | "unknown";
 
@@ -42,6 +43,11 @@ export function PrinterBody({ tone, label }: { tone: LightTone; label: string })
 }
 
 const ROW_GRID = "grid grid-cols-[0_auto_0] md:grid-cols-[112px_auto_112px]";
+const BARE_GRID = "grid grid-cols-[0_auto_0]";
+
+function useRowGrid() {
+  return useContext(PaperGutters) ? ROW_GRID : BARE_GRID;
+}
 
 interface PaperRowProps {
   left?: ReactNode;
@@ -56,9 +62,11 @@ interface PaperRowProps {
 
 /** One horizontal band of the strip: gutter · paper · gutter. */
 export function PaperRow({ left, right, children, className, paperClassName, printable = true, overlay }: PaperRowProps) {
+  const grid = useRowGrid();
+  const gutter = grid === ROW_GRID;
   return (
-    <div className={cn(ROW_GRID, "relative", className)}>
-      <div className="hidden items-center justify-end gap-2 pr-3.5 font-sans text-[11px] leading-tight text-ink-3 md:flex">{left}</div>
+    <div className={cn(grid, "relative", className)}>
+      <div className={cn("hidden items-center justify-end gap-2 pr-3.5 font-sans text-[11px] leading-tight text-ink-3", gutter && "md:flex")}>{left}</div>
       <div
         className={cn("paper-sheet relative", paperClassName)}
         style={{ width: `${PAPER_WIDTH_CH}ch`, paddingInline: printable ? `${MARGIN_CH}ch` : undefined }}
@@ -66,7 +74,7 @@ export function PaperRow({ left, right, children, className, paperClassName, pri
         {children}
         {overlay}
       </div>
-      <div className="hidden flex-col justify-center gap-0.5 pl-3.5 font-mono text-[11px] text-ink-3 md:flex">{right}</div>
+      <div className={cn("hidden flex-col justify-center gap-0.5 pl-3.5 font-mono text-[11px] text-ink-3", gutter && "md:flex")}>{right}</div>
     </div>
   );
 }
@@ -118,8 +126,9 @@ export function CutRow({ left, right }: { left?: ReactNode; right?: ReactNode })
 }
 
 export function TearEdge({ top = false }: { top?: boolean }) {
+  const grid = useRowGrid();
   return (
-    <div className={ROW_GRID} aria-hidden="true">
+    <div className={grid} aria-hidden="true">
       <div />
       <div className={top ? "paper-tear-top" : "paper-tear"} style={{ width: `${PAPER_WIDTH_CH}ch` }} />
       <div />
