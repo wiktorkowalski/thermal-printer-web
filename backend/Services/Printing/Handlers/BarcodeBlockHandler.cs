@@ -26,9 +26,7 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         if (opts.UseFontB.HasValue)
             ctx.Add(e.SetBarLabelFontB(opts.UseFontB.Value));
 
-        var data = PrinterSafeText.CleanBarcode(item.Content, out var replaced);
-        ctx.ReplacedCharacters += replaced;
-        ctx.Add(e.PrintBarcode(MapBarcodeType(opts.Type), data));
+        ctx.Add(e.PrintBarcode(MapBarcodeType(opts.Type), ctx.CleanBarcode(item.Content)));
         return Task.CompletedTask;
     }
 

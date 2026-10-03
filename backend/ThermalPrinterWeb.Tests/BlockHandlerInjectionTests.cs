@@ -25,8 +25,12 @@ public class BlockHandlerInjectionTests
         return (ByteSplicer.Combine([.. ctx.Output]), ctx);
     }
 
-    private static bool Contains(byte[] haystack, byte[] needle)
-        => haystack.AsSpan().IndexOf(needle) >= 0;
+    // Span overloads: a failure prints both byte sequences.
+    private static void AssertContains(byte[] expected, byte[] actual)
+        => Assert.Contains(expected.AsSpan(), actual.AsSpan());
+
+    private static void AssertDoesNotContain(byte[] expected, byte[] actual)
+        => Assert.DoesNotContain(expected.AsSpan(), actual.AsSpan());
 
     [Fact]
     public async Task Text_ControlCharacters_DoNotReachThePrinter()
@@ -36,7 +40,7 @@ public class BlockHandlerInjectionTests
 
         // Same bytes as a job that typed the question marks: nothing of the attack is left.
         Assert.Equal(withClean.Bytes, withAttack.Bytes);
-        Assert.True(Contains(withAttack.Bytes, [.. CleanAttack, 0x0A]));
+        AssertContains([.. CleanAttack, 0x0A], withAttack.Bytes);
         Assert.Equal(6, withAttack.Ctx.ReplacedCharacters);
         Assert.Equal(0, withClean.Ctx.ReplacedCharacters);
     }
@@ -49,21 +53,24 @@ public class BlockHandlerInjectionTests
 
         var (bytes, ctx) = await RunAsync(new TextBlockHandler(), textBlocks);
 
-        Assert.True(Contains(bytes, "Title?@\n"u8.ToArray()));
-        Assert.True(Contains(bytes, "Body?V?\n"u8.ToArray()));
+        AssertContains("Title?@\n"u8.ToArray(), bytes);
+        AssertContains("Body?V?\n"u8.ToArray(), bytes);
         Assert.Equal(3, ctx.ReplacedCharacters);
     }
 
     [Fact]
     public async Task Separator_ControlCharacter_BecomesQuestionMarks()
     {
-        var (bytes, ctx) = await RunAsync(
+        var withAttack = await RunAsync(
             new SeparatorBlockHandler(),
             new PrintContent { Type = ContentType.Separator, SeparatorChar = "\u001b", SeparatorLength = 4 });
+        var withClean = await RunAsync(
+            new SeparatorBlockHandler(),
+            new PrintContent { Type = ContentType.Separator, SeparatorChar = "?", SeparatorLength = 4 });
 
-        Assert.True(Contains(bytes, "????\n"u8.ToArray()));
-        Assert.DoesNotContain((byte)0x1B, bytes.AsSpan(bytes.AsSpan().IndexOf("????"u8), 4).ToArray());
-        Assert.Equal(4, ctx.ReplacedCharacters);
+        Assert.Equal(withClean.Bytes, withAttack.Bytes);
+        AssertContains("????\n"u8.ToArray(), withAttack.Bytes);
+        Assert.Equal(4, withAttack.Ctx.ReplacedCharacters);
     }
 
     [Theory]
@@ -80,8 +87,8 @@ public class BlockHandlerInjectionTests
                 BarcodeOptions = new BarcodeOptions { Type = type }
             });
 
-        Assert.True(Contains(bytes, [.. "AB"u8, .. CleanAttack]));
-        Assert.False(Contains(bytes, [0x10, 0x04, 0x01]));
+        AssertContains([.. "AB"u8, .. CleanAttack], bytes);
+        AssertDoesNotContain([0x10, 0x04, 0x01], bytes);
         Assert.Equal(6, ctx.ReplacedCharacters);
     }
 
@@ -92,8 +99,8 @@ public class BlockHandlerInjectionTests
             new QRCodeBlockHandler(),
             new PrintContent { Type = ContentType.QRCode, Content = "AB" + Attack + "ĐĄā" });
 
-        Assert.True(Contains(bytes, [.. "AB"u8, .. CleanAttack, .. "???"u8]));
-        Assert.False(Contains(bytes, [0x10, 0x04, 0x01]));
+        AssertContains([.. "AB"u8, .. CleanAttack, .. "???"u8], bytes);
+        AssertDoesNotContain([0x10, 0x04, 0x01], bytes);
         Assert.Equal(9, ctx.ReplacedCharacters);
     }
 }

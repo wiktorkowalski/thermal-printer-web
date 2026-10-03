@@ -7,8 +7,7 @@ public class PrinterSafeTextTests
 {
     private static readonly Encoding Pc852 = CodePages.GetEncoding("PC852");
 
-    public static TheoryData<string> AllCodePages =>
-        ["PC437", "PC850", "PC858", "WPC1252", "PC852", "WPC1250", "ISO8859_2", "KATAKANA"];
+    public static TheoryData<string> AllCodePages => [.. CodePages.Names];
 
     [Fact]
     public void Encode_PlainAscii_IsUnchanged()

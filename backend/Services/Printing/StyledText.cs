@@ -21,9 +21,7 @@ internal static class StyledText
 
         bytes.Add(e.SetStyles(MapPrintStyles(styles)));
 
-        var textBytes = PrinterSafeText.Encode(text, ctx.Encoding, out var replaced);
-        ctx.ReplacedCharacters += replaced;
-        bytes.Add([.. textBytes, 0x0A]); // trailing LF
+        bytes.Add([.. ctx.EncodeText(text), 0x0A]); // trailing LF
 
         bytes.Add(e.SetStyles(EscPrintStyle.None));
 
