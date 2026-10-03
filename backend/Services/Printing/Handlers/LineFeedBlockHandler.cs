@@ -4,11 +4,18 @@ namespace ThermalPrinterWeb.Services.Printing.Handlers;
 
 internal sealed class LineFeedBlockHandler : IBlockHandler
 {
+    // 100 lines = 2900 dots = 36 cm of blank paper.
+    internal const int MaxLines = 100;
+
     public ContentType Type => ContentType.LineFeed;
 
     public Task HandleAsync(PrintContent item, BlockContext ctx)
     {
-        for (int i = 0; i < (item.Lines ?? 1); i++)
+        var lines = item.Lines ?? 1;
+        if (lines > MaxLines)
+            throw PrintContentException.OverLimit("lines", lines, MaxLines);
+
+        for (var i = 0; i < lines; i++)
             ctx.Add(ctx.Emitter.PrintLine(string.Empty));
         return Task.CompletedTask;
     }

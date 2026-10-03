@@ -20,6 +20,18 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
     private const string DefaultCodePage = "PC852";
 
+    // The Kestrel default, set in Program.cs because the image size limit in ImageBlockHandler depends on it.
+    internal const long MaxRequestBodyBytes = 30_000_000;
+
+    // A long receipt is about 100 blocks.
+    internal const int MaxBlocks = 500;
+
+    // One 64 MP image takes about 0.6 s of CPU inside the decode gate, whatever its output size.
+    internal const int MaxImageBlocks = 20;
+
+    // Printer data for one job. A full-width image 4096 dots tall is 295 KB; text is 1 byte per character.
+    internal const int MaxOutputBytes = 2 * 1024 * 1024;
+
     // ESC B n t (1B 42): buzzer - n beeps each of length t. Both clamp to 1..9.
     private const int BuzzerMin = 1;
     private const int BuzzerMax = 9;
@@ -72,6 +84,19 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // no switch to edit.
     internal async Task<List<byte[]>> BuildDocumentAsync(List<PrintContent> content, PrintOptions? options)
     {
+        if (content.Count > MaxBlocks)
+        {
+            logger.LogWarning("Rejected print: the document has {BlockCount} blocks, the limit is {MaxBlocks}", content.Count, MaxBlocks);
+            throw PrintContentException.OverLimit("block count", content.Count, MaxBlocks);
+        }
+
+        var imageBlocks = content.Count(block => block is { Type: ContentType.Image, Content.Length: > 0 });
+        if (imageBlocks > MaxImageBlocks)
+        {
+            logger.LogWarning("Rejected print: the document has {ImageBlockCount} image blocks, the limit is {MaxImageBlocks}", imageBlocks, MaxImageBlocks);
+            throw PrintContentException.OverLimit("image block count", imageBlocks, MaxImageBlocks);
+        }
+
         var e = new EPSON();
         var ctx = new BlockContext(e, options);
 
@@ -92,8 +117,22 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         if (options?.DefaultLineSpacing != null)
             ctx.Add(e.SetLineSpacingInDots(options.DefaultLineSpacing.Value));
 
+        var outputBytes = 0L;
+        var counted = 0;
         foreach (var (index, item) in content.Index())
+        {
             await AddBlockAsync(index, item, ctx);
+
+            for (; counted < ctx.Output.Count; counted++)
+                outputBytes += ctx.Output[counted].Length;
+            if (outputBytes > MaxOutputBytes)
+            {
+                logger.LogWarning(
+                    "Rejected print: the document passes {MaxOutputBytes} bytes of printer data at block {BlockIndex} of {BlockCount}",
+                    MaxOutputBytes, index, content.Count);
+                throw new PrintContentException($"Block {index}: the document is over the limit of {MaxOutputBytes} bytes of printer data");
+            }
+        }
 
         // Count only: the content is caller input and the endpoint is public.
         if (ctx.ReplacedCharacters > 0)
