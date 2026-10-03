@@ -338,6 +338,16 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         Assert.Equal("Beeped 1x.", text);
     }
 
+    // ArgumentShapeFilter depends on this: a number in a string is not the faulty argument.
+    [Fact]
+    public async Task ToolsCall_BeepWithCountAsString_Beeps()
+    {
+        var (isError, text) = await CallAsync("beep", """{"count":"5"}""");
+
+        Assert.False(isError);
+        Assert.Equal("Beeped 5x.", text);
+    }
+
     // A rejected payload keeps the text and the shape it had before: not an MCP error.
     [Fact]
     public async Task ToolsCall_PrinterRejectsTheJob_KeepsTheReasonText()
