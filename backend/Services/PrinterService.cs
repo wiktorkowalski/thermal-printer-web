@@ -26,26 +26,12 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
-        // Build first: it needs no printer, so a bad payload is reported as such
-        // even while the printer is off.
-        List<byte[]> byteContent;
         try
         {
-            byteContent = await BuildDocumentAsync(content, options);
-        }
-        catch (PrintContentException ex)
-        {
-            return PrintResult.Invalid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            // Outside a block handler: only the print options are left as a cause.
-            logger.LogWarning("Rejected print: document build failed with {Exception}", ex.GetType().Name);
-            return PrintResult.Invalid("Print options are not valid");
-        }
+            // Build first: it needs no printer, so a bad payload is reported as such
+            // even while the printer is off.
+            var byteContent = await BuildDocumentAsync(content, options);
 
-        try
-        {
             // Fire-and-forget writes buffer even when the printer can't print (cover open,
             // paper out), so a job would falsely report success. Refuse instead of lying.
             var status = await GetStatusAsync();
@@ -66,7 +52,12 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
             await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
             logger.LogInformation("Printing complete");
-            return new PrintResult(true);
+            return PrintResult.Ok;
+        }
+        catch (PrintContentException ex)
+        {
+            // Logged where the block failed.
+            return PrintResult.Invalid(ex.Message);
         }
         catch (Exception ex)
         {
@@ -79,7 +70,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // can be exercised without the printer attached. Dispatch is a handler
     // registry keyed by ContentType - add a block type by registering a handler,
     // no switch to edit.
-    private async Task<List<byte[]>> BuildDocumentAsync(List<PrintContent> content, PrintOptions? options)
+    internal async Task<List<byte[]>> BuildDocumentAsync(List<PrintContent> content, PrintOptions? options)
     {
         var e = new EPSON();
         var ctx = new BlockContext(e, options);
@@ -103,6 +94,13 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
         foreach (var (index, item) in content.Index())
         {
+            // JSON "content": [null] binds to a null entry.
+            if (item is null)
+            {
+                logger.LogWarning("Rejected print: block {Index} is null", index);
+                throw new PrintContentException($"Block {index}: must not be null");
+            }
+
             ctx.Add(item.Alignment switch
             {
                 Alignment.Left => e.LeftAlign(),

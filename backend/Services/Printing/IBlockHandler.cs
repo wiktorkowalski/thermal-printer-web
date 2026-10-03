@@ -46,6 +46,8 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
 
 // One handler per ContentType: adding a block type = a new handler class plus
 // its DI registration, no central switch to edit.
+// Every exception from HandleAsync becomes a 400 for the caller. Throw
+// PrintContentException to name the cause; any other type gets a generic reason.
 internal interface IBlockHandler
 {
     ContentType Type { get; }

@@ -7,8 +7,12 @@ public enum PrintFailure
     Printer
 }
 
-public record PrintResult(bool Success, string? Error = null, PrintFailure? Failure = null)
+public record PrintResult(string? Error = null, PrintFailure? Failure = null)
 {
-    public static PrintResult Invalid(string error) => new(false, error, PrintFailure.Validation);
-    public static PrintResult PrinterFault(string error) => new(false, error, PrintFailure.Printer);
+    public static readonly PrintResult Ok = new();
+
+    public bool Success => Failure is null;
+
+    public static PrintResult Invalid(string error) => new(error, PrintFailure.Validation);
+    public static PrintResult PrinterFault(string error) => new(error, PrintFailure.Printer);
 }

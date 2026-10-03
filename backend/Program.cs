@@ -23,7 +23,13 @@ builder.Services.AddControllers()
     .ConfigureApiBehaviorOptions(options =>
     {
         options.InvalidModelStateResponseFactory = context =>
-            new BadRequestObjectResult(PrintResponse.FromModelState(context.ModelState));
+        {
+            // One entry per bad field, e.g. "$.content[0].type: The JSON value could not be converted ...".
+            var errors = context.ModelState.SelectMany(entry => entry.Value?.Errors.Select(error =>
+                $"{entry.Key}: {error.ErrorMessage}".TrimStart(':', ' ')) ?? []);
+            return new BadRequestObjectResult(
+                new PrintResponse(false, string.Join("; ", errors), PrintResponse.ValidationType));
+        };
     });
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
@@ -79,6 +85,3 @@ app.MapMcp("/mcp");
 app.MapFallbackToFile("index.html");
 
 app.Run();
-
-// Lets the test project host the app (WebApplicationFactory<Program>).
-public partial class Program;

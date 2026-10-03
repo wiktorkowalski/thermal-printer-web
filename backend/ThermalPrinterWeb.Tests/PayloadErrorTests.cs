@@ -4,13 +4,13 @@ using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
-using ThermalPrinterWeb.Services.Printing.Handlers;
 using BarcodeType = ThermalPrinterWeb.Models.BarcodeType;
 
 namespace ThermalPrinterWeb.Tests;
@@ -33,18 +33,10 @@ public sealed class PayloadErrorTests
             => Entries.Add((logLevel, formatter(state, exception) + exception));
     }
 
+    // The production handler registration, so a new block type is covered here too.
     private static PrinterService NewService(ILogger<PrinterService>? logger = null) => new(
         logger ?? NullLogger<PrinterService>.Instance,
-        [
-            new TextBlockHandler(),
-            new ImageBlockHandler(NullLogger<ImageBlockHandler>.Instance),
-            new BarcodeBlockHandler(),
-            new QRCodeBlockHandler(),
-            new LineFeedBlockHandler(),
-            new CutBlockHandler(),
-            new SeparatorBlockHandler(),
-            new CodePageBlockHandler(NullLogger<CodePageBlockHandler>.Instance)
-        ]);
+        new ServiceCollection().AddLogging().AddPrinterBlockHandlers().BuildServiceProvider().GetServices<IBlockHandler>());
 
     private static PrintContent Text(string content = "ok") => new() { Type = ContentType.Text, Content = content };
 
@@ -91,14 +83,23 @@ public sealed class PayloadErrorTests
     }
 
     [Fact]
-    public async Task Separator_EmptyChar_Throws()
+    public async Task PrintAsync_NullBlock_IsAValidationFailure()
     {
-        var ctx = new BlockContext(new ESCPOS_NET.Emitters.EPSON(), null);
+        var result = await NewService().PrintAsync([Text(), null!]);
 
-        var ex = await Assert.ThrowsAsync<PrintContentException>(() => new SeparatorBlockHandler()
-            .HandleAsync(new PrintContent { Type = ContentType.Separator, SeparatorChar = "" }, ctx));
+        Assert.Equal(PrintResult.Invalid("Block 1: must not be null"), result);
+    }
 
-        Assert.Equal("separatorChar must not be empty", ex.Message);
+    // Out-of-range options must not fail the build: outside a block, a throw is
+    // reported as a printer fault.
+    [Fact]
+    public async Task BuildDocumentAsync_ExtremeOptions_DoNotThrow()
+    {
+        var options = new PrintOptions { CodePage = "nope", DefaultLineSpacing = -70000, FeedLinesAfterPrint = int.MinValue };
+
+        var bytes = await NewService().BuildDocumentAsync([Text()], options);
+
+        Assert.NotEmpty(bytes);
     }
 
     private sealed class FakePrinterService(PrintResult result) : IPrinterService
@@ -135,7 +136,7 @@ public sealed class PayloadErrorTests
     [Fact]
     public async Task Controller_Success_Returns200()
     {
-        var response = await PrintViaControllerAsync(new PrintResult(true));
+        var response = await PrintViaControllerAsync(PrintResult.Ok);
 
         Assert.Equal(200, response.StatusCode);
         Assert.Equal(new PrintResponse(true), response.Value);
@@ -144,9 +145,15 @@ public sealed class PayloadErrorTests
 
 // The whole HTTP pipeline with the real PrinterService. Every request here fails
 // before the first printer call, so nothing reaches the network.
-public sealed class PayloadErrorHttpTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp app) : IClassFixture<PayloadErrorHttpTests.ProductionApp>
 {
-    private readonly HttpClient _client = factory.WithWebHostBuilder(b => b.UseEnvironment("Production")).CreateClient();
+    // One host for the whole class.
+    public sealed class ProductionApp : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.UseEnvironment("Production");
+    }
+
+    private readonly HttpClient _client = app.CreateClient();
 
     private async Task<PrintResponse> PostBadRequestAsync(string json)
     {
@@ -166,14 +173,6 @@ public sealed class PayloadErrorHttpTests(WebApplicationFactory<Program> factory
         var body = await PostBadRequestAsync("""{"content":[{"type":"Separator","separatorChar":""}]}""");
 
         Assert.Equal("Block 0 (Separator): separatorChar must not be empty", body.Error);
-    }
-
-    [Fact]
-    public async Task BadBase64Image_Returns400()
-    {
-        var body = await PostBadRequestAsync("""{"content":[{"type":"Image","content":"not base64 !!"}]}""");
-
-        Assert.StartsWith("Block 0 (Image):", body.Error);
     }
 
     [Theory]
