@@ -7,15 +7,13 @@ using ThermalPrinterWeb.Models;
 
 namespace ThermalPrinterWeb.Services.Printing.Handlers;
 
-internal sealed class ImageBlockHandler(ILogger<ImageBlockHandler> logger) : IBlockHandler
+internal sealed class ImageBlockHandler : IBlockHandler
 {
     // 576 = full V330M print-head width (80mm head).
     private const int DefaultMaxWidth = 576;
     private const int DefaultMaxHeight = 576;
 
-    // Only these two decoders ever run on caller bytes. The pinned ImageSharp
-    // has open advisories in other decoders (BigTIFF loop), so they stay off
-    // the path even if the format check below is wrong.
+    // The pinned ImageSharp has open advisories in other decoders (BigTIFF loop): keep them off caller bytes.
     private static readonly Configuration PngAndJpegOnly = new(new PngConfigurationModule(), new JpegConfigurationModule());
 
     public ContentType Type => ContentType.Image;
@@ -32,7 +30,7 @@ internal sealed class ImageBlockHandler(ILogger<ImageBlockHandler> logger) : IBl
         ctx.Add(ctx.Emitter.PrintImage(imageBytes, highDensity, isLegacy: legacy));
     }
 
-    private async Task<byte[]> ProcessImageContentAsync(string content, ImageOptions? options)
+    private static async Task<byte[]> ProcessImageContentAsync(string content, ImageOptions? options)
     {
         using var image = LoadPngOrJpeg(DecodeBase64(content));
 
@@ -61,24 +59,25 @@ internal sealed class ImageBlockHandler(ILogger<ImageBlockHandler> logger) : IBl
         return ms.ToArray();
     }
 
-    private Image LoadPngOrJpeg(byte[] imageBytes)
+    private static Image LoadPngOrJpeg(byte[] imageBytes)
     {
         // The format comes from the bytes. A declared MIME type in a data URI is ignored.
         var format = Image.DetectFormat(imageBytes);
         if (format is not (PngFormat or JpegFormat))
-            throw Reject(format, imageBytes.Length, "format not supported");
+            throw Rejected(format, imageBytes.Length, "format not supported");
 
         try
         {
             return Image.Load(PngAndJpegOnly, imageBytes);
         }
-        catch (ImageFormatException)
+        // Damaged files also surface as NullReference, IndexOutOfRange and NotSupported from the decoders.
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            throw Reject(format, imageBytes.Length, "file is damaged");
+            throw Rejected(format, imageBytes.Length, "file is damaged", ex);
         }
     }
 
-    private byte[] DecodeBase64(string content)
+    private static byte[] DecodeBase64(string content)
     {
         var base64 = content.StartsWith("data:", StringComparison.Ordinal) || content.StartsWith("base64,", StringComparison.Ordinal)
             ? content[(content.IndexOf(',') + 1)..]
@@ -87,18 +86,13 @@ internal sealed class ImageBlockHandler(ILogger<ImageBlockHandler> logger) : IBl
         {
             return Convert.FromBase64String(base64);
         }
-        catch (FormatException)
+        catch (FormatException ex)
         {
-            logger.LogWarning("Image rejected: not valid base64 ({Length} characters)", content.Length);
-            throw new InvalidDataException("Image is not valid base64.");
+            throw new InvalidDataException($"Image rejected: not valid base64 ({content.Length} characters).", ex);
         }
     }
 
-    // One log line per rejected image: facts only, never the image content.
-    private InvalidDataException Reject(IImageFormat? format, int byteCount, string reason)
-    {
-        var formatName = format?.Name ?? "unknown";
-        logger.LogWarning("Image rejected: {Reason} (format {Format}, {ByteCount} bytes)", reason, formatName, byteCount);
-        return new InvalidDataException($"Image rejected: {reason} (format {formatName}, {byteCount} bytes). Send a PNG or JPEG.");
-    }
+    // No log here: PrinterService logs the failure once, with this message. Facts only, never the image content.
+    private static InvalidDataException Rejected(IImageFormat? format, int byteCount, string reason, Exception? inner = null)
+        => new($"Image rejected: {reason} (format {format?.Name ?? "unknown"}, {byteCount} bytes). Send a PNG or JPEG.", inner);
 }

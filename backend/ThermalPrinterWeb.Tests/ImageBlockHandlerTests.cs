@@ -1,7 +1,6 @@
 using System.Text;
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
-using Microsoft.Extensions.Logging.Abstractions;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Bmp;
@@ -17,7 +16,6 @@ using ThermalPrinterWeb.Services.Printing.Handlers;
 
 namespace ThermalPrinterWeb.Tests;
 
-// Image blocks accept PNG and JPEG only. The format comes from the bytes.
 public sealed class ImageBlockHandlerTests
 {
     // GS v 0: the raster command ESCPOS_NET emits in legacy mode.
@@ -38,7 +36,7 @@ public sealed class ImageBlockHandlerTests
     private static BlockContext NewContext() => new(new EPSON(), null);
 
     private static Task RunAsync(string content, BlockContext ctx)
-        => new ImageBlockHandler(NullLogger<ImageBlockHandler>.Instance)
+        => new ImageBlockHandler()
             .HandleAsync(new PrintContent { Type = ContentType.Image, Content = content }, ctx);
 
     private static async Task<BlockContext> RunAsync(string content)
@@ -163,6 +161,19 @@ public sealed class ImageBlockHandlerTests
     [InlineData(20)] // cut inside the header chunk
     public async Task Png_HeaderOnly_IsRejected(int length)
         => await AssertRejectedAsync(Convert.ToBase64String(Png()[..length]));
+
+    [Fact]
+    public async Task Jpeg_ArithmeticCoded_IsRejected()
+    {
+        // SOF0 (FF C0) -> SOF9 (FF C9): the decoder throws NotSupportedException, not ImageFormatException.
+        var jpeg = Jpeg();
+        var sof = jpeg.AsSpan().IndexOf<byte>([0xFF, 0xC0]);
+        Assert.True(sof >= 0);
+        jpeg[sof + 1] = 0xC9;
+
+        var ex = await AssertRejectedAsync(Convert.ToBase64String(jpeg));
+        Assert.Contains("file is damaged (format JPEG,", ex.Message);
+    }
 
     [Fact]
     public async Task Jpeg_HeaderOnly_IsRejected()
