@@ -64,7 +64,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
         var maxHeight = PrintLimit(options.MaxHeight, DefaultMaxHeight, MaxPrintHeight, "maxHeight");
         var source = DecodeBase64(item.Content);
         var (format, size) = CheckHeader(source);
-        // Before the gate: a job over the paper limit is not decoded.
+        // Before the queue: a job over the paper limit is not decoded.
         ctx.AddPaper(PaperLength.ImageDots(size.Width, size.Height, maxWidth, maxHeight, options.PreserveAspectRatio));
 
         await _queue.RunAsync(async () =>
