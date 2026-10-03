@@ -1,16 +1,25 @@
 namespace ThermalPrinterWeb.Models;
 
-// Why a job did not print: the caller's payload, or the printer / connection.
 public enum PrintFailure
 {
     Validation,
     Printer
 }
 
-public record PrintResult(string? Error = null, PrintFailure? Failure = null)
+// Private constructor: a failure always carries its kind, so it cannot be
+// mistaken for a printer fault (503, which clients retry).
+public sealed record PrintResult
 {
-    public static readonly PrintResult Ok = new();
+    public static readonly PrintResult Ok = new(null, null);
 
+    private PrintResult(string? error, PrintFailure? failure)
+    {
+        Error = error;
+        Failure = failure;
+    }
+
+    public string? Error { get; }
+    public PrintFailure? Failure { get; }
     public bool Success => Failure is null;
 
     public static PrintResult Invalid(string error) => new(error, PrintFailure.Validation);

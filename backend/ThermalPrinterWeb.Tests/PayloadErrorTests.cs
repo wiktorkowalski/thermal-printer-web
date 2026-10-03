@@ -15,9 +15,7 @@ using BarcodeType = ThermalPrinterWeb.Models.BarcodeType;
 
 namespace ThermalPrinterWeb.Tests;
 
-// A payload the printer can never print is the caller's fault: 400 "validation".
-// 503 "printer" stays for the printer and the connection. None of these tests
-// reach the network: the document is built before the first printer call.
+// No test here reaches the network: the document is built before the first printer call.
 public sealed class PayloadErrorTests
 {
     private const string Secret = "SECRET-CALLER-CONTENT";
@@ -116,7 +114,7 @@ public sealed class PayloadErrorTests
     }
 
     [Fact]
-    public async Task Controller_ValidationFailure_Returns400()
+    public async Task Print_ValidationFailure_Returns400()
     {
         var response = await PrintViaControllerAsync(PrintResult.Invalid("bad block"));
 
@@ -125,7 +123,7 @@ public sealed class PayloadErrorTests
     }
 
     [Fact]
-    public async Task Controller_PrinterFault_Returns503()
+    public async Task Print_PrinterFault_Returns503()
     {
         var response = await PrintViaControllerAsync(PrintResult.PrinterFault("Printer not ready: cover open"));
 
@@ -134,7 +132,7 @@ public sealed class PayloadErrorTests
     }
 
     [Fact]
-    public async Task Controller_Success_Returns200()
+    public async Task Print_Success_Returns200()
     {
         var response = await PrintViaControllerAsync(PrintResult.Ok);
 
@@ -143,11 +141,9 @@ public sealed class PayloadErrorTests
     }
 }
 
-// The whole HTTP pipeline with the real PrinterService. Every request here fails
-// before the first printer call, so nothing reaches the network.
+// Real PrinterService behind the HTTP pipeline: every request fails before the first printer call.
 public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp app) : IClassFixture<PayloadErrorHttpTests.ProductionApp>
 {
-    // One host for the whole class.
     public sealed class ProductionApp : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.UseEnvironment("Production");
@@ -168,7 +164,7 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
     }
 
     [Fact]
-    public async Task EmptySeparatorChar_Returns400WithReason()
+    public async Task PostPrinter_EmptySeparatorChar_Returns400WithReason()
     {
         var body = await PostBadRequestAsync("""{"content":[{"type":"Separator","separatorChar":""}]}""");
 
@@ -178,17 +174,26 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
     [Theory]
     [InlineData("""{"content":[{"type":"Bogus"}]}""", "$.content[0].type")]
     [InlineData("""{"content":"text"}""", "$.content")]
-    [InlineData("""{"content":[""", "")]
-    public async Task ModelBindingError_ReturnsPrintResponseShape(string json, string expectedInError)
+    [InlineData("""{"content":[""", "$.content")]
+    public async Task PostPrinter_ModelBindingError_ReturnsPrintResponseShape(string json, string expectedInError)
     {
         var body = await PostBadRequestAsync(json);
 
-        Assert.False(string.IsNullOrEmpty(body.Error));
-        Assert.Contains(expectedInError, body.Error);
+        Assert.StartsWith(expectedInError, body.Error);
     }
 
     [Fact]
-    public async Task EmptyRequest_Returns400()
+    public async Task PostBeep_BadQueryValue_ReturnsPrintResponseShape()
+    {
+        var response = await _client.PostAsync("/api/printer/beep?count=abc", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<PrintResponse>();
+        Assert.Equal(new PrintResponse(false, "count: The value 'abc' is not valid.", "validation"), body);
+    }
+
+    [Fact]
+    public async Task PostPrinter_EmptyRequest_Returns400()
     {
         var body = await PostBadRequestAsync("{}");
 

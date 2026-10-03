@@ -93,43 +93,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             ctx.Add(e.SetLineSpacingInDots(options.DefaultLineSpacing.Value));
 
         foreach (var (index, item) in content.Index())
-        {
-            // JSON "content": [null] binds to a null entry.
-            if (item is null)
-            {
-                logger.LogWarning("Rejected print: block {Index} is null", index);
-                throw new PrintContentException($"Block {index}: must not be null");
-            }
-
-            ctx.Add(item.Alignment switch
-            {
-                Alignment.Left => e.LeftAlign(),
-                Alignment.Right => e.RightAlign(),
-                _ => e.CenterAlign()
-            });
-
-            if (!_handlers.TryGetValue(item.Type, out var handler))
-            {
-                logger.LogWarning("Unsupported content type: {Type}", item.Type);
-                continue;
-            }
-
-            try
-            {
-                await handler.HandleAsync(item, ctx);
-            }
-            catch (Exception ex)
-            {
-                // Handlers do no printer I/O, so a throw here means the block cannot be
-                // printed as sent. Library messages repeat caller content: keep them out
-                // of the log and the response, the endpoint is public.
-                var reason = ex is PrintContentException ? ex.Message : "content is not valid for this block type";
-                logger.LogWarning(
-                    "Rejected print: block {Index} ({Type}) failed with {Exception}",
-                    index, item.Type, ex.GetType().Name);
-                throw new PrintContentException($"Block {index} ({item.Type}): {reason}");
-            }
-        }
+            await AddBlockAsync(index, item, ctx);
 
         // Count only: the content is caller input and the endpoint is public.
         if (ctx.ReplacedCharacters > 0)
@@ -142,6 +106,46 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         }
 
         return ctx.Output;
+    }
+
+    private async Task AddBlockAsync(int index, PrintContent? item, BlockContext ctx)
+    {
+        // JSON "content": [null] binds to a null entry.
+        if (item is null)
+        {
+            logger.LogWarning("Rejected print: block {BlockIndex} is null", index);
+            throw new PrintContentException($"Block {index}: must not be null");
+        }
+
+        var e = ctx.Emitter;
+        ctx.Add(item.Alignment switch
+        {
+            Alignment.Left => e.LeftAlign(),
+            Alignment.Right => e.RightAlign(),
+            _ => e.CenterAlign()
+        });
+
+        if (!_handlers.TryGetValue(item.Type, out var handler))
+        {
+            logger.LogWarning("Unsupported content type: {Type}", item.Type);
+            return;
+        }
+
+        try
+        {
+            await handler.HandleAsync(item, ctx);
+        }
+        catch (Exception ex)
+        {
+            // Handlers do no printer I/O, so a throw here means the block cannot be
+            // printed as sent. Library messages repeat caller content: keep them out
+            // of the log and the response, the endpoint is public.
+            var reason = ex is PrintContentException ? ex.Message : "content is not valid for this block type";
+            logger.LogWarning(
+                "Rejected print: block {BlockIndex} ({Type}) failed with {ExceptionType}: {Reason}",
+                index, item.Type, ex.GetType().Name, reason);
+            throw new PrintContentException($"Block {index} ({item.Type}): {reason}");
+        }
     }
 
     public async Task<PrinterStatus> GetStatusAsync()
