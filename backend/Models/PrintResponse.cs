@@ -4,4 +4,5 @@ public record PrintResponse(bool Success, string? Error = null, string? Type = n
 {
     public const string ValidationType = "validation";
     public const string PrinterType = "printer";
+    public const string BusyType = "busy";
 }

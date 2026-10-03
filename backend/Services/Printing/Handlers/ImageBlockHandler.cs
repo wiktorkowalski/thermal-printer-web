@@ -22,18 +22,33 @@ internal sealed class ImageBlockHandler : IBlockHandler
     // 16 MiB as base64 is 22.4 MB, below PrinterService.MaxRequestBodyBytes.
     internal const int MaxImageBytes = 16 * 1024 * 1024;
     internal const int MaxBase64Length = (MaxImageBytes + 2) / 3 * 4;
-    // Phone photos must pass: 12 MP 4032x3024, 48 MP 8064x6048, 50 MP 8160x6144, panorama 16382x3628.
+    // Phone photos must pass: 12 MP 4032x3024, 48 MP 8064x6048, 50 MP 8160x6144 and 8192x6144.
+    // A panorama passes up to 16382x3072; a full 16382x3628 one (59 MP) does not.
     internal const int MaxSidePixels = 16384;
-    internal const long MaxPixels = 64_000_000;
-    // Second guard, for what the header check cannot see. 64 MP as Rgba32 = 256 MB.
-    // The limit is per buffer: a progressive 64 MP JPEG also holds its coefficient planes, 640 MB in total (measured).
+    internal const long MaxPixels = 8192 * 6144;
+    // Second guard, for what the header check cannot see. The pixel limit as Rgba32 = 192 MiB.
+    // The limit is per buffer: a progressive 4:4:4 JPEG at the pixel limit also holds its coefficient planes, 460 MB in total (measured).
     private const int AllocationLimitMegabytes = 256;
+
+    // Jobs that wait for the decode slot. Each one holds its image: up to 16 MiB of bytes and the base64 text.
+    internal const int MaxDecodeWaiters = 4;
+    // One decode takes about 1 s, so a full queue clears in less time than this.
+    internal static readonly TimeSpan DecodeWaitTimeout = TimeSpan.FromSeconds(10);
 
     // The pinned ImageSharp has open advisories in other decoders (BigTIFF loop): keep them off caller bytes.
     private static readonly Configuration PngAndJpegOnly = CreateConfiguration();
 
-    // One decode at a time: an accepted photo takes up to 640 MB while it is decoded.
-    private static readonly SemaphoreSlim DecodeGate = new(1, 1);
+    // One queue for the process: an accepted photo takes up to 460 MB while it is decoded.
+    internal static readonly DecodeQueue SharedQueue = new(MaxDecodeWaiters, DecodeWaitTimeout);
+
+    private readonly DecodeQueue _queue;
+
+    public ImageBlockHandler() : this(SharedQueue)
+    {
+    }
+
+    // Tests pass their own queue.
+    internal ImageBlockHandler(DecodeQueue queue) => _queue = queue;
 
     public ContentType Type => ContentType.Image;
 
@@ -43,24 +58,19 @@ internal sealed class ImageBlockHandler : IBlockHandler
         if (string.IsNullOrEmpty(item.Content))
             return;
 
-        // Cheap checks first: a rejected image does not wait for the gate.
+        // Cheap checks first: a rejected image does not wait for the queue.
         var options = item.ImageOptions ?? new ImageOptions();
         var maxWidth = PrintLimit(options.MaxWidth, HeadWidth, HeadWidth, "maxWidth");
         var maxHeight = PrintLimit(options.MaxHeight, DefaultMaxHeight, MaxPrintHeight, "maxHeight");
         var source = DecodeBase64(item.Content);
         var format = CheckHeader(source);
 
-        await DecodeGate.WaitAsync();
-        try
+        await _queue.RunAsync(async () =>
         {
             var png = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
-            // ESCPOS_NET decodes the PNG again, so this stays inside the gate.
+            // ESCPOS_NET decodes the PNG again, so this stays inside the queue.
             ctx.Add(ctx.Emitter.PrintImage(png, options.HighDensity, isLegacy: options.UseLegacyMode));
-        }
-        finally
-        {
-            DecodeGate.Release();
-        }
+        });
     }
 
     private static Configuration CreateConfiguration()

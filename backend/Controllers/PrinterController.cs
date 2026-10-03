@@ -9,6 +9,9 @@ namespace ThermalPrinterWeb.Controllers;
 [Route("api/[controller]")]
 public class PrinterController(IPrinterService printerService, PrintJobLog jobLog) : ControllerBase
 {
+    // A full decode queue clears in a few seconds.
+    private const string BusyRetryAfterSeconds = "5";
+
     [HttpPost]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
@@ -40,9 +43,16 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
             return Ok(new PrintResponse(true));
 
         // 503 tells clients to retry; a payload fault never gets better on retry.
-        return result.Failure == PrintFailure.Validation
-            ? BadRequest(new PrintResponse(false, result.Error, PrintResponse.ValidationType))
-            : StatusCode(503, new PrintResponse(false, result.Error, PrintResponse.PrinterType));
+        switch (result.Failure)
+        {
+            case PrintFailure.Validation:
+                return BadRequest(new PrintResponse(false, result.Error, PrintResponse.ValidationType));
+            case PrintFailure.Busy:
+                Response.Headers.RetryAfter = BusyRetryAfterSeconds;
+                return StatusCode(503, new PrintResponse(false, result.Error, PrintResponse.BusyType));
+            default:
+                return StatusCode(503, new PrintResponse(false, result.Error, PrintResponse.PrinterType));
+        }
     }
 
     [HttpGet("status")]

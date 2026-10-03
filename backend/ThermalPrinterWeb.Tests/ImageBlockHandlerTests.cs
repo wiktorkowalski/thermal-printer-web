@@ -223,11 +223,16 @@ public sealed class ImageBlockHandlerTests
     [InlineData(16385, 1, true)]
     [InlineData(1, 16384, false)]
     [InlineData(1, 16385, true)]
-    [InlineData(8000, 8000, false)]  // 64 MP, the pixel limit
-    [InlineData(8001, 8000, true)]
-    [InlineData(8064, 6048, false)]  // 48 MP phone photo
-    [InlineData(8160, 6144, false)]  // 50 MP phone photo
-    [InlineData(16382, 3628, false)] // phone panorama
+    [InlineData(8192, 6144, false)]  // 50.3 MP, the pixel limit
+    [InlineData(8193, 6144, true)]
+    [InlineData(8192, 6145, true)]
+    [InlineData(8000, 8000, true)]   // 64 MP
+    [InlineData(8000, 6000, false)]  // 48 MP phone photos
+    [InlineData(8064, 6048, false)]
+    [InlineData(8160, 6120, false)]  // 50 MP phone photos
+    [InlineData(8160, 6144, false)]
+    [InlineData(16382, 3072, false)] // the longest panorama that passes
+    [InlineData(16382, 3628, true)]  // full phone panorama, 59 MP
     [InlineData(int.MaxValue, int.MaxValue, true)]
     public void PixelsOverLimit_AtTheBoundaries(int width, int height, bool expected)
         => Assert.Equal(expected, ImageBlockHandler.PixelsOverLimit(width, height));

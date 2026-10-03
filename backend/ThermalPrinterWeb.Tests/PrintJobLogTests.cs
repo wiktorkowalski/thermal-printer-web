@@ -133,9 +133,16 @@ public sealed class PrintJobLogTests(McpToolTests.McpApp app) : IClassFixture<Mc
     [InlineData(HttpTemplate, "http", PrintFailure.Printer)]
     [InlineData(McpPrint, McpPrint, PrintFailure.Validation)]
     [InlineData(McpPrintNote, McpPrintNote, PrintFailure.Printer)]
+    [InlineData(HttpTemplate, "http", PrintFailure.Busy)]
+    [InlineData(McpPrint, McpPrint, PrintFailure.Busy)]
     public async Task Print_FailedJob_LogsTheKindWithoutTheReason(string path, string transport, PrintFailure failure)
     {
-        app.Printer.Result = failure == PrintFailure.Validation ? PrintResult.Invalid(Secret) : PrintResult.PrinterFault(Secret);
+        app.Printer.Result = failure switch
+        {
+            PrintFailure.Validation => PrintResult.Invalid(Secret),
+            PrintFailure.Busy => PrintResult.Busy,
+            _ => PrintResult.PrinterFault(Secret)
+        };
         try
         {
             var jobLines = await PrintAsync(path, "claude-code", "ua");

@@ -3,7 +3,8 @@ namespace ThermalPrinterWeb.Models;
 public enum PrintFailure
 {
     Validation,
-    Printer
+    Printer,
+    Busy
 }
 
 // Private constructor: a failure always carries its kind, so it cannot be
@@ -11,6 +12,9 @@ public enum PrintFailure
 public sealed record PrintResult
 {
     public static readonly PrintResult Ok = new(null, null);
+
+    // Server load: the payload is fine and the printer is not asked. Fixed text, the queue facts stay in the log.
+    public static readonly PrintResult Busy = new("Server busy: too many image jobs wait for a decode. Send the job again in a few seconds.", PrintFailure.Busy);
 
     private PrintResult(string? error, PrintFailure? failure)
     {
