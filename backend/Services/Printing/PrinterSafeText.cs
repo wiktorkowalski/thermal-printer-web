@@ -72,21 +72,4 @@ internal static class PrinterSafeText
 
         return [.. output];
     }
-
-    // ESCPOS_NET validates the character set of most barcode types, but passes
-    // control characters through for CODE128 and GS1-128.
-    public static string CleanBarcode(string content, out int replaced)
-        => Clean(content, char.IsControl, out replaced);
-
-    // QR data. ESCPOS_NET keeps only the low byte of each char, so a character
-    // above U+00FF can also become a control byte (U+0110 -> 0x10 DLE). LF stays:
-    // vCard and Wi-Fi payloads use it.
-    public static string CleanQRCode(string content, out int replaced)
-        => Clean(content.ReplaceLineEndings("\n"), c => c != '\n' && (char.IsControl(c) || c > 0xFF), out replaced);
-
-    private static string Clean(string content, Func<char, bool> isUnsafe, out int replaced)
-    {
-        replaced = content.Count(isUnsafe);
-        return replaced == 0 ? content : string.Concat(content.Select(c => isUnsafe(c) ? '?' : c));
-    }
 }

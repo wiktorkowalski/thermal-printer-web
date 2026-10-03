@@ -61,7 +61,9 @@ public sealed class PayloadErrorTests
         { Text(new string('\r', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
         { Text(new string('\f', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
         { Text(new string('\u2028', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
-        { new PrintContent { Type = ContentType.Image, Content = "AAAA", ImageOptions = new ImageOptions { MaxWidth = 0 } }, "Block 1 (Image): imageOptions.maxWidth 0 must be at least 1" }
+        { new PrintContent { Type = ContentType.Image, Content = "AAAA", ImageOptions = new ImageOptions { MaxWidth = 0 } }, "Block 1 (Image): imageOptions.maxWidth 0 must be at least 1" },
+        { new PrintContent { Type = ContentType.Barcode, Content = "Zażółć" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" },
+        { new PrintContent { Type = ContentType.QRCode, Content = new string('ż', 1477) }, "Block 1 (QRCode): content is 2954 bytes as UTF-8; a Model2 QR code holds at most 2953" }
     };
 
     [Fact]
