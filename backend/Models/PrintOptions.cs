@@ -10,6 +10,6 @@ public class PrintOptions
     public int? DefaultLineSpacing { get; set; }
     [Description("Cut the paper after the last block when the content has no Cut block. Default true.")]
     public bool AutoCut { get; set; } = true;
-    [Description("Paper fed before a cut, so the last line clears the cutter, 0 to 255. Default 3.")]
+    [Description("Empty lines fed before a cut, so the last line clears the cutter, 0 to 255. Default 3.")]
     public int FeedLinesAfterPrint { get; set; } = 3;
 }

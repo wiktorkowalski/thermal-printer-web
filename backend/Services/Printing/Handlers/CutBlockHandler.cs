@@ -10,8 +10,7 @@ internal sealed class CutBlockHandler : IBlockHandler
     {
         ctx.HasCut = true;
         var feedLines = ctx.Options?.FeedLinesAfterPrint ?? 3;
-        // GS V n feeds n motion units; one unit is at most one dot.
-        ctx.AddPaper(feedLines);
+        ctx.AddPaper(PaperLength.CutDots(feedLines));
         ctx.Add(item.PartialCut == true
             ? ctx.Emitter.PartialCutAfterFeed(feedLines)
             : ctx.Emitter.FullCutAfterFeed(feedLines));

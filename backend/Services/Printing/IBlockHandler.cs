@@ -18,6 +18,11 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     // Characters turned into '?' across the whole document.
     public int ReplacedCharacters { get; private set; }
 
+    // Estimated paper for the document so far, in dots. See PaperLength.
+    public int PaperDots { get; private set; }
+
+    public int? LineSpacing => Options?.DefaultLineSpacing;
+
     // The only ways caller text becomes printer bytes: handlers must not encode on
     // their own. Barcode content is the exception: its handler rejects all but printable ASCII.
     public byte[] EncodeText(string text) => Encode(text, Encoding);
@@ -31,11 +36,6 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
         ReplacedCharacters += replaced;
         return bytes;
     }
-
-    // Estimated paper for the document so far, in dots. See PaperLength.
-    public int PaperDots { get; private set; }
-
-    public int? LineSpacing => Options?.DefaultLineSpacing;
 
     // A handler calls this before it does the work for the block, so a job over the limit stops early.
     public void AddPaper(int dots)

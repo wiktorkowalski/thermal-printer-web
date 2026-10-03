@@ -18,6 +18,11 @@ internal static class PaperLength
     // Font A cell height. DoubleHeight adds one more cell to the line.
     private const int GlyphDots = 24;
 
+    private const byte LineFeed = 0x0A;
+
+    // Measured: the paper between the head and the cutter. Each cut feeds it.
+    private const int CutterOffsetDots = 124;
+
     private const int FontAColumns = 48;
     private const int FontBColumns = 64;
 
@@ -33,19 +38,22 @@ internal static class PaperLength
             + (styles?.Contains(PrintStyle.DoubleHeight) == true ? GlyphDots : 0);
 
     // The printer wraps a long line; an empty line still feeds one line.
-    public static int TextDots(string text, int? lineSpacing, List<PrintStyle>? styles)
+    // Counted on the encoded text: one byte is one column, and one character can be three bytes.
+    public static int TextDots(ReadOnlySpan<byte> encoded, int? lineSpacing, List<PrintStyle>? styles)
     {
         var columns = styles?.Contains(PrintStyle.FontB) == true ? FontBColumns : FontAColumns;
         if (styles?.Contains(PrintStyle.DoubleWidth) == true)
             columns /= 2;
 
         var lines = 0;
-        // Same line breaks as the encoder: it turns CR, FF, NEL, LS and PS into LF.
-        foreach (var line in text.AsSpan().EnumerateLines())
-            lines += Math.Max(1, (line.Length + columns - 1) / columns);
+        foreach (var line in encoded.Split(LineFeed))
+            lines += Math.Max(1, (line.End.GetOffset(encoded.Length) - line.Start.GetOffset(encoded.Length) + columns - 1) / columns);
 
         return lines * LineDots(lineSpacing, styles);
     }
+
+    // GS V n feeds n motion units; one unit is at most one dot.
+    public static int CutDots(int feed) => feed + CutterOffsetDots;
 
     // The size the printer gives an image: it only scales down, to fit inside the limits.
     public static int ImageDots(int width, int height, int maxWidth, int maxHeight, bool preserveAspectRatio)

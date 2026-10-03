@@ -41,13 +41,13 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     internal const int MaxLineSpacing = 255;
     internal const int MaxFeedBeforeCut = 255;
 
-    // Tests set a loopback address and a zero timeout.
-    internal string PrinterAddress { get; init; } = DefaultPrinterAddress;
-    internal TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(3);
-
     // ESC B n t (1B 42): buzzer - n beeps each of length t. Both clamp to 1..9.
     private const int BuzzerMin = 1;
     private const int BuzzerMax = 9;
+
+    // Tests set a loopback address and a zero timeout.
+    internal string PrinterAddress { get; init; } = DefaultPrinterAddress;
+    internal TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
@@ -80,14 +80,15 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 PrinterName = "ThermalPrinter"
             });
 
+            var job = ByteSplicer.Combine(byteContent.ToArray());
             try
             {
-                await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
+                await printer.WriteAsync(job);
             }
             catch (Exception ex)
             {
-                // The status read passed, then the connection for the job failed.
-                logger.LogWarning(ex, "Print failed: no connection to the printer at {Address}", PrinterAddress);
+                // The status read passed, then the connection for the job failed: the job is lost.
+                logger.LogError(ex, "Print failed: no connection to the printer at {Address}", PrinterAddress);
                 return PrintResult.PrinterFault(UnreachableError);
             }
 
@@ -176,7 +177,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
         if (options?.AutoCut != false && !ctx.HasCut)
         {
-            // Not counted as paper: at most 255 dots, one time.
+            // Not counted as paper: one cut, under 5 cm.
             var feedLines = options?.FeedLinesAfterPrint ?? 3;
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
@@ -189,9 +190,8 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         if (value is not { } number || (number >= 0 && number <= max))
             return;
 
-        var rejection = PrintContentException.OutOfRange(field, number, 0, max);
-        logger.LogWarning("Rejected print: {Reason}", rejection.Message);
-        throw rejection;
+        logger.LogWarning("Rejected print: {Field} {Value} is outside the range {Min} to {Max}", field, number, 0, max);
+        throw PrintContentException.OutOfRange(field, number, 0, max);
     }
 
     private async Task AddBlockAsync(int index, PrintContent? item, BlockContext ctx)

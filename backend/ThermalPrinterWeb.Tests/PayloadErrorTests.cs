@@ -47,11 +47,11 @@ public sealed class PayloadErrorTests
         BarcodeOptions = new BarcodeOptions { Type = BarcodeType.EAN13 }
     };
 
-    private static PrintContent Barcode(int? heightInDots) => new()
+    private static PrintContent Barcode(int? heightInDots, BarLabelPosition labelPosition = BarLabelPosition.Below, string content = "BOX-0007") => new()
     {
         Type = ContentType.Barcode,
-        Content = "BOX-0007",
-        BarcodeOptions = new BarcodeOptions { HeightInDots = heightInDots }
+        Content = content,
+        BarcodeOptions = new BarcodeOptions { HeightInDots = heightInDots, LabelPosition = labelPosition }
     };
 
     private static PrintContent LineFeed(int lines) => new() { Type = ContentType.LineFeed, Lines = lines };
@@ -80,6 +80,8 @@ public sealed class PayloadErrorTests
         { Barcode(0), "Block 1 (Barcode): barcodeOptions.heightInDots 0 is outside the range 1 to 255" },
         { Barcode(-1), "Block 1 (Barcode): barcodeOptions.heightInDots -1 is outside the range 1 to 255" },
         { Barcode(256), "Block 1 (Barcode): barcodeOptions.heightInDots 256 is outside the range 1 to 255" },
+        // A barcode block with no content prints nothing; the height is still checked.
+        { Barcode(256, content: ""), "Block 1 (Barcode): barcodeOptions.heightInDots 256 is outside the range 1 to 255" },
         { Barcode(int.MinValue), "Block 1 (Barcode): barcodeOptions.heightInDots -2147483648 is outside the range 1 to 255" },
         { new PrintContent { Type = ContentType.QRCode, Content = new string('ż', 1477) }, "Block 1 (QRCode): content is 2954 bytes as UTF-8; a Model2 QR code holds at most 2953" }
     };
@@ -240,15 +242,24 @@ public sealed class PayloadErrorTests
             // Line spacing 255: 125 lines are 31,875 dots.
             { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255 }, null },
             { [Text(new string('\n', 125))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaper(0, ContentType.Text) },
-            // Each cut feeds 255 dots.
-            { [.. Enumerable.Repeat(cut, 125)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
-            { [.. Enumerable.Repeat(cut, 126)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(125, ContentType.Cut) },
+            // Each cut feeds 255 dots and the 124 dots to the cutter: 379.
+            { [.. Enumerable.Repeat(cut, 84)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
+            { [.. Enumerable.Repeat(cut, 85)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(84, ContentType.Cut) },
+            // A feed of 0 still moves the paper to the cutter.
+            { [.. Enumerable.Repeat(cut, 259)], new PrintOptions { FeedLinesAfterPrint = 0 }, OverPaper(258, ContentType.Cut) },
+            // The printer wraps on bytes. KATAKANA has no .NET encoding, so the text goes out as UTF-8: 3 bytes for one euro sign.
+            { [.. Enumerable.Repeat(Text(new string('€', 10_000)), 2)], new PrintOptions { CodePage = "KATAKANA" }, OverPaper(1, ContentType.Text) },
+            // PC852 has no ellipsis: it prints as three dots.
+            { [.. Enumerable.Repeat(Text(new string('…', 10_000)), 2)], null, OverPaper(1, ContentType.Text) },
             // 177 modules x 6 dots + one line = 1091 dots.
             { [.. Enumerable.Repeat(widestQRCode, 29)], null, null },
             { [.. Enumerable.Repeat(widestQRCode, 30)], null, OverPaper(29, ContentType.QRCode) },
             // 255 dots + one line = 284 dots.
             { [.. Enumerable.Repeat(Barcode(255), 112)], null, null },
-            { [.. Enumerable.Repeat(Barcode(255), 113)], null, OverPaper(112, ContentType.Barcode) }
+            { [.. Enumerable.Repeat(Barcode(255), 113)], null, OverPaper(112, ContentType.Barcode) },
+            // A caption above and below: 255 dots + two lines = 313 dots.
+            { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 102)], null, null },
+            { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 103)], null, OverPaper(102, ContentType.Barcode) }
         };
     }
 

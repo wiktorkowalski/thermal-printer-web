@@ -22,6 +22,9 @@ public sealed class PrinterFaultTests
         """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"ready":false,"notReadyReason":"printer unreachable"}""";
     private const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
 
+    // Online, cover closed, paper present.
+    private static readonly byte[] ReadyStatus = [0x12];
+
     private static readonly string ServiceCategory = typeof(PrinterService).FullName!;
 
     // The app with PrinterService pointed at a loopback port.
@@ -75,8 +78,7 @@ public sealed class PrinterFaultTests
                 await stream.ReadExactlyAsync(query);
                 if (i == 2)
                     listener.Dispose();
-                // Online, cover closed, paper present.
-                await stream.WriteAsync(new byte[] { 0x12 });
+                await stream.WriteAsync(ReadyStatus);
             }
         });
         return (port, done);
@@ -174,7 +176,7 @@ public sealed class PrinterFaultTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("""{"success":false,"error":"Printer unreachable","type":"printer"}""", body);
         var entry = Assert.Single(app.ServiceLogs);
-        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal(LogLevel.Error, entry.Level);
         Assert.StartsWith($"Print failed: no connection to the printer at {Loopback}:{port}", entry.Message);
         Assert.Contains("Exception", entry.Message);
     }
