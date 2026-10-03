@@ -24,7 +24,7 @@ public static class PrinterTools
         IPrinterService printer,
         [Description("Title, printed large and centered at the top.")] string title,
         [Description("Message body, printed centered under the title.")] string message,
-        [Description("Optional base64-encoded PNG to print under the message.")] string? imageBase64 = null)
+        [Description("Optional base64-encoded PNG or JPEG to print under the message.")] string? imageBase64 = null)
     {
         var result = await printer.PrintAsync(SimpleNote.Build(title, message, imageBase64));
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
@@ -42,7 +42,7 @@ public static class PrinterTools
     }
 
     [McpServerTool(Name = "print")]
-    [Description("Print a custom document: an ordered list of content blocks (Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage). Use for full control over styling, barcodes, QR codes and images.")]
+    [Description("Print a custom document: an ordered list of content blocks (Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage). Use for full control over styling, barcodes, QR codes and images. Image content is base64 PNG or JPEG; other formats are rejected.")]
     public static async Task<string> PrintAsync(
         IPrinterService printer,
         [Description("Ordered content blocks to print, top to bottom.")] List<PrintContent> content,

@@ -4,18 +4,21 @@ export interface ValidationResult {
 }
 
 // Image validation
+const IMAGE_TYPES = ['image/png', 'image/jpeg'];
+export const IMAGE_ACCEPT = IMAGE_TYPES.join(',');
+
 export function validateImage(file: File | null): ValidationResult {
   if (!file) {
     return { isValid: true }; // Image is optional
   }
 
   const maxSize = 5 * 1024 * 1024; // 5MB
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
-  if (!allowedTypes.includes(file.type)) {
+  // The backend decodes PNG and JPEG only and checks the bytes itself.
+  if (!IMAGE_TYPES.includes(file.type)) {
     return {
       isValid: false,
-      error: `[ERROR] Invalid file type. Allowed: ${allowedTypes.map(t => t.split('/')[1].toUpperCase()).join(', ')}`
+      error: '[ERROR] Invalid file type. Allowed: PNG, JPEG'
     };
   }
 
