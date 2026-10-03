@@ -19,7 +19,7 @@ internal sealed class McpApiKeyMiddleware
 
     public McpApiKeyMiddleware(
         RequestDelegate next,
-        IOptions<McpServerOptions> options,
+        IOptions<McpAuthOptions> options,
         IHostEnvironment environment,
         ILogger<McpApiKeyMiddleware> logger)
     {
@@ -42,7 +42,7 @@ internal sealed class McpApiKeyMiddleware
             _logger.LogWarning(
                 "MCP API key not configured. {McpPath} rejects every request. Set {ConfigPath}",
                 McpPath,
-                $"{McpServerOptions.SectionName}:{nameof(McpServerOptions.ApiKey)}");
+                $"{McpAuthOptions.SectionName}:{nameof(McpAuthOptions.ApiKey)}");
         }
     }
 
@@ -61,8 +61,8 @@ internal sealed class McpApiKeyMiddleware
             context.Connection.RemoteIpAddress);
 
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        context.Response.Headers.WWWAuthenticate = "Bearer";
-        await context.Response.WriteAsync("Unauthorized");
+        // No WWW-Authenticate header: MCP clients read it as a prompt to start OAuth discovery.
+        await context.Response.WriteAsync("Unauthorized", context.RequestAborted);
     }
 
     private bool IsAuthorized(HttpRequest request)

@@ -25,7 +25,10 @@ builder.Services.AddPrinterBlockHandlers();
 builder.Services.AddMcpServer()
     .WithHttpTransport(o => o.Stateless = true)
     .WithToolsFromAssembly();
-builder.Services.AddOptions<McpServerOptions>().BindConfiguration(McpServerOptions.SectionName);
+builder.Services.AddOptions<McpAuthOptions>()
+    .BindConfiguration(McpAuthOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 // Development only: Swagger (it lists every endpoint) and CORS for the React dev server.
 if (builder.Environment.IsDevelopment())

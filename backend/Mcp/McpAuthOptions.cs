@@ -1,6 +1,6 @@
 namespace ThermalPrinterWeb.Mcp;
 
-internal sealed class McpServerOptions
+internal sealed class McpAuthOptions
 {
     public const string SectionName = "McpServer";
 
