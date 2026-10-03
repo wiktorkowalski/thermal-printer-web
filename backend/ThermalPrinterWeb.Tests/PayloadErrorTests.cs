@@ -52,9 +52,84 @@ public sealed class PayloadErrorTests
         { new PrintContent { Type = ContentType.Image, Content = "not base64 !!" }, "Block 1 (Image): Image rejected: not valid base64 (13 characters)." },
         { new PrintContent { Type = ContentType.Image, Content = Convert.ToBase64String("not an image"u8) }, "Block 1 (Image): Image rejected: format not supported (format unknown, 12 bytes). Send a PNG or JPEG." },
         { BadBarcode(), "Block 1 (Barcode): content is not a valid EAN13 barcode" },
+        { new PrintContent { Type = ContentType.Separator, SeparatorLength = 65 }, "Block 1 (Separator): separatorLength 65 is over the limit of 64" },
+        { new PrintContent { Type = ContentType.Separator, SeparatorLength = int.MaxValue }, "Block 1 (Separator): separatorLength 2147483647 is over the limit of 64" },
+        { new PrintContent { Type = ContentType.LineFeed, Lines = 101 }, "Block 1 (LineFeed): lines 101 is over the limit of 100" },
+        { Text(new string('x', 10_001)), "Block 1 (Text): text length 10001 is over the limit of 10000" },
+        { Text(new string('\n', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        // The encoder turns each of these into LF.
+        { Text(new string('\r', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        { Text(new string('\f', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        { Text(new string('\u2028', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        { new PrintContent { Type = ContentType.Image, Content = "AAAA", ImageOptions = new ImageOptions { MaxWidth = 0 } }, "Block 1 (Image): imageOptions.maxWidth 0 must be at least 1" },
         { new PrintContent { Type = ContentType.Barcode, Content = "Zażółć" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" },
         { new PrintContent { Type = ContentType.QRCode, Content = new string('ż', 1477) }, "Block 1 (QRCode): content is 2954 bytes as UTF-8; a Model2 QR code holds at most 2953" }
     };
+
+    [Fact]
+    public async Task BuildDocumentAsync_BlocksAtTheLimits_AreAccepted()
+    {
+        List<PrintContent> content =
+        [
+            new() { Type = ContentType.Separator, SeparatorLength = 64 },
+            new() { Type = ContentType.LineFeed, Lines = 100 },
+            Text(new string('x', 10_000)),
+            Text(new string('\n', 499)),
+            .. Enumerable.Range(0, PrinterService.MaxBlocks - 4).Select(_ => Text())
+        ];
+        Assert.Equal(PrinterService.MaxBlocks, content.Count);
+
+        Assert.NotEmpty(await NewService().BuildDocumentAsync(content, null));
+    }
+
+    [Fact]
+    public async Task PrintAsync_TooManyBlocks_IsAValidationFailureLoggedOnce()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        var content = Enumerable.Range(0, PrinterService.MaxBlocks + 1).Select(_ => Text(Secret)).ToList();
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        Assert.Equal(PrintResult.Invalid("block count 501 is over the limit of 500"), result);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.DoesNotContain(Secret, entry.Message);
+    }
+
+    [Theory]
+    [InlineData(20, true)]
+    [InlineData(21, false)]
+    public async Task PrintAsync_ImageBlocks_AreLimitedPerDocument(int count, bool accepted)
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        // Not an image: an accepted document fails later, at block 0.
+        var content = Enumerable.Range(0, count).Select(_ => new PrintContent { Type = ContentType.Image, Content = "AAAA" }).ToList();
+        // Image blocks with no picture do not count.
+        content.Add(new PrintContent { Type = ContentType.Image });
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        Assert.Equal(PrintFailure.Validation, result.Failure);
+        Assert.Equal(accepted, result.Error!.StartsWith("Block 0 (Image):", StringComparison.Ordinal));
+        if (!accepted)
+            Assert.Equal("image block count 21 is over the limit of 20", result.Error);
+        Assert.Equal(LogLevel.Warning, Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information).Level);
+    }
+
+    [Fact]
+    public async Task PrintAsync_TooMuchPrinterData_IsAValidationFailureLoggedOnce()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        var block = new string('x', 10_000);
+        var content = Enumerable.Range(0, 250).Select(_ => Text(block)).ToList();
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        // 2 MiB / 10,019 bytes per block = 209 blocks fit.
+        Assert.Equal(PrintResult.Invalid("Block 209: the document is over the limit of 2097152 bytes of printer data"), result);
+        var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+    }
 
     [Theory]
     [MemberData(nameof(InvalidBlocks))]

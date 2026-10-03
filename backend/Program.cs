@@ -12,6 +12,7 @@ var port = Environment.GetEnvironmentVariable("PORT") ?? "5160";
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.ListenAnyIP(int.Parse(port)); // Listen on all interfaces
+    serverOptions.Limits.MaxRequestBodySize = PrinterService.MaxRequestBodyBytes;
 });
 
 // Add services to the container.
