@@ -52,10 +52,10 @@ public sealed class ImageBlockHandlerTests
         Assert.Contains(RasterCommand.AsSpan(), ByteSplicer.Combine([.. ctx.Output]).AsSpan());
     }
 
-    private static async Task<InvalidDataException> AssertRejectedAsync(string content)
+    private static async Task<PrintContentException> AssertRejectedAsync(string content)
     {
         var ctx = NewContext();
-        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => RunAsync(content, ctx));
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(content, ctx));
         Assert.Empty(ctx.Output);
         return ex;
     }

@@ -28,6 +28,10 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     {
         try
         {
+            // Build first: it needs no printer, so a bad payload is reported as such
+            // even while the printer is off.
+            var byteContent = await BuildDocumentAsync(content, options);
+
             // Fire-and-forget writes buffer even when the printer can't print (cover open,
             // paper out), so a job would falsely report success. Refuse instead of lying.
             var status = await GetStatusAsync();
@@ -36,7 +40,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 logger.LogWarning(
                     "Refusing print: printer not ready ({Reason}); status={Raw}",
                     status.NotReadyReason, status.Raw);
-                return new PrintResult(false, $"Printer not ready: {status.NotReadyReason}");
+                return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
             logger.LogInformation("Connecting to printer at {Address}", PrinterAddress);
@@ -46,16 +50,19 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 PrinterName = "ThermalPrinter"
             });
 
-            var byteContent = await BuildDocumentAsync(content, options);
-
             await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
             logger.LogInformation("Printing complete");
-            return new PrintResult(true);
+            return PrintResult.Ok;
+        }
+        catch (PrintContentException ex)
+        {
+            // Logged where the block failed.
+            return PrintResult.Invalid(ex.Message);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Print failed");
-            return new PrintResult(false, ex.Message);
+            return PrintResult.PrinterFault(ex.Message);
         }
     }
 
@@ -63,7 +70,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // can be exercised without the printer attached. Dispatch is a handler
     // registry keyed by ContentType - add a block type by registering a handler,
     // no switch to edit.
-    private async Task<List<byte[]>> BuildDocumentAsync(List<PrintContent> content, PrintOptions? options)
+    internal async Task<List<byte[]>> BuildDocumentAsync(List<PrintContent> content, PrintOptions? options)
     {
         var e = new EPSON();
         var ctx = new BlockContext(e, options);
@@ -85,20 +92,8 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         if (options?.DefaultLineSpacing != null)
             ctx.Add(e.SetLineSpacingInDots(options.DefaultLineSpacing.Value));
 
-        foreach (var item in content)
-        {
-            ctx.Add(item.Alignment switch
-            {
-                Alignment.Left => e.LeftAlign(),
-                Alignment.Right => e.RightAlign(),
-                _ => e.CenterAlign()
-            });
-
-            if (_handlers.TryGetValue(item.Type, out var handler))
-                await handler.HandleAsync(item, ctx);
-            else
-                logger.LogWarning("Unsupported content type: {Type}", item.Type);
-        }
+        foreach (var (index, item) in content.Index())
+            await AddBlockAsync(index, item, ctx);
 
         // Count only: the content is caller input and the endpoint is public.
         if (ctx.ReplacedCharacters > 0)
@@ -111,6 +106,46 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         }
 
         return ctx.Output;
+    }
+
+    private async Task AddBlockAsync(int index, PrintContent? item, BlockContext ctx)
+    {
+        // JSON "content": [null] binds to a null entry.
+        if (item is null)
+        {
+            logger.LogWarning("Rejected print: block {BlockIndex} is null", index);
+            throw new PrintContentException($"Block {index}: must not be null");
+        }
+
+        var e = ctx.Emitter;
+        ctx.Add(item.Alignment switch
+        {
+            Alignment.Left => e.LeftAlign(),
+            Alignment.Right => e.RightAlign(),
+            _ => e.CenterAlign()
+        });
+
+        if (!_handlers.TryGetValue(item.Type, out var handler))
+        {
+            logger.LogWarning("Unsupported content type: {Type}", item.Type);
+            return;
+        }
+
+        try
+        {
+            await handler.HandleAsync(item, ctx);
+        }
+        catch (Exception ex)
+        {
+            // Handlers do no printer I/O, so a throw here means the block cannot be
+            // printed as sent. Library messages repeat caller content: keep them out
+            // of the log and the response, the endpoint is public.
+            var reason = ex is PrintContentException ? ex.Message : "content is not valid for this block type";
+            logger.LogWarning(
+                "Rejected print: block {BlockIndex} ({Type}) failed with {ExceptionType}: {Reason}",
+                index, item.Type, ex.GetType().Name, reason);
+            throw new PrintContentException($"Block {index} ({item.Type}): {reason}");
+        }
     }
 
     public async Task<PrinterStatus> GetStatusAsync()

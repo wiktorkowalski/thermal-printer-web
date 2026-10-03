@@ -1,4 +1,7 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
 
@@ -16,6 +19,26 @@ builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    })
+    // Model-binding failures answer in the same shape as every other print error.
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            // A body that fails to parse also reports "request field is required": keep
+            // only the JSON path entries ("$...") then, they hold the cause.
+            var entries = context.ModelState.Where(entry => entry.Value is { Errors.Count: > 0 }).ToList();
+            if (entries.Any(IsJsonPath))
+                entries = entries.Where(IsJsonPath).ToList();
+
+            var errors = entries.SelectMany(entry => entry.Value!.Errors.Select(error =>
+                $"{entry.Key}: {error.ErrorMessage}".TrimStart(':', ' ')));
+            return new BadRequestObjectResult(
+                new PrintResponse(false, string.Join("; ", errors), PrintResponse.ValidationType));
+
+            static bool IsJsonPath(KeyValuePair<string, ModelStateEntry?> entry)
+                => entry.Key.StartsWith('$');
+        };
     });
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
