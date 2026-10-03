@@ -17,6 +17,8 @@ namespace ThermalPrinterWeb.Tests;
 public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToolTests.McpApp>
 {
     private const string Secret = "SECRET-CALLER-CONTENT";
+    private const int FontAColumns = 48;
+    private const int DoubleWidthColumns = 24;
 
     public sealed class RecordingPrinter : IPrinterService
     {
@@ -122,7 +124,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     }
 
     [Fact]
-    public async Task Initialize_SendsServerInstructions()
+    public async Task Initialize_AnyClient_SendsServerInstructions()
     {
         var result = await RpcAsync("initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}""");
 
@@ -133,7 +135,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     }
 
     [Fact]
-    public async Task ToolsList_KeepsTheToolNames()
+    public async Task ToolsList_AfterTheChange_KeepsTheToolNames()
     {
         var tools = (await RpcAsync("tools/list")).GetProperty("tools");
 
@@ -146,7 +148,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [InlineData("print", "content,options")]
     [InlineData("print_note", "title,message,imageBase64")]
     [InlineData("beep", "count,duration")]
-    public async Task ToolsList_EveryArgumentIsOptionalAndDescribed(string tool, string expectedArguments)
+    public async Task ToolsList_EveryTool_HasOnlyOptionalDescribedArguments(string tool, string expectedArguments)
     {
         var schema = (await ToolAsync(tool)).GetProperty("inputSchema");
 
@@ -158,7 +160,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     }
 
     [Fact]
-    public async Task ToolsList_PrintDescribesEveryNestedProperty()
+    public async Task ToolsList_PrintTool_DescribesEveryNestedProperty()
     {
         var properties = (await ToolAsync("print")).GetProperty("inputSchema").GetProperty("properties");
         var block = properties.GetProperty("content").GetProperty("items");
@@ -179,7 +181,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [InlineData("print")]
     [InlineData("print_note")]
     [InlineData("beep")]
-    public async Task ToolsList_DescriptionExampleIsAValidCall(string tool)
+    public async Task ToolsCall_DescriptionExample_IsAValidCall(string tool)
     {
         var example = ExampleIn(await ToolAsync(tool));
 
@@ -191,7 +193,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
 
     // The examples follow the advice they give: no line is wider than its style allows.
     [Fact]
-    public async Task PrintExample_KeepsEveryLineInsideThePaper()
+    public async Task ToolsCall_PrintExample_KeepsEveryLineInsideThePaper()
     {
         app.Printer.Jobs.Clear();
 
@@ -200,31 +202,31 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         Assert.True(app.Printer.Jobs.TryDequeue(out var job));
         foreach (var block in job.Content.Where(block => block.Type == ContentType.Text))
         {
-            var width = block.Style?.Contains(PrintStyle.DoubleWidth) == true ? 24 : 48;
+            var width = block.Style?.Contains(PrintStyle.DoubleWidth) == true ? DoubleWidthColumns : FontAColumns;
             Assert.All(block.Content!.Split('\n'), line => Assert.True(line.Length <= width, line));
         }
     }
 
     [Theory]
     // Wrong names: the caller guessed before it read the schema (#37).
-    [InlineData("print", """{"text":"SECRET-CALLER-CONTENT"}""", "'content' is missing")]
-    [InlineData("print", """{"title":"SECRET-CALLER-CONTENT","message":"m"}""", "'content' is missing")]
+    [InlineData("print", $$$"""{"text":"{{{Secret}}}"}""", "'content' is missing")]
+    [InlineData("print", $$$"""{"title":"{{{Secret}}}","message":"m"}""", "'content' is missing")]
     [InlineData("print", "{}", "'content' is missing")]
     [InlineData("print", null, "'content' is missing")]
     [InlineData("print", """{"content":null}""", "'content' is missing")]
-    [InlineData("print_note", """{"content":[{"type":"Text","content":"SECRET-CALLER-CONTENT"}]}""", "'title' and 'message' are missing")]
-    [InlineData("print_note", """{"text":"SECRET-CALLER-CONTENT"}""", "'title' and 'message' are missing")]
-    [InlineData("print_note", """{"title":"SECRET-CALLER-CONTENT"}""", "'message' is missing")]
-    [InlineData("print_note", """{"message":"SECRET-CALLER-CONTENT"}""", "'title' is missing")]
+    [InlineData("print_note", $$$"""{"content":[{"type":"Text","content":"{{{Secret}}}"}]}""", "'title' and 'message' are missing")]
+    [InlineData("print_note", $$$"""{"text":"{{{Secret}}}"}""", "'title' and 'message' are missing")]
+    [InlineData("print_note", $$$"""{"title":"{{{Secret}}}"}""", "'message' is missing")]
+    [InlineData("print_note", $$$"""{"message":"{{{Secret}}}"}""", "'title' is missing")]
     [InlineData("print_note", """{"title":null,"message":null}""", "'title' and 'message' are missing")]
     // Wrong JSON types: these fail in the SDK, before the tool body.
-    [InlineData("print", """{"content":"SECRET-CALLER-CONTENT"}""", "an argument has the wrong JSON type")]
-    [InlineData("print", """{"content":{"type":"Text","content":"SECRET-CALLER-CONTENT"}}""", "an argument has the wrong JSON type")]
-    [InlineData("print", """{"content":[{"type":"SECRET-CALLER-CONTENT"}]}""", "the value at $[0].type has the wrong JSON type")]
-    [InlineData("print", """{"content":[{"type":"Text","content":"x","style":"SECRET-CALLER-CONTENT"}]}""", "the value at $[0].style has the wrong JSON type")]
-    [InlineData("print", """{"content":[{"type":"Text","content":"x"}],"options":"SECRET-CALLER-CONTENT"}""", "an argument has the wrong JSON type")]
-    [InlineData("print_note", """{"title":5,"message":"SECRET-CALLER-CONTENT"}""", "an argument has the wrong JSON type")]
-    [InlineData("beep", """{"count":"SECRET-CALLER-CONTENT"}""", "an argument has the wrong JSON type")]
+    [InlineData("print", $$$"""{"content":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
+    [InlineData("print", $$$"""{"content":{"type":"Text","content":"{{{Secret}}}"}}""", "an argument has the wrong JSON type")]
+    [InlineData("print", $$$"""{"content":[{"type":"{{{Secret}}}"}]}""", "the value at $[0].type has the wrong JSON type or is not a known name")]
+    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x","style":"{{{Secret}}}"}]}""", "the value at $[0].style has the wrong JSON type or is not a known name")]
+    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x"}],"options":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
+    [InlineData("print_note", $$$"""{"title":5,"message":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
+    [InlineData("beep", $$$"""{"count":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
     public async Task ToolsCall_WrongShape_AnswersWithTheCorrectShape(string tool, string? arguments, string expectedProblem)
     {
         app.Printer.Jobs.Clear();

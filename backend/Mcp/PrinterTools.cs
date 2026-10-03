@@ -11,7 +11,7 @@ namespace ThermalPrinterWeb.Mcp;
 // is injected from the request's DI scope; the remaining parameters form each
 // tool's input schema.
 // Every schema parameter is optional, so a call with the wrong argument names
-// reaches the tool body and gets the correct shape back (ToolArgumentException).
+// reaches the tool body and gets the correct shape back.
 [McpServerToolType]
 public static class PrinterTools
 {
@@ -47,7 +47,7 @@ public static class PrinterTools
         "Print a simple note: a large centered title, a message below it, an optional image, then a cut. Best for quick notes and messages. "
         + "title and message are both needed. "
         + "The title holds 24 characters per line, the message 48; longer lines wrap in the middle of a word, so put \\n where a line must end. "
-        + "Polish letters print; emoji and control characters print as '?'. "
+        + "Polish letters print; emoji print as '?'. "
         + "Example: " + PrintNoteExample)]
     public static async Task<string> PrintNoteAsync(
         IPrinterService printer,
@@ -86,12 +86,12 @@ public static class PrinterTools
     [McpServerTool(Name = PrintName)]
     [Description(
         "Print a custom document: an ordered list of content blocks (Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage). "
-        + "Use for full control over styling, barcodes, QR codes and images; for a plain note use print_note. "
+        + "Use for full control over styling, barcodes, QR codes and images; for a plain note use " + PrintNoteName + ". "
         + "content is needed. Each block is an object with a type; a Text block is {\"type\":\"Text\",\"content\":\"...\"}. "
         + "One line holds 48 characters (24 with DoubleWidth, 64 with FontB, 32 with both); longer lines wrap in the middle of a word, "
         + "so keep each line within the limit (one Text block per line, or \\n inside content). "
-        + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block. "
-        + "Polish letters print; emoji and control characters print as '?'. "
+        + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
+        + "Polish letters print; emoji print as '?'. "
         + "Image content is base64 PNG or JPEG; other formats are rejected. "
         + "Example: " + PrintExample)]
     public static async Task<string> PrintAsync(
@@ -106,8 +106,12 @@ public static class PrinterTools
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 
-    // One valid call per tool, shown in every wrong-shape error. A caller that
-    // sends plain text to print most often wants print_note.
+    internal static string WrongArgumentsMessage(string tool, string problem)
+        => ValidCallFor(tool) is { } validCall
+            ? $"Wrong arguments for '{tool}': {problem}. Example of a valid call: {validCall}"
+            : $"Wrong arguments for '{tool}': {problem}.";
+
+    // A caller that sends plain text to print most often wants print_note.
     internal static string? ValidCallFor(string tool) => tool switch
     {
         PrintName => $"{PrintExample} For a plain note use {PrintNoteName}: {PrintNoteExample}",

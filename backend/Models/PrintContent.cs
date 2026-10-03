@@ -6,7 +6,7 @@ public class PrintContent
 {
     [Description("Block type. Text, Separator, LineFeed and Cut need no options; Barcode, QRCode and Image read 'content' plus their options object; CodePage switches to the code page named in 'content'.")]
     public ContentType Type { get; set; }
-    [Description("Text: the text to print, 48 characters per line (24 with DoubleWidth, 64 with FontB); a longer line wraps in the middle of a word, \\n starts a new line, a tab prints as a space, other control characters print as '?'. QRCode: the data, stored as UTF-8. Barcode: the data, printable ASCII only. Image: base64 PNG or JPEG. CodePage: the code page name, for example PC852. Not used by LineFeed, Cut and Separator.")]
+    [Description("Text: the text to print, 48 characters per line (24 with DoubleWidth, 64 with FontB); a longer line wraps in the middle of a word, \\n starts a new line (CR and CRLF count as \\n), a tab prints as a space, other control characters print as '?'. QRCode: the data, stored as UTF-8, with the same control character rules. Barcode: the data, printable ASCII only. Image: base64 PNG or JPEG. CodePage: the code page name, for example PC852. Not used by LineFeed, Cut and Separator.")]
     public string? Content { get; set; }
     [Description("Horizontal position of the block. Default Center.")]
     public Alignment Alignment { get; set; } = Alignment.Center;

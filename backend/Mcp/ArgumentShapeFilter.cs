@@ -4,9 +4,7 @@ using ModelContextProtocol.Server;
 
 namespace ThermalPrinterWeb.Mcp;
 
-// Answers a wrong-shaped tool call with the correct shape. Without it the SDK
-// replies "An error occurred invoking '<tool>'" and logs the caller's mistake
-// as an error.
+// Without this the SDK answers "An error occurred invoking '<tool>'" and logs the caller's mistake as an error.
 internal static class ArgumentShapeFilter
 {
     public static McpRequestHandler<CallToolRequestParams, CallToolResult> Wrap(
@@ -23,11 +21,11 @@ internal static class ArgumentShapeFilter
             }
             catch (JsonException ex) when (context.Params?.Name is { } tool)
             {
-                // The SDK binds arguments before the tool body runs; a wrong JSON type
-                // fails there. The path is relative to the argument and holds schema
-                // property names only. The exception message is not used.
-                var where = ex.Path is null or "$" ? "an argument" : $"the value at {ex.Path}";
-                return Reject(context, tool, $"{where} has the wrong JSON type");
+                // SDK argument binding failed. The path holds schema property names only; the message can repeat caller content.
+                var problem = ex.Path is null or "$"
+                    ? "an argument has the wrong JSON type"
+                    : $"the value at {ex.Path} has the wrong JSON type or is not a known name";
+                return Reject(context, tool, problem);
             }
         };
 
@@ -40,7 +38,7 @@ internal static class ArgumentShapeFilter
         return new CallToolResult
         {
             IsError = true,
-            Content = [new TextContentBlock { Text = ToolArgumentException.MessageFor(tool, problem) }]
+            Content = [new TextContentBlock { Text = PrinterTools.WrongArgumentsMessage(tool, problem) }]
         };
     }
 }
