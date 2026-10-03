@@ -249,6 +249,8 @@ const inRange = (value: number, min: number, max: number) => value >= min && val
  */
 export function blockError(block: PrintContent): string | null {
   const message = (result: ValidationResult) => (result.isValid ? null : errorText(result));
+  // An imported or hand-edited JSON can hold any value here.
+  if (block.content != null && typeof block.content !== "string") return "Content must be text";
   switch (block.type) {
     case ContentType.Text:
       return message(validateText(block.content ?? ""));

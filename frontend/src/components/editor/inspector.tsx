@@ -12,7 +12,7 @@ import {
 } from "@/types/printer";
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
-import { BARCODE_MAX_HEIGHT_DOTS, EDITOR_LINE_FEED_MAX_LINES } from "@/lib/printer-limits";
+import { BARCODE_MAX_HEIGHT_DOTS, EDITOR_BARCODE_MIN_HEIGHT_DOTS, EDITOR_LINE_FEED_MAX_LINES } from "@/lib/printer-limits";
 import { HEAD_DOTS, LINE_DOTS, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { SectionLabel, Segmented, Switch, ToggleChip, fieldLabelClass, inputClass, quietButtonClass } from "./controls";
@@ -295,7 +295,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
             <input
               id={`${id}-h`}
               type="range"
-              min={16}
+              min={EDITOR_BARCODE_MIN_HEIGHT_DOTS}
               max={BARCODE_MAX_HEIGHT_DOTS}
               value={height}
               onChange={(e) => onUpdate({ barcodeOptions: { ...options, heightInDots: Number(e.target.value) } })}

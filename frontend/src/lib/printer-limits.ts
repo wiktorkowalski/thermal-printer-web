@@ -14,9 +14,10 @@ export const LINE_FEED_MAX_LINES = 100;
 // backend/Services/Printing/Handlers/BarcodeBlockHandler.cs: MinHeightInDots, MaxHeightInDots
 export const BARCODE_MIN_HEIGHT_DOTS = 1;
 export const BARCODE_MAX_HEIGHT_DOTS = 255;
-// Same file, BuildCommand: the payload length is one byte (255). CODE128 spends
-// 2 bytes on the code set prefix and sends each '{' twice.
-export const CODE128_MAX_PAYLOAD = 253;
+// Same file, BuildCommand: the payload length is one byte. CODE128 spends
+// 2 bytes of it on the code set prefix and sends each '{' twice.
+export const BARCODE_MAX_PAYLOAD = 255;
+export const CODE128_MAX_PAYLOAD = BARCODE_MAX_PAYLOAD - 2;
 
 // backend/Services/Printing/Handlers/QRCodeBlockHandler.cs: Model2MaxBytes, Model1MaxBytes, MicroMaxBytes
 // Bytes of the content as UTF-8, not characters.
@@ -38,9 +39,18 @@ export const MAX_REQUEST_BYTES = 30_000_000;
 
 // backend/Services/Printing/PaperLength.cs: MaxDots (32,000 dots = 4 m per job)
 export const MAX_PAPER_DOTS = 32_000;
+// Same file: QRMinModules, QRMaxModules, QRModulesPerByte. The paper estimate for a QR code.
+export const QR_MIN_MODULES = 21;
+export const QR_MAX_MODULES = 177;
+export const QR_MODULES_PER_BYTE = 25;
+
+// backend/Controllers/PrinterController.cs: BusyRetryAfterSeconds (the Retry-After of a busy answer)
+export const BUSY_RETRY_AFTER_SECONDS = 5;
 
 // Stricter in the editor on purpose. The backend takes more, the editor does not offer it.
 // A file over this does not fit the draft and the tray in localStorage.
 export const EDITOR_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const EDITOR_IMAGE_MAX_MB = EDITOR_IMAGE_MAX_BYTES / 1024 / 1024;
 export const EDITOR_LINE_FEED_MAX_LINES = 20;
 export const EDITOR_MAX_FEED_BEFORE_CUT = 10;
+export const EDITOR_BARCODE_MIN_HEIGHT_DOTS = 16;

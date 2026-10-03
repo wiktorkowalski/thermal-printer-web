@@ -2,7 +2,8 @@ import { useCallback, useState, type DragEvent, type ReactNode, type Ref } from 
 import { ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
-import { EDITOR_IMAGE_MAX_MB, IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
+import { EDITOR_IMAGE_MAX_MB } from "@/lib/printer-limits";
+import { IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
 import { DEFAULT_ALIGNMENT, HEAD_DOTS, countPrintedLines, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";

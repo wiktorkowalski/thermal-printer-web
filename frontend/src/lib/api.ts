@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
 import type { PrintRequest, PrintContent, PrintOptions, PrintResponse } from "../types/printer";
+import { BUSY_RETRY_AFTER_SECONDS } from "./printer-limits";
 
 const API_BASE_URL = "/api";
 
@@ -22,8 +23,8 @@ export interface PrintError {
   retryAfterMs?: number;
 }
 
-// The backend sends "Retry-After: 5" with a busy answer.
-const DEFAULT_BUSY_WAIT_MS = 5000;
+// Used when a busy answer has no readable Retry-After header.
+const DEFAULT_BUSY_WAIT_MS = BUSY_RETRY_AFTER_SECONDS * 1000;
 const MAX_BUSY_WAIT_MS = 30000;
 
 function retryAfterMs(header: unknown): number {

@@ -1,5 +1,6 @@
 import type { PrintContent, PrintStyle } from "@/types/printer";
 import { getMaxChars, CHARS_PER_LINE } from "@/lib/printer-constants";
+import { QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE } from "@/lib/printer-limits";
 import { qrDataBytes } from "@/lib/validation";
 
 // Vretti V330M geometry. The head is 576 dots wide (72 mm printable on 80 mm
@@ -68,9 +69,9 @@ export interface JobOptions {
 }
 
 // Same bound as backend/Services/Printing/PaperLength.cs QRCodeDots: the printer picks
-// the QR version, so this is the largest side the data can need (21 to 177 modules).
+// the QR version, so this is the largest side the data can need.
 function qrModules(content: string): number {
-  return Math.min(177, Math.ceil(Math.sqrt(21 * 21 + qrDataBytes(content) * 25)));
+  return Math.min(QR_MAX_MODULES, Math.ceil(Math.sqrt(QR_MIN_MODULES * QR_MIN_MODULES + qrDataBytes(content) * QR_MODULES_PER_BYTE)));
 }
 
 /**

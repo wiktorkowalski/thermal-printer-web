@@ -1,6 +1,8 @@
 import {
+  BARCODE_MAX_PAYLOAD,
   CODE128_MAX_PAYLOAD,
   EDITOR_IMAGE_MAX_BYTES,
+  EDITOR_IMAGE_MAX_MB,
   IMAGE_MAX_BYTES,
   IMAGE_MAX_PIXELS,
   IMAGE_MAX_SIDE_PIXELS,
@@ -25,7 +27,6 @@ export function errorText(result: ValidationResult, fallback = 'Invalid value'):
 // Image validation
 const IMAGE_TYPES = ['image/png', 'image/jpeg'];
 export const IMAGE_ACCEPT = IMAGE_TYPES.join(',');
-export const EDITOR_IMAGE_MAX_MB = EDITOR_IMAGE_MAX_BYTES / 1024 / 1024;
 
 function validateImage(file: File): ValidationResult {
   // The backend decodes PNG and JPEG only and checks the bytes itself.
@@ -96,7 +97,7 @@ export function validateImageContent(content: string): ValidationResult {
   if (content.length - start > IMAGE_MAX_BASE64_LENGTH) {
     return {
       isValid: false,
-      error: `[ERROR] Image too large. Max size: ${IMAGE_MAX_BYTES / 1024 / 1024} MB`
+      error: `[ERROR] Image too large. Max size: ${IMAGE_MAX_BYTES / 1024 / 1024}MB`
     };
   }
 
@@ -145,6 +146,13 @@ export function validateBarcode(data: string, type: string): ValidationResult {
     };
   }
 
+  if (data.length > BARCODE_MAX_PAYLOAD) {
+    return {
+      isValid: false,
+      error: `[ERROR] A barcode holds at most ${BARCODE_MAX_PAYLOAD} characters`
+    };
+  }
+
   // The printer sends each '{' twice, so it takes two places.
   if (type === 'CODE128' && data.length + (data.split('{').length - 1) > CODE128_MAX_PAYLOAD) {
     return {
@@ -160,7 +168,7 @@ const utf8 = new TextEncoder();
 
 /** QR data size as the backend counts it: UTF-8 bytes, CRLF as one LF. "ą" is 2 bytes, an emoji is 4. */
 export function qrDataBytes(content: string): number {
-  return utf8.encode(content.replaceAll('\r\n', '\n')).length;
+  return utf8.encode(String(content).replaceAll('\r\n', '\n')).length;
 }
 
 /** Index of the first control character the backend rejects in QR content, or -1. */
