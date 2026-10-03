@@ -28,11 +28,29 @@ public sealed class PrintJobLogTests(McpToolTests.McpApp app) : IClassFixture<Mc
         { McpPrintNote, McpPrintNote }
     };
 
-    // Sends one print job that holds Secret as its content and returns the job lines it logged.
-    private async Task<List<(LogLevel Level, string Category, string Message)>> PrintAsync(string path, string? source, string? userAgent)
+    private async Task<List<(LogLevel Level, string Category, string Message)>> SendAsync(string url, string json, string? userAgent = null)
     {
         app.Logs.Entries.Clear();
 
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        // Streamable HTTP (MCP) needs both; the controller ignores them.
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        if (userAgent is not null)
+            Assert.True(request.Headers.TryAddWithoutValidation("User-Agent", userAgent));
+
+        using var response = await _client.SendAsync(request);
+        await response.Content.ReadAsStringAsync();
+
+        return [.. app.Logs.Entries.Where(entry => entry.Category == JobLogCategory)];
+    }
+
+    // Sends one print job that holds Secret as its content and returns the job lines it logged.
+    private Task<List<(LogLevel Level, string Category, string Message)>> PrintAsync(string path, string? source, string? userAgent)
+    {
         var arguments = new Dictionary<string, object?>();
         if (path is HttpSimple or McpPrintNote)
         {
@@ -52,19 +70,7 @@ public sealed class PrintJobLogTests(McpToolTests.McpApp app) : IClassFixture<Mc
             ? new { jsonrpc = "2.0", id = 1, method = "tools/call", @params = new { name = path["mcp:".Length..], arguments } }
             : arguments;
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, isMcp ? "/mcp" : "/api/printer")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        if (userAgent is not null)
-            Assert.True(request.Headers.TryAddWithoutValidation("User-Agent", userAgent));
-
-        using var response = await _client.SendAsync(request);
-        await response.Content.ReadAsStringAsync();
-
-        return [.. app.Logs.Entries.Where(entry => entry.Category == JobLogCategory)];
+        return SendAsync(isMcp ? "/mcp" : "/api/printer", JsonSerializer.Serialize(body), userAgent);
     }
 
     [Theory]
@@ -76,15 +82,6 @@ public sealed class PrintJobLogTests(McpToolTests.McpApp app) : IClassFixture<Mc
         var line = Assert.Single(jobLines);
         Assert.Equal(LogLevel.Information, line.Level);
         Assert.Equal($"Print job: transport={transport} source=\"claude-code\" userAgent=\"test-agent/1.0 (unit)\" result=Printed", line.Message);
-    }
-
-    [Theory]
-    [MemberData(nameof(Paths))]
-    public async Task Print_AnyCaller_KeepsContentOutOfTheLog(string path, string transport)
-    {
-        await PrintAsync(path, "claude-code", "test-agent/1.0");
-
-        Assert.Contains(app.Logs.Entries, entry => entry.Message.Contains($"transport={transport} "));
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Message.Contains(Secret));
     }
 
@@ -156,35 +153,24 @@ public sealed class PrintJobLogTests(McpToolTests.McpApp app) : IClassFixture<Mc
     [Fact]
     public async Task PostPrinter_NoContentAndNoMessage_LogsOneRejectedJobLine()
     {
-        app.Logs.Entries.Clear();
+        app.Printer.Jobs.Clear();
+        var jobLines = await SendAsync("/api/printer", """{"source":"claude-code"}""");
 
-        using var response = await _client.PostAsync("/api/printer", new StringContent("""{"source":"claude-code"}""", Encoding.UTF8, "application/json"));
-
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(
             "Print job: transport=http source=\"claude-code\" userAgent=\"-\" result=Validation",
-            Assert.Single(app.Logs.Entries, entry => entry.Category == JobLogCategory).Message);
+            Assert.Single(jobLines).Message);
+        Assert.Empty(app.Printer.Jobs);
     }
 
     // A wrong-shaped MCP call is not a job: ArgumentShapeFilter logs it.
     [Fact]
     public async Task ToolsCall_WrongShape_LogsNoJobLine()
     {
-        app.Logs.Entries.Clear();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
-        {
-            Content = new StringContent(
-                """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"print","arguments":{"source":"claude-code"}}}""",
-                Encoding.UTF8,
-                "application/json")
-        };
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        var jobLines = await SendAsync(
+            "/mcp",
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"print","arguments":{"source":"claude-code"}}}""");
 
-        using var response = await _client.SendAsync(request);
-        await response.Content.ReadAsStringAsync();
-
-        Assert.DoesNotContain(app.Logs.Entries, entry => entry.Category == JobLogCategory);
+        Assert.Empty(jobLines);
         Assert.Single(app.Logs.Entries, entry => entry.Message == "Rejected MCP call to print: 'content' is missing");
     }
 

@@ -20,18 +20,12 @@ public sealed class PrintJobLog(ILogger<PrintJobLog> logger, IHttpContextAccesso
 
     // The reason of a failure is logged where it happens; this line holds the kind only.
     public void Write(string transport, string? source, PrintResult result)
-        => Write(transport, source, result.Failure?.ToString() ?? "Printed");
-
-    public void WriteRejected(string transport, string? source)
-        => Write(transport, source, nameof(PrintFailure.Validation));
-
-    private void Write(string transport, string? source, string result)
         => logger.LogInformation(
             "Print job: transport={Transport} source=\"{Source}\" userAgent=\"{UserAgent}\" result={Result}",
             transport,
             Clean(source, MaxSourceLength),
             Clean(httpContext.HttpContext?.Request.Headers.UserAgent.ToString(), MaxUserAgentLength),
-            result);
+            result.Failure?.ToString() ?? "Printed");
 
     // Caller text: no character may start a new log line, hide text or close the quotes around the value.
     internal static string Clean(string? value, int maxLength)
@@ -40,6 +34,7 @@ public sealed class PrintJobLog(ILogger<PrintJobLog> logger, IHttpContextAccesso
             return Missing;
 
         var cleaned = new StringBuilder(Math.Min(value.Length, maxLength));
+        Span<char> chars = stackalloc char[2];
         // Runes: a cut never splits a surrogate pair, and a lone surrogate becomes U+FFFD.
         foreach (var rune in value.AsSpan().Trim().EnumerateRunes())
         {
@@ -51,7 +46,7 @@ public sealed class PrintJobLog(ILogger<PrintJobLog> logger, IHttpContextAccesso
             else if (IsUnsafe(rune))
                 cleaned.Append(Replacement);
             else
-                cleaned.Append(rune.ToString());
+                cleaned.Append(chars[..rune.EncodeToUtf16(chars)]);
         }
 
         return cleaned.ToString();

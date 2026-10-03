@@ -27,8 +27,10 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         }
         else
         {
-            jobLog.WriteRejected(PrintJobLog.HttpTransport, request.Source);
-            return BadRequest(new PrintResponse(false, "Request must have Content array or both Name and Message", PrintResponse.ValidationType));
+            // No job to send, but the caller is known: the same line, so a broken client shows up by name.
+            var rejected = PrintResult.Invalid("Request must have Content array or both Name and Message");
+            jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected);
+            return BadRequest(new PrintResponse(false, rejected.Error, PrintResponse.ValidationType));
         }
 
         var result = await printerService.PrintAsync(content, request.Options);
