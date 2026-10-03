@@ -4,19 +4,22 @@ import { Pencil, Plus } from "lucide-react";
 import { ContentType } from "@/types/printer";
 import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
-import { validateImage } from "@/lib/validation";
-import { estimateLengthMm } from "@/lib/paper";
+import { errorText, validateImageFile } from "@/lib/validation";
+import { dotsToMm, estimatePaperDots } from "@/lib/paper";
 import {
-  blockError,
+  contentError,
   createBlock,
+  documentError,
   editorReducer,
   emptyDocument,
+  isPrintable,
   noteDocument,
   toPrintContent,
+  toPrintOptions,
   type EditorDocument,
   type EditorState,
 } from "@/editor/document";
-import { documentToRequest, loadDraft, saveDraft } from "@/editor/storage";
+import { loadDraft, saveDraft } from "@/editor/storage";
 import type { PrinterStatusState } from "@/hooks/use-printer-status";
 import { usePrintJob } from "@/hooks/use-print-job";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
@@ -74,11 +77,14 @@ export default function Editor({ mode, printer }: { mode: EditorMode; printer: P
   const selectedIndex = doc.blocks.findIndex((b) => b.id === selectedId);
   const selected = selectedIndex >= 0 ? doc.blocks[selectedIndex] : null;
   const printable = useMemo(() => toPrintContent(doc.blocks), [doc.blocks]);
-  const lengthMm = estimateLengthMm(
+  const paperDots = estimatePaperDots(
     printable,
     doc.settings,
     doc.blocks.reduce((sum, b) => sum + (b.type === ContentType.Image && b.content ? (imageDots[b.id] ?? 0) : 0), 0),
   );
+  const lengthMm = dotsToMm(paperDots);
+  const options = useMemo(() => toPrintOptions(doc.settings), [doc.settings]);
+  const docError = documentError(printable, options, paperDots);
   const light = printerLight(printer, job.phase);
   const blocked = isBlocked(printer);
   const lastIsCut = doc.blocks.at(-1)?.type === ContentType.Cut;
@@ -105,8 +111,8 @@ export default function Editor({ mode, printer }: { mode: EditorMode; printer: P
 
   const insertImage = useCallback(
     async (file: File) => {
-      const check = validateImage(file);
-      if (!check.isValid) return notify((check.error ?? "Invalid image").replace(/^\[ERROR\]\s*/, ""), "error");
+      const check = await validateImageFile(file);
+      if (!check.isValid) return notify(errorText(check, "Invalid image"), "error");
       const content = await fileToBase64(file);
       if (selected?.type === ContentType.Image && !selected.content) {
         dispatch({ type: "update", id: selected.id, patch: { content } });
@@ -120,15 +126,20 @@ export default function Editor({ mode, printer }: { mode: EditorMode; printer: P
   const { print: sendJob } = job;
   const print = useCallback(async () => {
     if (printing) return;
-    const invalid = doc.blocks.find((b) => blockError(b));
-    if (invalid) {
-      dispatch({ type: "select", id: invalid.id });
-      return notify(`Block ${doc.blocks.indexOf(invalid) + 1}: ${blockError(invalid)}`, "error");
-    }
+    // Selects the block at an index of the sent content and returns its name on the paper.
+    const sent = doc.blocks.filter(isPrintable);
+    const locate = (index: number) => {
+      const block = sent[index];
+      if (!block) return undefined;
+      dispatch({ type: "select", id: block.id });
+      return `Block ${doc.blocks.indexOf(block) + 1}`;
+    };
+    const invalid = contentError(printable, options, paperDots, locate);
+    if (invalid) return notify(invalid, "error");
     if (printable.length === 0) return notify("Nothing to print yet. Write something on the paper.", "error");
     const title = mode === "template" ? name.trim() || titleOf(doc, "Template") : titleOf(doc, "Note");
-    await sendJob(documentToRequest(doc, `web/${mode}`), title, mode);
-  }, [doc, printable.length, printing, mode, name, notify, sendJob]);
+    await sendJob({ content: printable, options, source: `web/${mode}` }, title, mode, locate);
+  }, [doc, printable, options, paperDots, printing, mode, name, notify, sendJob]);
 
   const saveHint = mode === "note" ? "Save as template" : null;
 
@@ -333,9 +344,15 @@ export default function Editor({ mode, printer }: { mode: EditorMode; printer: P
                 {saveHint}
               </button>
             )}
-            <span className="font-mono text-[11px]">
-              ≈ {lengthMm} mm · ⌘↵ to print{doc.settings.autoCut ? " · auto-cut" : ""}
-            </span>
+            {docError ? (
+              <span role="alert" className="text-xs text-danger-text">
+                {docError}
+              </span>
+            ) : (
+              <span className="font-mono text-[11px]">
+                ≈ {lengthMm} mm · ⌘↵ to print{doc.settings.autoCut ? " · auto-cut" : ""}
+              </span>
+            )}
           </>
         }
         leading={

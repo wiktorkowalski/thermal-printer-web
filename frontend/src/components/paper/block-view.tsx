@@ -2,7 +2,7 @@ import { useCallback, useState, type DragEvent, type ReactNode, type Ref } from 
 import { ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
-import { IMAGE_ACCEPT, validateImage } from "@/lib/validation";
+import { EDITOR_IMAGE_MAX_MB, IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
 import { DEFAULT_ALIGNMENT, HEAD_DOTS, countPrintedLines, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
@@ -198,6 +198,16 @@ export function BlockView(props: BlockViewProps) {
       content = <span className="text-paper-faint">[{block.type}]</span>;
   }
 
+  // The barcode gutter has its own state line. The reason is in the block panel.
+  if (error && block.type !== "Barcode") {
+    right = (
+      <>
+        {right}
+        <span className="text-warn">invalid</span>
+      </>
+    );
+  }
+
   return (
     <div {...drop}>
       <PaperRow {...rowProps} right={right} paperClassName="py-1.5" overlay={selected ? toolbar : undefined}>
@@ -210,9 +220,9 @@ export function BlockView(props: BlockViewProps) {
 function ImagePicker({ onPicked, onError }: { onPicked: (base64: string) => void; onError: (message: string) => void }) {
   const pick = async (file: File | undefined) => {
     if (!file) return;
-    const result = validateImage(file);
+    const result = await validateImageFile(file);
     if (!result.isValid) {
-      onError((result.error ?? "Invalid image").replace(/^\[ERROR\]\s*/, ""));
+      onError(errorText(result, "Invalid image"));
       return;
     }
     onPicked(await fileToBase64(file));
@@ -232,7 +242,7 @@ function ImagePicker({ onPicked, onError }: { onPicked: (base64: string) => void
     >
       <ImagePlus className="size-5" aria-hidden="true" />
       <span className="font-sans text-sm">Choose, drop or paste a PNG or JPEG</span>
-      <span className="font-sans text-xs">Max 5 MB · printed 1-bit, up to 576 dots wide</span>
+      <span className="font-sans text-xs">Max {EDITOR_IMAGE_MAX_MB} MB · printed 1-bit, up to {HEAD_DOTS} dots wide</span>
       <input type="file" accept={IMAGE_ACCEPT} className="sr-only" onChange={(e) => void pick(e.target.files?.[0])} />
     </label>
   );
