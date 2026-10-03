@@ -49,8 +49,8 @@ public sealed class PayloadErrorTests
     {
         { new PrintContent { Type = ContentType.Separator, SeparatorChar = "" }, "Block 1 (Separator): separatorChar must not be empty" },
         { new PrintContent { Type = ContentType.Separator, SeparatorLength = -1 }, "Block 1 (Separator): separatorLength must not be negative" },
-        { new PrintContent { Type = ContentType.Image, Content = "not base64 !!" }, "Block 1 (Image): content is not valid for this block type" },
-        { new PrintContent { Type = ContentType.Image, Content = Convert.ToBase64String("not an image"u8) }, "Block 1 (Image): content is not valid for this block type" },
+        { new PrintContent { Type = ContentType.Image, Content = "not base64 !!" }, "Block 1 (Image): Image rejected: not valid base64 (13 characters)." },
+        { new PrintContent { Type = ContentType.Image, Content = Convert.ToBase64String("not an image"u8) }, "Block 1 (Image): Image rejected: format not supported (format unknown, 12 bytes). Send a PNG or JPEG." },
         { BadBarcode(), "Block 1 (Barcode): content is not a valid EAN13 barcode" }
     };
 

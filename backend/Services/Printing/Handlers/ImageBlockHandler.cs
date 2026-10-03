@@ -88,11 +88,11 @@ internal sealed class ImageBlockHandler : IBlockHandler
         }
         catch (FormatException ex)
         {
-            throw new InvalidDataException($"Image rejected: not valid base64 ({content.Length} characters).", ex);
+            throw new PrintContentException($"Image rejected: not valid base64 ({content.Length} characters).", ex);
         }
     }
 
     // No log here: PrinterService logs the failure once, with this message. Facts only, never the image content.
-    private static InvalidDataException Rejected(IImageFormat? format, int byteCount, string reason, Exception? inner = null)
+    private static PrintContentException Rejected(IImageFormat? format, int byteCount, string reason, Exception? inner = null)
         => new($"Image rejected: {reason} (format {format?.Name ?? "unknown"}, {byteCount} bytes). Send a PNG or JPEG.", inner);
 }
