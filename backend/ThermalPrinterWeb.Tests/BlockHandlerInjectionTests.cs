@@ -76,31 +76,31 @@ public sealed class BlockHandlerInjectionTests
     [Theory]
     [InlineData(BarcodeType.CODE128)]
     [InlineData(BarcodeType.GS1_128)]
-    public async Task Barcode_ControlCharacters_AreReplacedInPayload(BarcodeType type)
+    public async Task Barcode_ControlCharacters_RejectTheBlock(BarcodeType type)
     {
-        var (bytes, ctx) = await RunAsync(
-            new BarcodeBlockHandler(),
-            new PrintContent
-            {
-                Type = ContentType.Barcode,
-                Content = "AB" + Attack,
-                BarcodeOptions = new BarcodeOptions { Type = type }
-            });
+        var ctx = NewContext();
+        var block = new PrintContent
+        {
+            Type = ContentType.Barcode,
+            Content = "AB" + Attack,
+            BarcodeOptions = new BarcodeOptions { Type = type }
+        };
 
-        AssertContains([.. "AB"u8, .. CleanAttack], bytes);
-        AssertDoesNotContain([0x10, 0x04, 0x01], bytes);
-        Assert.Equal(6, ctx.ReplacedCharacters);
+        // A barcode with '?' in place of a character is a different barcode: no bytes at all.
+        await Assert.ThrowsAsync<PrintContentException>(() => new BarcodeBlockHandler().HandleAsync(block, ctx));
+        Assert.Empty(ctx.Output);
     }
 
     [Fact]
-    public async Task QRCode_ControlAndWideCharacters_AreReplacedInPayload()
+    public async Task QRCode_ControlCharacters_AreReplacedAndWideCharactersAreUtf8()
     {
         var (bytes, ctx) = await RunAsync(
             new QRCodeBlockHandler(),
             new PrintContent { Type = ContentType.QRCode, Content = "AB" + Attack + "ĐĄā" });
 
-        AssertContains([.. "AB"u8, .. CleanAttack, .. "???"u8], bytes);
+        // ĐĄā: the low bytes are 10 04 01 (DLE EOT 1). As UTF-8 they are data bytes above 0x7F.
+        AssertContains([.. "AB"u8, .. CleanAttack, .. "ĐĄā"u8], bytes);
         AssertDoesNotContain([0x10, 0x04, 0x01], bytes);
-        Assert.Equal(9, ctx.ReplacedCharacters);
+        Assert.Equal(6, ctx.ReplacedCharacters);
     }
 }

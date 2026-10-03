@@ -147,31 +147,4 @@ public sealed class PrinterSafeTextTests
         Assert.DoesNotContain(bytes, b => (b < 0x20 && b != 0x0A) || b == 0x7F);
     }
 
-    [Theory]
-    [InlineData("ABC-123", "ABC-123", 0)]
-    [InlineData("AB\u001b@\u001dV\u0000", "AB?@?V?", 3)]
-    [InlineData("12\n34", "12?34", 1)]
-    [InlineData("(01)1\u0010\u0004\u0001", "(01)1???", 3)]
-    public void CleanBarcode_ReplacesControlCharacters(string input, string expected, int expectedReplaced)
-    {
-        var cleaned = PrinterSafeText.CleanBarcode(input, out var replaced);
-
-        Assert.Equal(expected, cleaned);
-        Assert.Equal(expectedReplaced, replaced);
-    }
-
-    [Theory]
-    [InlineData("https://example.com/?a=1", "https://example.com/?a=1", 0)]
-    [InlineData("WIFI:S:net;\r\nP:pass;;", "WIFI:S:net;\nP:pass;;", 0)]
-    [InlineData("a\u001dV\u0000b", "a?V?b", 2)]
-    [InlineData("café", "café", 0)]              // Latin-1 passes as one byte
-    [InlineData("ĐĄā", "???", 3)]           // low bytes 10 04 01 = DLE EOT 1
-    [InlineData("zażółć", "za?ó??", 3)]
-    public void CleanQRCode_ReplacesControlAndWideCharacters(string input, string expected, int expectedReplaced)
-    {
-        var cleaned = PrinterSafeText.CleanQRCode(input, out var replaced);
-
-        Assert.Equal(expected, cleaned);
-        Assert.Equal(expectedReplaced, replaced);
-    }
 }
