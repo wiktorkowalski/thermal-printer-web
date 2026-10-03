@@ -209,7 +209,7 @@ public sealed class PrinterFaultTests
         Assert.Equal("Not printed: Printer unreachable", text);
     }
 
-    // A fault that is not a connection fault: the caller gets no exception text either.
+    // A fault in the service itself: the caller gets no exception text either.
     [Fact]
     public async Task PrintAsync_UnexpectedException_ReturnsFixedTextAndLogsTheExceptionOnce()
     {

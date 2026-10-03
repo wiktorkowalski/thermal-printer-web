@@ -33,11 +33,20 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     }
 
     // Estimated paper for the document so far, in dots. See PaperLength.
-    public long PaperDots { get; private set; }
+    public int PaperDots { get; private set; }
 
     public int? LineSpacing => Options?.DefaultLineSpacing;
 
-    public void AddPaper(long dots) => PaperDots += dots;
+    // A handler calls this before it does the work for the block, so a job over the limit stops early.
+    public void AddPaper(int dots)
+    {
+        PaperDots += dots;
+        if (PaperDots > PaperLength.MaxDots)
+        {
+            throw new PrintContentException(
+                $"the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)");
+        }
+    }
 
     public void Add(byte[] bytes) => Output.Add(bytes);
     public void AddRange(IEnumerable<byte[]> bytes) => Output.AddRange(bytes);

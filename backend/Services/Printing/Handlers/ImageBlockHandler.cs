@@ -48,13 +48,14 @@ internal sealed class ImageBlockHandler : IBlockHandler
         var maxWidth = PrintLimit(options.MaxWidth, HeadWidth, HeadWidth, "maxWidth");
         var maxHeight = PrintLimit(options.MaxHeight, DefaultMaxHeight, MaxPrintHeight, "maxHeight");
         var source = DecodeBase64(item.Content);
-        var format = CheckHeader(source);
+        var (format, size) = CheckHeader(source);
+        // Before the gate: a job over the paper limit is not decoded.
+        ctx.AddPaper(PaperLength.ImageDots(size.Width, size.Height, maxWidth, maxHeight, options.PreserveAspectRatio));
 
         await DecodeGate.WaitAsync();
         try
         {
-            var (png, height) = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
-            ctx.AddPaper(height);
+            var png = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
             // ESCPOS_NET decodes the PNG again, so this stays inside the gate.
             ctx.Add(ctx.Emitter.PrintImage(png, options.HighDensity, isLegacy: options.UseLegacyMode));
         }
@@ -89,7 +90,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
         return Math.Min(value, limit);
     }
 
-    private static async Task<(byte[] Png, int Height)> ResizeToPngAsync(byte[] source, IImageFormat format, Size max, bool preserveAspectRatio)
+    private static async Task<byte[]> ResizeToPngAsync(byte[] source, IImageFormat format, Size max, bool preserveAspectRatio)
     {
         using var image = Decode(format, source, static bytes => Image.Load(PngAndJpegOnly, bytes));
 
@@ -111,11 +112,11 @@ internal sealed class ImageBlockHandler : IBlockHandler
 
         using var ms = new MemoryStream();
         await image.SaveAsPngAsync(ms);
-        return (ms.ToArray(), image.Height);
+        return ms.ToArray();
     }
 
     // Format and dimensions from the header: no pixel buffer yet.
-    private static IImageFormat CheckHeader(byte[] imageBytes)
+    private static (IImageFormat Format, Size Size) CheckHeader(byte[] imageBytes)
     {
         // The format comes from the bytes. A declared MIME type in a data URI is ignored.
         var format = Image.DetectFormat(imageBytes);
@@ -131,7 +132,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
                 $"and {MaxPixels} in total ({Facts(format, imageBytes.Length)}).");
         }
 
-        return format;
+        return (format, new Size(info.Width, info.Height));
     }
 
     private static T Decode<T>(IImageFormat format, byte[] imageBytes, Func<byte[], T> read)

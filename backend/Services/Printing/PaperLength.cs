@@ -2,13 +2,17 @@ using ThermalPrinterWeb.Models;
 
 namespace ThermalPrinterWeb.Services.Printing;
 
-// Estimate of the paper one block feeds, in dots (8 dots = 1 mm). It only has to stop a job
-// that empties the roll. The numbers match frontend/src/lib/paper.ts.
+// An estimate, in dots (8 dots = 1 mm): it only has to stop a job that empties the roll,
+// so it takes the larger value where the printer decides.
 internal static class PaperLength
 {
     internal const int DotsPerMetre = 8000;
 
-    // Measured line pitch: 11 lines = 40 mm.
+    // One job: 32,000 dots = 4 m. The longest Text block (500 DoubleHeight lines, 3.3 m)
+    // and 20 images of the default height (1.4 m) pass; a receipt is under 1 m.
+    internal const int MaxDots = 32_000;
+
+    // Measured line pitch: 11 lines = 40 mm. Same value as frontend/src/lib/paper.ts.
     internal const int DefaultLineDots = 29;
 
     // Font A cell height. DoubleHeight adds one more cell to the line.
@@ -29,13 +33,13 @@ internal static class PaperLength
             + (styles?.Contains(PrintStyle.DoubleHeight) == true ? GlyphDots : 0);
 
     // The printer wraps a long line; an empty line still feeds one line.
-    public static long TextDots(string text, int? lineSpacing, List<PrintStyle>? styles)
+    public static int TextDots(string text, int? lineSpacing, List<PrintStyle>? styles)
     {
         var columns = styles?.Contains(PrintStyle.FontB) == true ? FontBColumns : FontAColumns;
         if (styles?.Contains(PrintStyle.DoubleWidth) == true)
             columns /= 2;
 
-        var lines = 0L;
+        var lines = 0;
         // Same line breaks as the encoder: it turns CR, FF, NEL, LS and PS into LF.
         foreach (var line in text.AsSpan().EnumerateLines())
             lines += Math.Max(1, (line.Length + columns - 1) / columns);
@@ -43,10 +47,22 @@ internal static class PaperLength
         return lines * LineDots(lineSpacing, styles);
     }
 
+    // The size the printer gives an image: it only scales down, to fit inside the limits.
+    public static int ImageDots(int width, int height, int maxWidth, int maxHeight, bool preserveAspectRatio)
+    {
+        if (width <= maxWidth && height <= maxHeight)
+            return height;
+        if (!preserveAspectRatio)
+            return maxHeight;
+
+        var scale = Math.Min((double)maxWidth / width, (double)maxHeight / height);
+        return Math.Max(1, (int)Math.Round(height * scale));
+    }
+
     // The printer picks the QR version. This is the largest side the data can need.
     public static int QRCodeDots(int dataBytes, int moduleDots)
     {
         var modules = (int)Math.Ceiling(Math.Sqrt(QRMinModules * QRMinModules + (double)dataBytes * QRModulesPerByte));
-        return Math.Clamp(modules, QRMinModules, QRMaxModules) * moduleDots;
+        return Math.Min(modules, QRMaxModules) * moduleDots;
     }
 }

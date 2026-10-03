@@ -12,12 +12,13 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 {
     private readonly IReadOnlyDictionary<ContentType, IBlockHandler> _handlers = handlers.ToDictionary(h => h.Type);
     private const string DefaultPrinterAddress = "192.168.123.100:9100";
+    private const int DefaultPrinterPort = 9100;
 
-    // The only text a caller gets for a fault on the way to the printer. The exception
-    // holds the printer address and socket details: it stays in the server log.
+    // The only text a caller gets for these faults. The exception holds the printer
+    // address and socket details: it stays in the server log.
     internal const string UnreachableError = "Printer unreachable";
     internal const string InternalError = "Print failed: internal error";
-    private const int DefaultPrinterPort = 9100;
+
     private static readonly TimeSpan StatusReadTimeout = TimeSpan.FromSeconds(2);
 
     // The printer renders single-byte code pages only; raw UTF-8 prints as garbage
@@ -35,10 +36,6 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
     // Printer data for one job. A full-width image 4096 dots tall is 295 KB; text is 1 byte per character.
     internal const int MaxOutputBytes = 2 * 1024 * 1024;
-
-    // Estimated paper for one job: 32,000 dots = 4 m. The longest Text block (500 DoubleHeight
-    // lines, 3.3 m) and 20 images of the default height (1.4 m) pass; a receipt is under 1 m.
-    internal const int MaxPaperDots = 32_000;
 
     // ESC 3 n and GS V m n take one byte each.
     internal const int MaxLineSpacing = 255;
@@ -83,7 +80,17 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 PrinterName = "ThermalPrinter"
             });
 
-            await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
+            try
+            {
+                await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
+            }
+            catch (Exception ex)
+            {
+                // The status read passed, then the connection for the job failed.
+                logger.LogWarning(ex, "Print failed: no connection to the printer at {Address}", PrinterAddress);
+                return PrintResult.PrinterFault(UnreachableError);
+            }
+
             return PrintResult.Ok;
         }
         catch (PrintContentException ex)
@@ -91,14 +98,9 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             // Logged where the block failed.
             return PrintResult.Invalid(ex.Message);
         }
-        catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException)
-        {
-            // The status read passed, then the connection for the job failed.
-            logger.LogWarning(ex, "Print failed: no connection to the printer at {Address}", PrinterAddress);
-            return PrintResult.PrinterFault(UnreachableError);
-        }
         catch (Exception ex)
         {
+            // Not a printer fault and not the payload: a fault in this service.
             logger.LogError(ex, "Print failed");
             return PrintResult.PrinterFault(InternalError);
         }
@@ -166,15 +168,6 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                     MaxOutputBytes, index, content.Count);
                 throw new PrintContentException($"Block {index}: the document is over the limit of {MaxOutputBytes} bytes of printer data");
             }
-
-            // The feed of the cut at the end is not counted: at most 255 dots, one time.
-            if (ctx.PaperDots > MaxPaperDots)
-            {
-                logger.LogWarning(
-                    "Rejected print: the document passes {MaxPaperDots} dots of paper at block {BlockIndex} of {BlockCount}",
-                    MaxPaperDots, index, content.Count);
-                throw new PrintContentException($"Block {index}: the document is over the limit of {MaxPaperDots} dots of paper ({MaxPaperDots / PaperLength.DotsPerMetre} m)");
-            }
         }
 
         // Count only: the content is caller input and the endpoint is public.
@@ -183,6 +176,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
         if (options?.AutoCut != false && !ctx.HasCut)
         {
+            // Not counted as paper: at most 255 dots, one time.
             var feedLines = options?.FeedLinesAfterPrint ?? 3;
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
@@ -195,8 +189,9 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         if (value is not { } number || (number >= 0 && number <= max))
             return;
 
-        logger.LogWarning("Rejected print: {Field} {Value} is outside the range 0 to {Max}", field, number, max);
-        throw PrintContentException.OutOfRange(field, number, 0, max);
+        var rejection = PrintContentException.OutOfRange(field, number, 0, max);
+        logger.LogWarning("Rejected print: {Reason}", rejection.Message);
+        throw rejection;
     }
 
     private async Task AddBlockAsync(int index, PrintContent? item, BlockContext ctx)

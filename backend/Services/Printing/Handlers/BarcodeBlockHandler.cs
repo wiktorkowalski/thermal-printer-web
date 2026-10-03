@@ -16,9 +16,6 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
     internal const int MinHeightInDots = 1;
     internal const int MaxHeightInDots = 255;
 
-    // The printer default when the caller sends no height.
-    private const int DefaultHeightInDots = 162;
-
     public ContentType Type => ContentType.Barcode;
 
     public Task HandleAsync(PrintContent item, BlockContext ctx)
@@ -35,8 +32,8 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
 
         var command = BuildCommand(e, item.Content, opts.Type);
 
-        // The bars plus one line for the caption.
-        ctx.AddPaper((opts.HeightInDots ?? DefaultHeightInDots) + PaperLength.LineDots(ctx.LineSpacing));
+        // The bars plus one line for the caption. A null height keeps what the printer has: count the tallest.
+        ctx.AddPaper((opts.HeightInDots ?? MaxHeightInDots) + PaperLength.LineDots(ctx.LineSpacing));
 
         if (opts.HeightInDots.HasValue)
             ctx.Add(e.SetBarcodeHeightInDots(opts.HeightInDots.Value));

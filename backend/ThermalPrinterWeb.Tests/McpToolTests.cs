@@ -189,7 +189,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         var imageOptions = block.GetProperty("imageOptions").GetProperty("properties");
 
         Assert.Contains(
-            $"at most {PrinterService.MaxBlocks} blocks, {PrinterService.MaxImageBlocks} of them images, and prints at most {PrinterService.MaxPaperDots / PaperLength.DotsPerMetre} m of paper",
+            $"at most {PrinterService.MaxBlocks} blocks, {PrinterService.MaxImageBlocks} of them images, and prints at most {PaperLength.MaxDots / PaperLength.DotsPerMetre} m of paper",
             tool.GetProperty("description").GetString());
         var options = tool.GetProperty("inputSchema").GetProperty("properties").GetProperty("options").GetProperty("properties");
         Assert.Contains($"0 to {PrinterService.MaxLineSpacing}.", options.GetProperty("defaultLineSpacing").GetProperty("description").GetString());

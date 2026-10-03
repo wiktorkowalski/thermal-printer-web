@@ -56,8 +56,8 @@ public sealed class PayloadErrorTests
 
     private static PrintContent LineFeed(int lines) => new() { Type = ContentType.LineFeed, Lines = lines };
 
-    private static string OverPaper(int block)
-        => $"Block {block}: the document is over the limit of 32000 dots of paper (4 m)";
+    internal static string OverPaper(int block, ContentType type)
+        => $"Block {block} ({type}): the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)";
 
     public static TheoryData<PrintContent, string> InvalidBlocks() => new()
     {
@@ -229,46 +229,45 @@ public sealed class PayloadErrorTests
         {
             // One line is 29 dots: 11 x 2900 + 3 x 29 = 31,987.
             { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(3)], null, null },
-            { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(4)], null, OverPaper(11) },
+            { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(4)], null, OverPaper(11, ContentType.LineFeed) },
             // The job from the issue: 500 blocks of 100 lines.
-            { [.. Enumerable.Repeat(LineFeed(100), 500)], null, OverPaper(11) },
+            { [.. Enumerable.Repeat(LineFeed(100), 500)], null, OverPaper(11, ContentType.LineFeed) },
             // 500 DoubleHeight lines are 26,500 dots.
             { [doubleHeight], null, null },
-            { [doubleHeight, doubleHeight], null, OverPaper(1) },
+            { [doubleHeight, doubleHeight], null, OverPaper(1, ContentType.Text) },
             // A long line wraps: 10,000 characters are 417 DoubleWidth lines.
-            { [.. Enumerable.Repeat(new PrintContent { Type = ContentType.Text, Content = new string('x', 10_000), Style = [PrintStyle.DoubleWidth] }, 3)], null, OverPaper(2) },
+            { [.. Enumerable.Repeat(new PrintContent { Type = ContentType.Text, Content = new string('x', 10_000), Style = [PrintStyle.DoubleWidth] }, 3)], null, OverPaper(2, ContentType.Text) },
             // Line spacing 255: 125 lines are 31,875 dots.
             { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255 }, null },
-            { [Text(new string('\n', 125))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaper(0) },
+            { [Text(new string('\n', 125))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaper(0, ContentType.Text) },
             // Each cut feeds 255 dots.
             { [.. Enumerable.Repeat(cut, 125)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
-            { [.. Enumerable.Repeat(cut, 126)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(125) },
+            { [.. Enumerable.Repeat(cut, 126)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(125, ContentType.Cut) },
             // 177 modules x 6 dots + one line = 1091 dots.
             { [.. Enumerable.Repeat(widestQRCode, 29)], null, null },
-            { [.. Enumerable.Repeat(widestQRCode, 30)], null, OverPaper(29) },
+            { [.. Enumerable.Repeat(widestQRCode, 30)], null, OverPaper(29, ContentType.QRCode) },
             // 255 dots + one line = 284 dots.
             { [.. Enumerable.Repeat(Barcode(255), 112)], null, null },
-            { [.. Enumerable.Repeat(Barcode(255), 113)], null, OverPaper(112) }
+            { [.. Enumerable.Repeat(Barcode(255), 113)], null, OverPaper(112, ContentType.Barcode) }
         };
     }
 
     [Theory]
     [MemberData(nameof(PaperJobs))]
-    public async Task PrintAsync_PaperLength_IsLimitedPerDocument(List<PrintContent> content, PrintOptions? options, string? expectedError)
+    public async Task BuildDocumentAsync_PaperLength_IsLimitedPerDocument(List<PrintContent> content, PrintOptions? options, string? expectedError)
     {
         var logger = new RecordingLogger<PrinterService>();
-        var service = NewService(logger);
+
+        // Not PrintAsync: an accepted document would go to the printer.
+        var build = NewService(logger).BuildDocumentAsync(content, options);
 
         if (expectedError is null)
         {
-            // Not PrintAsync: an accepted document would go to the printer.
-            Assert.NotEmpty(await service.BuildDocumentAsync(content, options));
+            Assert.NotEmpty(await build);
             return;
         }
 
-        var result = await service.PrintAsync(content, options);
-
-        Assert.Equal(PrintResult.Invalid(expectedError), result);
+        Assert.Equal(expectedError, (await Assert.ThrowsAsync<PrintContentException>(() => build)).Message);
         var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
         Assert.Equal(LogLevel.Warning, entry.Level);
     }
@@ -447,6 +446,6 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
 
         var body = await PostBadRequestAsync("{\"content\":[" + blocks + "]}");
 
-        Assert.Equal("Block 11: the document is over the limit of 32000 dots of paper (4 m)", body.Error);
+        Assert.Equal(PayloadErrorTests.OverPaper(11, ContentType.LineFeed), body.Error);
     }
 }
