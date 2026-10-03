@@ -31,7 +31,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // A long receipt is about 100 blocks.
     internal const int MaxBlocks = 500;
 
-    // One 64 MP image takes about 0.6 s of CPU inside the decode gate, whatever its output size.
+    // One image at the pixel limit takes about 1 s of CPU inside the decode queue, whatever its output size.
     internal const int MaxImageBlocks = 20;
 
     // Printer data for one job. A full-width image 4096 dots tall is 295 KB; text is 1 byte per character.
@@ -98,6 +98,11 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             // Logged where the block failed.
             return PrintResult.Invalid(ex.Message);
+        }
+        catch (PrintBusyException ex)
+        {
+            logger.LogWarning("Rejected print: server busy, {Reason}", ex.Message);
+            return PrintResult.Busy;
         }
         catch (Exception ex)
         {
@@ -226,7 +231,8 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             await handler.HandleAsync(item, ctx);
         }
-        catch (Exception ex)
+        // Busy is server load, not the payload: it must not turn into a 400.
+        catch (Exception ex) when (ex is not PrintBusyException)
         {
             // Handlers do no printer I/O, so a throw here means the block cannot be
             // printed as sent. Library messages repeat caller content: keep them out

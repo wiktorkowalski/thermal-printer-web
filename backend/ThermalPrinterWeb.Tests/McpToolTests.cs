@@ -337,4 +337,25 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
             app.Printer.Result = PrintResult.Ok;
         }
     }
+
+    // MCP has no status code: the text says that the server is busy and that the same call can be sent again.
+    [Theory]
+    [InlineData("print", """{"content":[{"type":"Text","content":"hello"}]}""")]
+    [InlineData("print_note", """{"title":"T","message":"M"}""")]
+    public async Task ToolsCall_ServerBusy_SaysToSendTheJobAgain(string tool, string arguments)
+    {
+        app.Printer.Result = PrintResult.Busy;
+        try
+        {
+            var (isError, text) = await CallAsync(tool, arguments);
+
+            Assert.False(isError);
+            Assert.Equal($"Not printed: {PrintResult.Busy.Error}", text);
+            Assert.StartsWith("Not printed: Server busy", text);
+        }
+        finally
+        {
+            app.Printer.Result = PrintResult.Ok;
+        }
+    }
 }
