@@ -264,8 +264,12 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [InlineData("print_note", $$$"""{"title":5,"message":"{{{Secret}}}"}""", "'title' has the wrong JSON type")]
     [InlineData("beep", $$$"""{"count":"{{{Secret}}}"}""", "'count' has the wrong JSON type")]
     [InlineData("beep", $$$"""{"{{{Secret}}}":1,"duration":true}""", "'duration' has the wrong JSON type")]
-    // The JSON type fits the schema and the value does not: no argument is named.
-    [InlineData("beep", """{"count":1.5}""", "an argument has the wrong JSON type")]
+    [InlineData("beep", """{"count":1.5}""", "'count' has the wrong JSON type")]
+    // The SDK reads "5" as 5: the valid argument is not named.
+    [InlineData("beep", """{"count":"5","duration":1.5}""", "'duration' has the wrong JSON type")]
+    // Two arguments do not fit, or the value is over the int range: no argument is named.
+    [InlineData("beep", $$$"""{"count":1.5,"duration":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
+    [InlineData("beep", """{"count":99999999999}""", "an argument has the wrong JSON type")]
     public async Task ToolsCall_WrongShape_AnswersWithTheCorrectShape(string tool, string? arguments, string expectedProblem)
     {
         app.Printer.Jobs.Clear();

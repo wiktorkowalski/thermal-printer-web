@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -23,19 +24,19 @@ internal static class ArgumentShapeFilter
             }
             catch (JsonException ex) when (context.Params?.Name is { } tool)
             {
-                // SDK argument binding failed. The path holds schema property names only; the message can repeat caller content.
-                return Reject(context, tool, Problem(context, ex.Path ?? JsonPathRoot));
+                // SDK argument binding failed. The exception message can repeat caller content: only the path goes out.
+                var path = ex.Path?.StartsWith(JsonPathRoot, StringComparison.Ordinal) == true ? ex.Path : JsonPathRoot;
+                return Reject(context, tool, DescribeProblem(context, path));
             }
         };
 
-    // The SDK reads each argument on its own: the path starts at the argument and the exception does not name it.
-    private static string Problem(RequestContext<CallToolRequestParams> context, string path)
+    // The SDK reads each argument on its own, so the path starts at the argument. The exception does not name the argument.
+    private static string DescribeProblem(RequestContext<CallToolRequestParams> context, string path)
     {
         var argument = FaultyArgument(context, path);
         if (path == JsonPathRoot)
             return argument is null ? "an argument has the wrong JSON type" : $"'{argument}' has the wrong JSON type";
 
-        // "$[0].type" in 'content' reads "content[0].type".
         var place = argument is null ? path : argument + path[JsonPathRoot.Length..];
         return $"the value at {place} has the wrong JSON type or is not a known name";
     }
@@ -50,8 +51,7 @@ internal static class ArgumentShapeFilter
             return null;
         }
 
-        // The root: the value itself has a type the schema does not allow.
-        // Below the root the path starts with an index or a property: the argument is an array or an object.
+        // At the root the value itself does not fit the schema type. Below the root the argument is an array or an object.
         var atRoot = path == JsonPathRoot;
         var container = path.StartsWith(JsonPathRoot + "[", StringComparison.Ordinal) ? JsonValueKind.Array : JsonValueKind.Object;
 
@@ -72,20 +72,31 @@ internal static class ArgumentShapeFilter
             return true;
 
         return type.ValueKind == JsonValueKind.Array
-            ? type.EnumerateArray().Any(allowed => Accepts(allowed, value.ValueKind))
-            : Accepts(type, value.ValueKind);
+            ? type.EnumerateArray().Any(allowed => Accepts(allowed, value))
+            : Accepts(type, value);
     }
 
-    private static bool Accepts(JsonElement schemaType, JsonValueKind kind) => schemaType.GetString() switch
+    private static bool Accepts(JsonElement schemaType, JsonElement value) => schemaType.GetString() switch
     {
-        "string" => kind == JsonValueKind.String,
-        "integer" or "number" => kind == JsonValueKind.Number,
-        "boolean" => kind is JsonValueKind.True or JsonValueKind.False,
-        "array" => kind == JsonValueKind.Array,
-        "object" => kind == JsonValueKind.Object,
-        "null" => kind == JsonValueKind.Null,
+        "string" => value.ValueKind == JsonValueKind.String,
+        "integer" => IsNumber(value, wholeOnly: true),
+        "number" => IsNumber(value, wholeOnly: false),
+        "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+        "array" => value.ValueKind == JsonValueKind.Array,
+        "object" => value.ValueKind == JsonValueKind.Object,
+        "null" => value.ValueKind == JsonValueKind.Null,
         // A schema type not known here: no claim.
         _ => true
+    };
+
+    // The SDK also reads a number from a string: "5" is a valid count.
+    private static bool IsNumber(JsonElement value, bool wholeOnly) => value.ValueKind switch
+    {
+        JsonValueKind.Number => !wholeOnly || value.TryGetInt64(out _),
+        JsonValueKind.String => wholeOnly
+            ? long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+            : double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out _),
+        _ => false
     };
 
     private static CallToolResult Reject(RequestContext<CallToolRequestParams> context, string tool, string problem)
