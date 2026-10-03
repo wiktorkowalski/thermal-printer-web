@@ -65,14 +65,14 @@ Located in `backend/` directory.
   - `GET /api/printer/status` - Printer readiness
   - `POST /api/printer/beep` - Sounds the buzzer
 - `backend/Mcp/PrinterTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`)
-- `backend/Services/PrinterService.cs` - Service implementing `IPrinterService`, handles all printer communication via ESCPOS_NET library
+- `backend/Services/PrinterService.cs` - Service implementing `IPrinterService`, handles all printer communication. ESCPOS_NET builds and sends the print job; status and beep use a raw `TcpClient`.
 - `backend/Services/Printing/Handlers/` - One `IBlockHandler` per content type. To add a block type, add a handler and register it in `BlockHandlerServiceCollectionExtensions.cs`.
 
 **Print path**: `PrinterService.PrintAsync` builds the whole document first, then reads the printer status, then sends. So a payload fault is reported as such even while the printer is off. A handler rejects a block with `PrintContentException`; its message goes to the caller, so it must not repeat caller content.
 
 **Printer Configuration** (`backend/Services/PrinterOptions.cs`):
 - `Printer:Address` (env `Printer__Address`) is `host` or `host:port`; the port defaults to 9100. `Printer:ConnectTimeout` is `hh:mm:ss`, default 3 s, at most 1 min.
-- The default address is the constant `PrinterOptions.DefaultAddress`. Keep `Printer:Address` out of `appsettings.json`: a value there also binds in Development.
+- The default address is the constant `PrinterOptions.DefaultAddress`. Keep `Printer:Address` out of `appsettings.json`: a value there also binds in Development when `appsettings.Development.json` is not found.
 - Development has no printer: the address starts empty. Status then answers ready (`raw` is `no printer`); print and beep answer success and send nothing.
 - To print from a Development run, set `Printer__Address` on purpose.
 - Any other environment uses the default address, so a local Production-mode run reaches the real printer. An empty or invalid setting stops the app at startup with exit code 1.
@@ -94,7 +94,7 @@ Located in `frontend/` directory.
 - `frontend/src/pages/Receipts.tsx` - Receipt on paper; lines come from `lib/receipt-utils.ts` (`receiptLayout` also returns which blocks belong to which item)
 - `frontend/src/editor/document.ts` - Block model, reducer, conversion to `PrintContent[]`, checks before a print (`contentError`)
 - `frontend/src/lib/paper.ts` - Printer geometry: 576 dots, 8 dots/mm, 1 `ch` = 12 dots
-- `frontend/src/lib/printer-limits.ts` - Copy of the backend limits; each constant names its backend constant. `EDITOR_*` values are stricter on purpose.
+- `frontend/src/lib/printer-limits.ts` - Copy of the backend limits; a comment names the backend origin of each one. `EDITOR_*` values are stricter on purpose.
 - `frontend/src/types/printer.ts` - TypeScript types matching backend models
 - TailwindCSS v4 with theme tokens in `src/index.css` (light + dark); fonts Instrument Serif / Instrument Sans / DM Mono
 - `frontend/src/components/paper/` - `PaperDocument` renders any `PrintContent[]` read-only (receipts, tray thumbnails)
@@ -133,9 +133,8 @@ dotnet restore
 dotnet test backend/ThermalPrinterWeb.Tests
 ```
 
-- `dotnet test` with no path also works at the repo root, through `ThermalPrinterWeb.sln`. It does not work in `backend/`.
+- `dotnet test` with no path also works at the repo root, through `ThermalPrinterWeb.sln`. In `backend/` it runs no tests.
 - The tests need no printer and run in sequence (`AssemblyInfo.cs`); keep it that way.
-- The test project sees `internal` members of the API (`InternalsVisibleTo`).
 
 ### Frontend
 
@@ -165,7 +164,7 @@ The Dockerfile (.NET `sdk:10.0` and `aspnet:10.0` images):
 
 - **Development mode**: run `dotnet run` in `backend/` and `npm run dev` in `frontend/`. CORS allows `http://localhost:5173` in Development only.
 - **Single app**: run `npm run build` in `frontend/`, then the backend. It serves the API and the static React files from `wwwroot`.
-- **Production mode on a local machine**: `ASPNETCORE_ENVIRONMENT=Production dotnet run` sends every print and beep to the real printer.
+- **Production mode on a local machine**: a run without the launch profile (`dotnet run --no-launch-profile`, the published app, the Docker image) is Production. It sends every print and beep to the real printer.
 
 ## Print API
 
@@ -208,16 +207,16 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 | 503 | `printer` | Printer fault, fixed text: `Printer not ready: <reason>`, `Printer unreachable` or `Print failed: internal error`. Details stay in the server log. |
 | 503 | `busy` | Too many image jobs wait for a decode. Header `Retry-After: 5`. The job is fine; send it again. |
 
-- 413: the body is over 30,000,000 bytes (Kestrel rejects it). 415: the `Content-Type` is not `application/json`.
-- `GET /api/printer/status` answers 200, or 503 with the same body shape when the printer is unreachable.
+- 413: the body is over the request body limit (Kestrel rejects it). 415: the `Content-Type` is not `application/json`.
+- `GET /api/printer/status` answers a `PrinterStatus` body: with 200, or with 503 when the printer is unreachable.
 - `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
 
 ### Content rules
 
-- **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Only LF passes. A character outside the code page prints as `?`.
+- **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Every line ending becomes LF, the only control byte that passes. A character the code page lacks prints as `?` or as a best-fit letter.
 - **QR code**: the data is stored as UTF-8 bytes, whatever the code page. A control character rejects the block; `\n` and `\r\n` are line breaks.
 - **Barcode**: printable ASCII only (0x20-0x7E); any other character rejects the block. ESCPOS_NET checks length and characters per symbology.
-- **Image**: one decode runs at a time (`DecodeQueue`); 4 jobs wait at most, each up to 10 s. A full queue gives 503 `busy`.
+- **Image**: one decode runs at a time (`DecodeQueue`). The number of waiting jobs and the wait time have limits (`ImageBlockHandler.MaxDecodeWaiters`, `DecodeWaitTimeout`); past them the job gets 503 `busy`.
 
 ### Limits
 
@@ -235,15 +234,15 @@ Over a limit the job gets a 400 (413 for the request body). The constants are th
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
 | Barcode height | 1-255 dots | `BarcodeBlockHandler.MinHeightInDots`, `MaxHeightInDots` |
-| Barcode data | 255 bytes; 253 for CODE128 and GS1_128 | length check in `BarcodeBlockHandler.BuildCommand` |
+| Barcode data | per symbology; CODE128 holds 253 characters, `{` counts as 2 | no constant: ESCPOS_NET validates, `BarcodeBlockHandler.BuildCommand` checks the length byte |
 | QR data (UTF-8 bytes) | Model2 2953, Model1 707, Micro 21 | `QRCodeBlockHandler.Model2MaxBytes`, `Model1MaxBytes`, `MicroMaxBytes` |
 | Image file | 16 MiB | `ImageBlockHandler.MaxImageBytes` |
 | Image pixels | 16,384 per side, 8192 x 6144 (50 MP) in total | `ImageBlockHandler.MaxSidePixels`, `MaxPixels` |
-| Image printed size | width 576 dots, height 4096 dots | `ImageBlockHandler.HeadWidth`, `MaxPrintHeight` |
+| Image printed size | width 576 dots, height 4096 dots; a larger `maxWidth` / `maxHeight` is clamped, below 1 is a 400 | `ImageBlockHandler.HeadWidth`, `MaxPrintHeight` |
 
 **To add or change a limit**, change all of these:
 1. The backend constant.
-2. The MCP texts: `[Description]` in `backend/Models/PrintContent.cs` / `PrintOptions.cs` and the tool descriptions in `backend/Mcp/PrinterTools.cs`. `McpToolTests` pins their numbers to the constants.
+2. The MCP texts: the `[Description]` attributes in `backend/Models/` (`PrintContent.cs`, `PrintOptions.cs`, `Options/*.cs`) and the tool descriptions in `backend/Mcp/PrinterTools.cs`. `McpToolTests` pins most of these numbers to the constants.
 3. `frontend/src/lib/printer-limits.ts`.
 4. The table above.
 
@@ -283,7 +282,7 @@ Over a limit the job gets a 400 (413 for the request body). The constants are th
 | DoubleWidth + DoubleHeight | 24 | Large text |
 | FontB + DoubleWidth | 32 | |
 
-Source of truth: `frontend/src/lib/printer-constants.ts`.
+Source of truth: `frontend/src/lib/printer-constants.ts`. The backend repeats 48 and 64 in `PaperLength.cs` and in the MCP texts.
 
 A longer line wraps in the middle of a word. Break lines in the content.
 
