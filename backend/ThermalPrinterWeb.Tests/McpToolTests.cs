@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Printing;
 using ThermalPrinterWeb.Services.Printing.Handlers;
 
 namespace ThermalPrinterWeb.Tests;
@@ -187,7 +188,15 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         string Description(string property) => block.GetProperty(property).GetProperty("description").GetString()!;
         var imageOptions = block.GetProperty("imageOptions").GetProperty("properties");
 
-        Assert.Contains($"at most {PrinterService.MaxBlocks} blocks, {PrinterService.MaxImageBlocks} of them images", tool.GetProperty("description").GetString());
+        Assert.Contains(
+            $"at most {PrinterService.MaxBlocks} blocks, {PrinterService.MaxImageBlocks} of them images, and prints at most {PrinterService.MaxPaperDots / PaperLength.DotsPerMetre} m of paper",
+            tool.GetProperty("description").GetString());
+        var options = tool.GetProperty("inputSchema").GetProperty("properties").GetProperty("options").GetProperty("properties");
+        Assert.Contains($"0 to {PrinterService.MaxLineSpacing}.", options.GetProperty("defaultLineSpacing").GetProperty("description").GetString());
+        Assert.Contains($"0 to {PrinterService.MaxFeedBeforeCut}.", options.GetProperty("feedLinesAfterPrint").GetProperty("description").GetString());
+        Assert.Contains(
+            $"{BarcodeBlockHandler.MinHeightInDots} to {BarcodeBlockHandler.MaxHeightInDots}.",
+            block.GetProperty("barcodeOptions").GetProperty("properties").GetProperty("heightInDots").GetProperty("description").GetString());
         Assert.Contains($"at most {TextBlockHandler.MaxLength} characters and {TextBlockHandler.MaxLines} lines", Description("content"));
         Assert.Contains($"at most {ImageBlockHandler.MaxImageBytes / (1024 * 1024)} MB, {ImageBlockHandler.MaxSidePixels} pixels per side and {ImageBlockHandler.MaxPixels / 1_000_000} megapixels", Description("content"));
         Assert.Contains($"at most {LineFeedBlockHandler.MaxLines}.", Description("lines"));

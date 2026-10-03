@@ -33,11 +33,15 @@ internal sealed class QRCodeBlockHandler : IBlockHandler
             throw new PrintContentException(
                 $"content is {data.Length} bytes as UTF-8; a {opts.Model} QR code holds at most {maxBytes}");
 
+        var size = MapQRCodeSize(opts.Size);
+        // Size2DCode values are the module width in dots. One line of feed follows the code.
+        ctx.AddPaper(PaperLength.QRCodeDots(data.Length, (int)size) + PaperLength.LineDots(ctx.LineSpacing));
+
         // pL pH count the data plus the bytes of StoreQRCodeData.
         var storeLength = data.Length + Barcodes.StoreQRCodeData.Length;
         ctx.Add([
             .. GsParenK, .. Barcodes.SelectQRCodeModel, (byte)model, Barcodes.AutoEnding,
-            .. GsParenK, .. Barcodes.SetQRCodeDotSize, (byte)MapQRCodeSize(opts.Size),
+            .. GsParenK, .. Barcodes.SetQRCodeDotSize, (byte)size,
             .. GsParenK, .. Barcodes.SetQRCodeCorrectionLevel, (byte)MapQRCodeCorrectionLevel(opts.CorrectionLevel),
             .. GsParenK, (byte)(storeLength & 0xFF), (byte)(storeLength >> 8), .. Barcodes.StoreQRCodeData, .. data,
             .. GsParenK, .. Barcodes.PrintQRCode

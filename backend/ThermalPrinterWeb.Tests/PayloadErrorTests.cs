@@ -47,6 +47,18 @@ public sealed class PayloadErrorTests
         BarcodeOptions = new BarcodeOptions { Type = BarcodeType.EAN13 }
     };
 
+    private static PrintContent Barcode(int? heightInDots) => new()
+    {
+        Type = ContentType.Barcode,
+        Content = "BOX-0007",
+        BarcodeOptions = new BarcodeOptions { HeightInDots = heightInDots }
+    };
+
+    private static PrintContent LineFeed(int lines) => new() { Type = ContentType.LineFeed, Lines = lines };
+
+    private static string OverPaper(int block)
+        => $"Block {block}: the document is over the limit of 32000 dots of paper (4 m)";
+
     public static TheoryData<PrintContent, string> InvalidBlocks() => new()
     {
         { new PrintContent { Type = ContentType.Separator, SeparatorChar = "" }, "Block 1 (Separator): separatorChar must not be empty" },
@@ -65,6 +77,10 @@ public sealed class PayloadErrorTests
         { Text(new string('\u2028', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
         { new PrintContent { Type = ContentType.Image, Content = "AAAA", ImageOptions = new ImageOptions { MaxWidth = 0 } }, "Block 1 (Image): imageOptions.maxWidth 0 must be at least 1" },
         { new PrintContent { Type = ContentType.Barcode, Content = "Zażółć" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" },
+        { Barcode(0), "Block 1 (Barcode): barcodeOptions.heightInDots 0 is outside the range 1 to 255" },
+        { Barcode(-1), "Block 1 (Barcode): barcodeOptions.heightInDots -1 is outside the range 1 to 255" },
+        { Barcode(256), "Block 1 (Barcode): barcodeOptions.heightInDots 256 is outside the range 1 to 255" },
+        { Barcode(int.MinValue), "Block 1 (Barcode): barcodeOptions.heightInDots -2147483648 is outside the range 1 to 255" },
         { new PrintContent { Type = ContentType.QRCode, Content = new string('ż', 1477) }, "Block 1 (QRCode): content is 2954 bytes as UTF-8; a Model2 QR code holds at most 2953" }
     };
 
@@ -77,7 +93,8 @@ public sealed class PayloadErrorTests
             new() { Type = ContentType.LineFeed, Lines = 100 },
             Text(new string('x', 10_000)),
             Text(new string('\n', 499)),
-            .. Enumerable.Range(0, PrinterService.MaxBlocks - 4).Select(_ => Text())
+            // No paper: the document stays under the paper limit.
+            .. Enumerable.Range(0, PrinterService.MaxBlocks - 4).Select(_ => new PrintContent { Type = ContentType.CodePage, Content = "PC852" })
         ];
         Assert.Equal(PrinterService.MaxBlocks, content.Count);
 
@@ -122,13 +139,136 @@ public sealed class PayloadErrorTests
     public async Task PrintAsync_TooMuchPrinterData_IsAValidationFailureLoggedOnce()
     {
         var logger = new RecordingLogger<PrinterService>();
-        var block = new string('x', 10_000);
-        var content = Enumerable.Range(0, 250).Select(_ => Text(block)).ToList();
+        var content = Enumerable.Range(0, 250).Select(_ => Text()).ToList();
 
-        var result = await NewService(logger).PrintAsync(content);
+        // Text and images pass the paper limit first, so the handler here adds bytes and no paper.
+        var result = await new PrinterService(logger, [new BulkHandler()]).PrintAsync(content);
 
-        // 2 MiB / 10,019 bytes per block = 209 blocks fit.
+        // 2 MiB / 10,003 bytes per block = 209 blocks fit.
         Assert.Equal(PrintResult.Invalid("Block 209: the document is over the limit of 2097152 bytes of printer data"), result);
+        var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+    }
+
+    private sealed class BulkHandler : IBlockHandler
+    {
+        public ContentType Type => ContentType.Text;
+
+        public Task HandleAsync(PrintContent item, BlockContext ctx)
+        {
+            ctx.Add(new byte[10_000]);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(255)]
+    public async Task BuildDocumentAsync_BarcodeHeightAtTheLimits_GoesToThePrinter(int height)
+    {
+        var bytes = await NewService().BuildDocumentAsync([Barcode(height)], null);
+
+        // GS h n
+        Assert.Contains(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1D, (byte)0x68, (byte)height]));
+    }
+
+    [Fact]
+    public async Task BuildDocumentAsync_BarcodeWithoutHeight_KeepsThePrinterDefault()
+    {
+        var bytes = await NewService().BuildDocumentAsync([Barcode(null)], null);
+
+        Assert.DoesNotContain(bytes, command => command.AsSpan().StartsWith([(byte)0x1D, (byte)0x68]));
+    }
+
+    [Theory]
+    [InlineData(-1, null, "options.defaultLineSpacing -1 is outside the range 0 to 255")]
+    [InlineData(256, null, "options.defaultLineSpacing 256 is outside the range 0 to 255")]
+    [InlineData(-70000, null, "options.defaultLineSpacing -70000 is outside the range 0 to 255")]
+    [InlineData(null, -1, "options.feedLinesAfterPrint -1 is outside the range 0 to 255")]
+    [InlineData(null, 256, "options.feedLinesAfterPrint 256 is outside the range 0 to 255")]
+    [InlineData(null, int.MinValue, "options.feedLinesAfterPrint -2147483648 is outside the range 0 to 255")]
+    public async Task PrintAsync_OptionOutsideThePrinterRange_IsAValidationFailureLoggedOnce(int? lineSpacing, int? feed, string expectedError)
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        var options = new PrintOptions { DefaultLineSpacing = lineSpacing, FeedLinesAfterPrint = feed ?? 3 };
+
+        var result = await NewService(logger).PrintAsync([Text()], options);
+
+        Assert.Equal(PrintResult.Invalid(expectedError), result);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("Rejected print: " + expectedError, entry.Message);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(255, 255)]
+    public async Task BuildDocumentAsync_OptionsAtTheLimits_GoToThePrinter(int lineSpacing, int feed)
+    {
+        var options = new PrintOptions { DefaultLineSpacing = lineSpacing, FeedLinesAfterPrint = feed };
+
+        var bytes = await NewService().BuildDocumentAsync([Text()], options);
+
+        // ESC 3 n, then GS V 65 n at the end.
+        Assert.Contains(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x33, (byte)lineSpacing]));
+        Assert.Equal([0x1D, 0x56, 0x41, (byte)feed], bytes[^1]);
+    }
+
+    public static TheoryData<List<PrintContent>, PrintOptions?, string?> PaperJobs()
+    {
+        var doubleHeight = new PrintContent { Type = ContentType.Text, Content = new string('\n', 499), Style = [PrintStyle.DoubleHeight] };
+        var widestQRCode = new PrintContent
+        {
+            Type = ContentType.QRCode,
+            Content = new string('x', 2953),
+            QRCodeOptions = new QRCodeOptions { Size = QRCodeSize.ExtraLarge }
+        };
+        var cut = new PrintContent { Type = ContentType.Cut };
+
+        return new()
+        {
+            // One line is 29 dots: 11 x 2900 + 3 x 29 = 31,987.
+            { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(3)], null, null },
+            { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(4)], null, OverPaper(11) },
+            // The job from the issue: 500 blocks of 100 lines.
+            { [.. Enumerable.Repeat(LineFeed(100), 500)], null, OverPaper(11) },
+            // 500 DoubleHeight lines are 26,500 dots.
+            { [doubleHeight], null, null },
+            { [doubleHeight, doubleHeight], null, OverPaper(1) },
+            // A long line wraps: 10,000 characters are 417 DoubleWidth lines.
+            { [.. Enumerable.Repeat(new PrintContent { Type = ContentType.Text, Content = new string('x', 10_000), Style = [PrintStyle.DoubleWidth] }, 3)], null, OverPaper(2) },
+            // Line spacing 255: 125 lines are 31,875 dots.
+            { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255 }, null },
+            { [Text(new string('\n', 125))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaper(0) },
+            // Each cut feeds 255 dots.
+            { [.. Enumerable.Repeat(cut, 125)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
+            { [.. Enumerable.Repeat(cut, 126)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(125) },
+            // 177 modules x 6 dots + one line = 1091 dots.
+            { [.. Enumerable.Repeat(widestQRCode, 29)], null, null },
+            { [.. Enumerable.Repeat(widestQRCode, 30)], null, OverPaper(29) },
+            // 255 dots + one line = 284 dots.
+            { [.. Enumerable.Repeat(Barcode(255), 112)], null, null },
+            { [.. Enumerable.Repeat(Barcode(255), 113)], null, OverPaper(112) }
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(PaperJobs))]
+    public async Task PrintAsync_PaperLength_IsLimitedPerDocument(List<PrintContent> content, PrintOptions? options, string? expectedError)
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        var service = NewService(logger);
+
+        if (expectedError is null)
+        {
+            // Not PrintAsync: an accepted document would go to the printer.
+            Assert.NotEmpty(await service.BuildDocumentAsync(content, options));
+            return;
+        }
+
+        var result = await service.PrintAsync(content, options);
+
+        Assert.Equal(PrintResult.Invalid(expectedError), result);
         var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
         Assert.Equal(LogLevel.Warning, entry.Level);
     }
@@ -165,18 +305,6 @@ public sealed class PayloadErrorTests
         var result = await NewService().PrintAsync([Text(), null!]);
 
         Assert.Equal(PrintResult.Invalid("Block 1: must not be null"), result);
-    }
-
-    // Out-of-range options must not fail the build: outside a block, a throw is
-    // reported as a printer fault.
-    [Fact]
-    public async Task BuildDocumentAsync_ExtremeOptions_DoNotThrow()
-    {
-        var options = new PrintOptions { CodePage = "nope", DefaultLineSpacing = -70000, FeedLinesAfterPrint = int.MinValue };
-
-        var bytes = await NewService().BuildDocumentAsync([Text()], options);
-
-        Assert.NotEmpty(bytes);
     }
 
     // The name is caller text: it reaches the log cleaned and cut.
@@ -299,5 +427,26 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
         var body = await PostBadRequestAsync("{}");
 
         Assert.Equal("Request must have Content array or both Name and Message", body.Error);
+    }
+
+    [Theory]
+    [InlineData("""{"content":[{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"heightInDots":256}}]}""", "Block 0 (Barcode): barcodeOptions.heightInDots 256 is outside the range 1 to 255")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"feedLinesAfterPrint":-1}}""", "options.feedLinesAfterPrint -1 is outside the range 0 to 255")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"defaultLineSpacing":256}}""", "options.defaultLineSpacing 256 is outside the range 0 to 255")]
+    public async Task PostPrinter_NumberOutsideThePrinterRange_Returns400WithFieldAndRange(string json, string expectedError)
+    {
+        var body = await PostBadRequestAsync(json);
+
+        Assert.Equal(expectedError, body.Error);
+    }
+
+    [Fact]
+    public async Task PostPrinter_JobOverThePaperLimit_Returns400()
+    {
+        var blocks = string.Join(',', Enumerable.Repeat("""{"type":"LineFeed","lines":100}""", 500));
+
+        var body = await PostBadRequestAsync("{\"content\":[" + blocks + "]}");
+
+        Assert.Equal("Block 11: the document is over the limit of 32000 dots of paper (4 m)", body.Error);
     }
 }

@@ -15,6 +15,7 @@ internal sealed class LineFeedBlockHandler : IBlockHandler
         if (lines > MaxLines)
             throw PrintContentException.OverLimit("lines", lines, MaxLines);
 
+        ctx.AddPaper((long)Math.Max(lines, 0) * PaperLength.LineDots(ctx.LineSpacing));
         for (var i = 0; i < lines; i++)
             ctx.Add(ctx.Emitter.PrintLine(string.Empty));
         return Task.CompletedTask;

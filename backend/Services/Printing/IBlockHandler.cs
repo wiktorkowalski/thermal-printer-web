@@ -32,6 +32,13 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
         return bytes;
     }
 
+    // Estimated paper for the document so far, in dots. See PaperLength.
+    public long PaperDots { get; private set; }
+
+    public int? LineSpacing => Options?.DefaultLineSpacing;
+
+    public void AddPaper(long dots) => PaperDots += dots;
+
     public void Add(byte[] bytes) => Output.Add(bytes);
     public void AddRange(IEnumerable<byte[]> bytes) => Output.AddRange(bytes);
 }

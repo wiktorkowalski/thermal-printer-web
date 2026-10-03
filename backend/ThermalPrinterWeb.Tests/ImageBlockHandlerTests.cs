@@ -148,6 +148,8 @@ public sealed class ImageBlockHandlerTests
         var ctx = await RunAsync(Convert.ToBase64String(Encode(new JpegEncoder(), 4032, 3024)));
 
         Assert.Equal((72, 432), RasterSize(ctx));
+        // The paper limit counts the printed height.
+        Assert.Equal(432, ctx.PaperDots);
     }
 
     // The decoder checks the CRC of every critical chunk.

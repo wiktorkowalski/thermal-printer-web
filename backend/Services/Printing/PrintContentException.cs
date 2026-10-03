@@ -6,4 +6,7 @@ internal sealed class PrintContentException(string message, Exception? inner = n
 {
     public static PrintContentException OverLimit(string what, long value, long limit)
         => new($"{what} {value} is over the limit of {limit}");
+
+    public static PrintContentException OutOfRange(string field, long value, long min, long max)
+        => new($"{field} {value} is outside the range {min} to {max}");
 }

@@ -53,7 +53,8 @@ internal sealed class ImageBlockHandler : IBlockHandler
         await DecodeGate.WaitAsync();
         try
         {
-            var png = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
+            var (png, height) = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
+            ctx.AddPaper(height);
             // ESCPOS_NET decodes the PNG again, so this stays inside the gate.
             ctx.Add(ctx.Emitter.PrintImage(png, options.HighDensity, isLegacy: options.UseLegacyMode));
         }
@@ -88,7 +89,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
         return Math.Min(value, limit);
     }
 
-    private static async Task<byte[]> ResizeToPngAsync(byte[] source, IImageFormat format, Size max, bool preserveAspectRatio)
+    private static async Task<(byte[] Png, int Height)> ResizeToPngAsync(byte[] source, IImageFormat format, Size max, bool preserveAspectRatio)
     {
         using var image = Decode(format, source, static bytes => Image.Load(PngAndJpegOnly, bytes));
 
@@ -110,7 +111,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
 
         using var ms = new MemoryStream();
         await image.SaveAsPngAsync(ms);
-        return ms.ToArray();
+        return (ms.ToArray(), image.Height);
     }
 
     // Format and dimensions from the header: no pixel buffer yet.
