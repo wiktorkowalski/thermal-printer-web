@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
 
@@ -21,14 +20,10 @@ builder.Services.AddControllers()
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
 
-// MCP server over HTTP at /mcp (stateless). McpApiKeyMiddleware guards it with a bearer token.
+// MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
 builder.Services.AddMcpServer()
     .WithHttpTransport(o => o.Stateless = true)
     .WithToolsFromAssembly();
-builder.Services.AddOptions<McpAuthOptions>()
-    .BindConfiguration(McpAuthOptions.SectionName)
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
 
 // Development only: Swagger (it lists every endpoint) and CORS for the React dev server.
 if (builder.Environment.IsDevelopment())
@@ -69,10 +64,8 @@ if (app.Environment.IsDevelopment())
     app.UseCors("AllowReact");
 }
 
-app.UseMiddleware<McpApiKeyMiddleware>();
-
 app.MapControllers();
-app.MapMcp(McpApiKeyMiddleware.McpPath);
+app.MapMcp("/mcp");
 
 // Serve React app SPA (from wwwroot)
 app.MapFallbackToFile("index.html");
