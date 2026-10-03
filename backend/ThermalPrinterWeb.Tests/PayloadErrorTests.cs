@@ -51,8 +51,43 @@ public sealed class PayloadErrorTests
         { new PrintContent { Type = ContentType.Separator, SeparatorLength = -1 }, "Block 1 (Separator): separatorLength must not be negative" },
         { new PrintContent { Type = ContentType.Image, Content = "not base64 !!" }, "Block 1 (Image): Image rejected: not valid base64 (13 characters)." },
         { new PrintContent { Type = ContentType.Image, Content = Convert.ToBase64String("not an image"u8) }, "Block 1 (Image): Image rejected: format not supported (format unknown, 12 bytes). Send a PNG or JPEG." },
-        { BadBarcode(), "Block 1 (Barcode): content is not a valid EAN13 barcode" }
+        { BadBarcode(), "Block 1 (Barcode): content is not a valid EAN13 barcode" },
+        { new PrintContent { Type = ContentType.Separator, SeparatorLength = 65 }, "Block 1 (Separator): separatorLength 65 is over the limit of 64" },
+        { new PrintContent { Type = ContentType.Separator, SeparatorLength = int.MaxValue }, "Block 1 (Separator): separatorLength 2147483647 is over the limit of 64" },
+        { new PrintContent { Type = ContentType.LineFeed, Lines = 101 }, "Block 1 (LineFeed): lines 101 is over the limit of 100" },
+        { Text(new string('x', 10_001)), "Block 1 (Text): text of 10001 characters is over the limit of 10000" },
+        { Text(new string('\n', 500)), "Block 1 (Text): text of 501 lines is over the limit of 500" }
     };
+
+    [Fact]
+    public async Task BuildDocumentAsync_BlocksAtTheLimits_AreAccepted()
+    {
+        List<PrintContent> content =
+        [
+            new() { Type = ContentType.Separator, SeparatorLength = 64 },
+            new() { Type = ContentType.LineFeed, Lines = 100 },
+            Text(new string('x', 10_000)),
+            Text(new string('\n', 499)),
+            .. Enumerable.Range(0, PrinterService.MaxBlocks - 4).Select(_ => Text())
+        ];
+        Assert.Equal(PrinterService.MaxBlocks, content.Count);
+
+        Assert.NotEmpty(await NewService().BuildDocumentAsync(content, null));
+    }
+
+    [Fact]
+    public async Task PrintAsync_TooManyBlocks_IsAValidationFailureLoggedOnce()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        var content = Enumerable.Range(0, PrinterService.MaxBlocks + 1).Select(_ => Text(Secret)).ToList();
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        Assert.Equal(PrintResult.Invalid("Document has 501 blocks, over the limit of 500"), result);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.DoesNotContain(Secret, entry.Message);
+    }
 
     [Theory]
     [MemberData(nameof(InvalidBlocks))]

@@ -20,6 +20,9 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
     private const string DefaultCodePage = "PC852";
 
+    // A long receipt is about 100 blocks.
+    internal const int MaxBlocks = 500;
+
     // ESC B n t (1B 42): buzzer - n beeps each of length t. Both clamp to 1..9.
     private const int BuzzerMin = 1;
     private const int BuzzerMax = 9;
@@ -72,6 +75,12 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // no switch to edit.
     internal async Task<List<byte[]>> BuildDocumentAsync(List<PrintContent> content, PrintOptions? options)
     {
+        if (content.Count > MaxBlocks)
+        {
+            logger.LogWarning("Rejected print: {BlockCount} blocks, limit {MaxBlocks}", content.Count, MaxBlocks);
+            throw new PrintContentException($"Document has {content.Count} blocks, over the limit of {MaxBlocks}");
+        }
+
         var e = new EPSON();
         var ctx = new BlockContext(e, options);
 

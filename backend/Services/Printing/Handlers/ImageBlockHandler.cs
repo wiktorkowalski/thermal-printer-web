@@ -2,6 +2,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Memory;
 using SixLabors.ImageSharp.Processing;
 using ThermalPrinterWeb.Models;
 
@@ -10,11 +11,31 @@ namespace ThermalPrinterWeb.Services.Printing.Handlers;
 internal sealed class ImageBlockHandler : IBlockHandler
 {
     // 576 = full V330M print-head width (80mm head).
-    private const int DefaultMaxWidth = 576;
+    private const int HeadWidth = 576;
     private const int DefaultMaxHeight = 576;
 
+    // Printed height limit for one image: 4096 dots = 512 mm of paper at 8 dots/mm.
+    internal const int MaxPrintHeight = 4096;
+
+    // Limits on the image the caller sends. The endpoint is public, so the header
+    // must not decide how much memory a decode takes.
+    // 16 MiB as base64 is 22.4 MB, below MaxRequestBodySize in Program.cs.
+    internal const int MaxImageBytes = 16 * 1024 * 1024;
+    internal const int MaxBase64Length = (MaxImageBytes + 2) / 3 * 4;
+    // Phone photos must pass: 12 MP 4032x3024, 48 MP 8064x6048, 50 MP 8160x6144, panorama 16382x3628.
+    internal const int MaxSidePixels = 16384;
+    internal const long MaxPixels = 64_000_000;
+    // Second guard, for what the header check cannot see. 64 MP as Rgba32 = 256 MB.
+    private const int AllocationLimitMegabytes = 256;
+
     // The pinned ImageSharp has open advisories in other decoders (BigTIFF loop): keep them off caller bytes.
-    private static readonly Configuration PngAndJpegOnly = new(new PngConfigurationModule(), new JpegConfigurationModule());
+    private static readonly Configuration PngAndJpegOnly = new(new PngConfigurationModule(), new JpegConfigurationModule())
+    {
+        MemoryAllocator = MemoryAllocator.Create(new MemoryAllocatorOptions { AllocationLimitMegabytes = AllocationLimitMegabytes })
+    };
+
+    // One decode at a time: an accepted photo takes up to 256 MB while it is resized.
+    private static readonly SemaphoreSlim DecodeGate = new(1, 1);
 
     public ContentType Type => ContentType.Image;
 
@@ -24,19 +45,34 @@ internal sealed class ImageBlockHandler : IBlockHandler
         if (string.IsNullOrEmpty(item.Content))
             return;
 
-        var imageBytes = await ProcessImageContentAsync(item.Content, item.ImageOptions);
+        // Cheap checks first: a rejected image does not wait for the gate.
+        var source = DecodeBase64(item.Content);
+        var format = CheckHeader(source);
+
+        byte[] imageBytes;
+        await DecodeGate.WaitAsync();
+        try
+        {
+            imageBytes = await ResizeToPngAsync(source, format, item.ImageOptions);
+        }
+        finally
+        {
+            DecodeGate.Release();
+        }
+
         var legacy = item.ImageOptions?.UseLegacyMode ?? true;
         var highDensity = item.ImageOptions?.HighDensity ?? true;
         ctx.Add(ctx.Emitter.PrintImage(imageBytes, highDensity, isLegacy: legacy));
     }
 
-    private static async Task<byte[]> ProcessImageContentAsync(string content, ImageOptions? options)
+    private static async Task<byte[]> ResizeToPngAsync(byte[] source, IImageFormat format, ImageOptions? options)
     {
-        using var image = LoadPngOrJpeg(DecodeBase64(content));
+        using var image = Decode(format, source, static bytes => Image.Load(PngAndJpegOnly, bytes));
 
+        // The caller can ask for less than the head width, not for more.
         var opts = options ?? new ImageOptions();
-        var maxWidth = opts.MaxWidth ?? DefaultMaxWidth;
-        var maxHeight = opts.MaxHeight ?? DefaultMaxHeight;
+        var maxWidth = Math.Min(opts.MaxWidth ?? HeadWidth, HeadWidth);
+        var maxHeight = Math.Min(opts.MaxHeight ?? DefaultMaxHeight, MaxPrintHeight);
 
         if (image.Width > maxWidth || image.Height > maxHeight)
         {
@@ -59,40 +95,74 @@ internal sealed class ImageBlockHandler : IBlockHandler
         return ms.ToArray();
     }
 
-    private static Image LoadPngOrJpeg(byte[] imageBytes)
+    // Format and dimensions from the header: no pixel buffer yet.
+    private static IImageFormat CheckHeader(byte[] imageBytes)
     {
         // The format comes from the bytes. A declared MIME type in a data URI is ignored.
         var format = Image.DetectFormat(imageBytes);
         if (format is not (PngFormat or JpegFormat))
-            throw Rejected(format, imageBytes.Length, "format not supported");
+            throw new PrintContentException($"Image rejected: format not supported ({Facts(format, imageBytes.Length)}). Send a PNG or JPEG.");
 
+        var info = Decode(format, imageBytes, static bytes => Image.Identify(PngAndJpegOnly, bytes, out _))
+            ?? throw Damaged(format, imageBytes.Length);
+        if (PixelsOverLimit(info.Width, info.Height))
+        {
+            throw new PrintContentException(
+                $"Image rejected: {info.Width}x{info.Height} pixels is over the limit of {MaxSidePixels} per side " +
+                $"and {MaxPixels} in total ({Facts(format, imageBytes.Length)}).");
+        }
+
+        return format;
+    }
+
+    private static T Decode<T>(IImageFormat format, byte[] imageBytes, Func<byte[], T> read)
+    {
         try
         {
-            return Image.Load(PngAndJpegOnly, imageBytes);
+            return read(imageBytes);
+        }
+        // The decoders wrap the allocator's refusal in InvalidImageContentException.
+        catch (Exception ex) when (ex is InvalidMemoryOperationException || ex.InnerException is InvalidMemoryOperationException)
+        {
+            throw new PrintContentException(
+                $"Image rejected: decoding needs more than {AllocationLimitMegabytes} MB ({Facts(format, imageBytes.Length)}).", ex);
         }
         // Damaged files also surface as NullReference, IndexOutOfRange and NotSupported from the decoders.
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            throw Rejected(format, imageBytes.Length, "file is damaged", ex);
+            throw Damaged(format, imageBytes.Length, ex);
         }
     }
+
+    internal static bool PixelsOverLimit(int width, int height)
+        => width > MaxSidePixels || height > MaxSidePixels || (long)width * height > MaxPixels;
 
     private static byte[] DecodeBase64(string content)
     {
-        var base64 = content.StartsWith("data:", StringComparison.Ordinal) || content.StartsWith("base64,", StringComparison.Ordinal)
-            ? content[(content.IndexOf(',') + 1)..]
-            : content;
-        try
+        var start = content.StartsWith("data:", StringComparison.Ordinal) || content.StartsWith("base64,", StringComparison.Ordinal)
+            ? content.IndexOf(',') + 1
+            : 0;
+
+        // Checked on the text, before any allocation: n base64 characters hold at most 3n/4 bytes.
+        var length = content.Length - start;
+        if (length > MaxBase64Length)
         {
-            return Convert.FromBase64String(base64);
+            throw new PrintContentException(
+                $"Image rejected: {length} base64 characters is over the limit of {MaxBase64Length} ({MaxImageBytes} bytes).");
         }
-        catch (FormatException ex)
-        {
-            throw new PrintContentException($"Image rejected: not valid base64 ({content.Length} characters).", ex);
-        }
+
+        // From the span: no second copy of a 22 MB string.
+        var bytes = new byte[length / 4 * 3];
+        if (!Convert.TryFromBase64Chars(content.AsSpan(start), bytes, out var written))
+            throw new PrintContentException($"Image rejected: not valid base64 ({content.Length} characters).");
+
+        return written == bytes.Length ? bytes : bytes[..written];
     }
 
     // No log here: PrinterService logs the failure once, with this message. Facts only, never the image content.
-    private static PrintContentException Rejected(IImageFormat? format, int byteCount, string reason, Exception? inner = null)
-        => new($"Image rejected: {reason} (format {format?.Name ?? "unknown"}, {byteCount} bytes). Send a PNG or JPEG.", inner);
+    private static PrintContentException Damaged(IImageFormat format, int byteCount, Exception? inner = null)
+        => new($"Image rejected: file is damaged ({Facts(format, byteCount)}). Send a PNG or JPEG.", inner);
+
+    private static string Facts(IImageFormat? format, int byteCount)
+        => $"format {format?.Name ?? "unknown"}, {byteCount} bytes";
 }

@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Text;
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
@@ -35,15 +37,66 @@ public sealed class ImageBlockHandlerTests
 
     private static BlockContext NewContext() => new(new EPSON(), null);
 
-    private static Task RunAsync(string content, BlockContext ctx)
+    private static Task RunAsync(string content, BlockContext ctx, ImageOptions? options = null)
         => new ImageBlockHandler()
-            .HandleAsync(new PrintContent { Type = ContentType.Image, Content = content }, ctx);
+            .HandleAsync(new PrintContent { Type = ContentType.Image, Content = content, ImageOptions = options }, ctx);
 
-    private static async Task<BlockContext> RunAsync(string content)
+    private static async Task<BlockContext> RunAsync(string content, ImageOptions? options = null)
     {
         var ctx = NewContext();
-        await RunAsync(content, ctx);
+        await RunAsync(content, ctx, options);
         return ctx;
+    }
+
+    // GS v 0 m xL xH yL yH: width in bytes (8 dots each), height in dots.
+    private static (int WidthBytes, int Height) RasterSize(BlockContext ctx)
+    {
+        var bytes = ByteSplicer.Combine([.. ctx.Output]);
+        var at = bytes.AsSpan().IndexOf(RasterCommand);
+        Assert.True(at >= 0);
+        return (BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at + 4)), BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at + 6)));
+    }
+
+    // A PNG that only declares its size: valid header, one compressed pixel row of zeros.
+    private static byte[] PngDeclaring(int width, int height, byte bitDepth = 8)
+    {
+        using var ms = new MemoryStream();
+        ms.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        var header = new byte[13];
+        BinaryPrimitives.WriteInt32BigEndian(header, width);
+        BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), height);
+        header[8] = bitDepth;
+        header[9] = 6; // RGBA
+        WriteChunk(ms, "IHDR", header);
+
+        using var data = new MemoryStream();
+        using (var zlib = new ZLibStream(data, CompressionLevel.Optimal, leaveOpen: true))
+            zlib.Write(new byte[16]);
+        WriteChunk(ms, "IDAT", data.ToArray());
+        WriteChunk(ms, "IEND", []);
+        return ms.ToArray();
+    }
+
+    // The decoder checks the CRC of every critical chunk.
+    private static void WriteChunk(Stream stream, string type, byte[] data)
+    {
+        Span<byte> number = stackalloc byte[4];
+        byte[] typeAndData = [.. Encoding.ASCII.GetBytes(type), .. data];
+
+        BinaryPrimitives.WriteInt32BigEndian(number, data.Length);
+        stream.Write(number);
+        stream.Write(typeAndData);
+
+        var crc = 0xFFFFFFFFu;
+        foreach (var b in typeAndData)
+        {
+            crc ^= b;
+            for (var bit = 0; bit < 8; bit++)
+                crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320u : crc >> 1;
+        }
+        BinaryPrimitives.WriteUInt32BigEndian(number, ~crc);
+        stream.Write(number);
     }
 
     private static async Task AssertPrintsAsync(string content)
@@ -71,11 +124,94 @@ public sealed class ImageBlockHandlerTests
     {
         var ctx = await RunAsync(Convert.ToBase64String(Png(width: 1200, height: 40)));
 
-        // GS v 0 m xL xH yL yH: 576 dots = 72 bytes per row.
-        var bytes = ByteSplicer.Combine([.. ctx.Output]);
-        var at = bytes.AsSpan().IndexOf(RasterCommand);
-        Assert.True(at >= 0);
-        Assert.Equal(72, bytes[at + 4] | (bytes[at + 5] << 8));
+        // 576 dots = 72 bytes per row.
+        Assert.Equal(72, RasterSize(ctx).WidthBytes);
+    }
+
+    [Fact]
+    public async Task Png_HeaderDeclares30000x30000_IsRejectedWithoutThePixelBuffer()
+    {
+        var bomb = Convert.ToBase64String(PngDeclaring(30000, 30000));
+        Assert.True(bomb.Length < 200);
+        var ctx = NewContext();
+
+        // The handler throws before its first await, so the count is for this thread.
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(bomb, ctx));
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Contains("30000x30000 pixels is over the limit", ex.Message);
+        Assert.Contains("format PNG,", ex.Message);
+        Assert.Empty(ctx.Output);
+        Assert.True(allocated < 1024 * 1024, $"allocated {allocated} bytes");
+    }
+
+    [Theory]
+    [InlineData(16384, 1, false)]
+    [InlineData(16385, 1, true)]
+    [InlineData(1, 16384, false)]
+    [InlineData(1, 16385, true)]
+    [InlineData(8000, 8000, false)]  // 64 MP, the pixel limit
+    [InlineData(8001, 8000, true)]
+    [InlineData(8064, 6048, false)]  // 48 MP phone photo
+    [InlineData(8160, 6144, false)]  // 50 MP phone photo
+    [InlineData(16382, 3628, false)] // phone panorama
+    [InlineData(int.MaxValue, int.MaxValue, true)]
+    public void PixelsOverLimit_AtTheBoundaries(int width, int height, bool expected)
+        => Assert.Equal(expected, ImageBlockHandler.PixelsOverLimit(width, height));
+
+    [Fact]
+    public async Task Png_PhotoSized12Megapixels_IsResizedAndPrints()
+    {
+        using var photo = new Image<L8>(4032, 3024);
+        using var ms = new MemoryStream();
+        photo.SaveAsPng(ms);
+
+        var ctx = await RunAsync(Convert.ToBase64String(ms.ToArray()));
+
+        Assert.Equal((72, 432), RasterSize(ctx));
+    }
+
+    // 48 MP passes the header check, but 16 bits per channel is 384 MB of pixels.
+    [Fact]
+    public async Task Png_OverTheAllocatorLimit_IsRejected()
+    {
+        var ex = await AssertRejectedAsync(Convert.ToBase64String(PngDeclaring(8000, 6000, bitDepth: 16)));
+        Assert.Contains("decoding needs more than 256 MB (format PNG,", ex.Message);
+    }
+
+    [Fact]
+    public async Task Base64_AtTheLengthLimit_PassesTheSizeCheck()
+    {
+        var ex = await AssertRejectedAsync(new string('A', ImageBlockHandler.MaxBase64Length));
+        Assert.Contains($"format not supported (format unknown, {ImageBlockHandler.MaxBase64Length / 4 * 3} bytes)", ex.Message);
+    }
+
+    [Fact]
+    public async Task Base64_OverTheLengthLimit_IsRejectedBeforeDecoding()
+    {
+        var ex = await AssertRejectedAsync(new string('A', ImageBlockHandler.MaxBase64Length + 4));
+        Assert.Contains($"{ImageBlockHandler.MaxBase64Length + 4} base64 characters is over the limit", ex.Message);
+    }
+
+    [Fact]
+    public async Task MaxWidth_OverTheHeadWidth_IsClampedToTheHead()
+    {
+        var ctx = await RunAsync(
+            Convert.ToBase64String(Png(width: 1200, height: 40)),
+            new ImageOptions { MaxWidth = 100_000, MaxHeight = 100_000 });
+
+        Assert.Equal(72, RasterSize(ctx).WidthBytes);
+    }
+
+    [Fact]
+    public async Task MaxHeight_OverThePrintLimit_IsClamped()
+    {
+        var ctx = await RunAsync(
+            Convert.ToBase64String(Png(width: 8, height: ImageBlockHandler.MaxPrintHeight + 904)),
+            new ImageOptions { MaxHeight = 100_000, PreserveAspectRatio = false });
+
+        Assert.Equal(ImageBlockHandler.MaxPrintHeight, RasterSize(ctx).Height);
     }
 
     [Theory]
