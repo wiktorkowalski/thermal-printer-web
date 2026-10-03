@@ -1,4 +1,3 @@
-using System.Text;
 using ESCPOS_NET.Emitters;
 using EscPrintStyle = ESCPOS_NET.Emitters.PrintStyle;
 
@@ -8,8 +7,9 @@ namespace ThermalPrinterWeb.Services.Printing;
 // a trailing LF in reverse / upside-down toggles.
 internal static class StyledText
 {
-    public static List<byte[]> Build(EPSON e, string text, List<Models.PrintStyle>? styles, Encoding encoding)
+    public static List<byte[]> Build(BlockContext ctx, string text, List<Models.PrintStyle>? styles)
     {
+        var e = ctx.Emitter;
         List<byte[]> bytes = [];
         var hasReverse = styles?.Contains(Models.PrintStyle.ReverseMode) == true;
         var hasUpsideDown = styles?.Contains(Models.PrintStyle.UpsideDownMode) == true;
@@ -21,9 +21,9 @@ internal static class StyledText
 
         bytes.Add(e.SetStyles(MapPrintStyles(styles)));
 
-        var textBytes = encoding.GetBytes(text);
-        var newLine = new byte[] { 0x0A }; // LF
-        bytes.Add([.. textBytes, .. newLine]);
+        var textBytes = PrinterSafeText.Encode(text, ctx.Encoding, out var replaced);
+        ctx.ReplacedCharacters += replaced;
+        bytes.Add([.. textBytes, 0x0A]); // trailing LF
 
         bytes.Add(e.SetStyles(EscPrintStyle.None));
 

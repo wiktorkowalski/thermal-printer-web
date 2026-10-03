@@ -13,8 +13,10 @@ internal sealed class QRCodeBlockHandler : IBlockHandler
             return Task.CompletedTask;
 
         var opts = item.QRCodeOptions ?? new QRCodeOptions();
+        var data = PrinterSafeText.CleanQRCode(item.Content, out var replaced);
+        ctx.ReplacedCharacters += replaced;
         ctx.Add(ctx.Emitter.PrintQRCode(
-            item.Content!,
+            data,
             type: MapQRCodeModel(opts.Model),
             size: MapQRCodeSize(opts.Size),
             correction: MapQRCodeCorrectionLevel(opts.CorrectionLevel)

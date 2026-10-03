@@ -100,6 +100,10 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 logger.LogWarning("Unsupported content type: {Type}", item.Type);
         }
 
+        // Count only: the content is caller input and the endpoint is public.
+        if (ctx.ReplacedCharacters > 0)
+            logger.LogInformation("Replaced {Count} unprintable character(s) with '?'", ctx.ReplacedCharacters);
+
         if (options?.AutoCut != false && !ctx.HasCut)
         {
             var feedLines = options?.FeedLinesAfterPrint ?? 3;

@@ -9,7 +9,7 @@ internal sealed class SeparatorBlockHandler : IBlockHandler
     public Task HandleAsync(PrintContent item, BlockContext ctx)
     {
         var sep = new string((item.SeparatorChar ?? "=")[0], item.SeparatorLength ?? 32);
-        ctx.AddRange(StyledText.Build(ctx.Emitter, sep, item.Style, ctx.Encoding));
+        ctx.AddRange(StyledText.Build(ctx, sep, item.Style));
         return Task.CompletedTask;
     }
 }

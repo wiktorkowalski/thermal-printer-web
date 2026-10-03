@@ -15,6 +15,9 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     public List<byte[]> Output { get; } = [];
     public bool HasCut { get; set; }
 
+    // Characters PrinterSafeText turned into '?' across the whole document.
+    public int ReplacedCharacters { get; set; }
+
     public void Add(byte[] bytes) => Output.Add(bytes);
     public void AddRange(IEnumerable<byte[]> bytes) => Output.AddRange(bytes);
 }
