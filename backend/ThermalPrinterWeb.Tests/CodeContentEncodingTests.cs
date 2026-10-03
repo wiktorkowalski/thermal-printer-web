@@ -92,6 +92,8 @@ public sealed class CodeContentEncodingTests
     [Theory]
     [InlineData('A', 252, 0xFF, 0x00)]
     [InlineData('A', 253, 0x00, 0x01)]
+    [InlineData('A', 255, 0x02, 0x01)]
+    [InlineData('A', 256, 0x03, 0x01)]
     [InlineData('A', 2953, 0x8C, 0x0B)]
     [InlineData('ż', 126, 0xFF, 0x00)] // 252 bytes
     [InlineData('ż', 127, 0x01, 0x01)] // 254 bytes; a char count would give 130
@@ -113,6 +115,16 @@ public sealed class CodeContentEncodingTests
         var (bytes, ctx) = await RunQRAsync("BEGIN:VCARD\r\nFN:Łukasz Żółw\nEND:VCARD");
 
         Assert.Equal("BEGIN:VCARD\nFN:Łukasz Żółw\nEND:VCARD"u8.ToArray(), ReadStoreCommand(bytes).Data);
+        Assert.Equal(0, ctx.ReplacedCharacters);
+    }
+
+    [Fact]
+    public async Task QRCode_Tab_BecomesASpace()
+    {
+        // Same rule as text: HT is a printer command byte. The swap is not counted as a replacement.
+        var (bytes, ctx) = await RunQRAsync("a\tb");
+
+        Assert.Equal("a b"u8.ToArray(), ReadStoreCommand(bytes).Data);
         Assert.Equal(0, ctx.ReplacedCharacters);
     }
 

@@ -8,7 +8,14 @@ namespace ThermalPrinterWeb.Services.Printing.Handlers;
 // char and puts the char count, not the byte count, in the length prefix.
 internal sealed class QRCodeBlockHandler : IBlockHandler
 {
-    private static readonly byte[] Function = [Cmd.GS, Barcodes.Set2DCode, Barcodes.PrintBarcode];
+    private static readonly byte[] GsParenK = [Cmd.GS, Barcodes.Set2DCode, Barcodes.PrintBarcode];
+
+    // Byte-mode capacity of version 40 at the lowest correction level.
+    private const int Model2MaxBytes = 2953;
+
+    // The limits ESCPOS_NET applied, now counted in bytes.
+    private const int Model1MaxBytes = 707;
+    private const int MicroMaxBytes = 21;
 
     public ContentType Type => ContentType.QRCode;
 
@@ -29,22 +36,20 @@ internal sealed class QRCodeBlockHandler : IBlockHandler
         // pL pH count the data plus the bytes of StoreQRCodeData.
         var storeLength = data.Length + Barcodes.StoreQRCodeData.Length;
         ctx.Add([
-            .. Function, .. Barcodes.SelectQRCodeModel, (byte)model, Barcodes.AutoEnding,
-            .. Function, .. Barcodes.SetQRCodeDotSize, (byte)MapQRCodeSize(opts.Size),
-            .. Function, .. Barcodes.SetQRCodeCorrectionLevel, (byte)MapQRCodeCorrectionLevel(opts.CorrectionLevel),
-            .. Function, (byte)(storeLength & 0xFF), (byte)(storeLength >> 8), .. Barcodes.StoreQRCodeData, .. data,
-            .. Function, .. Barcodes.PrintQRCode
+            .. GsParenK, .. Barcodes.SelectQRCodeModel, (byte)model, Barcodes.AutoEnding,
+            .. GsParenK, .. Barcodes.SetQRCodeDotSize, (byte)MapQRCodeSize(opts.Size),
+            .. GsParenK, .. Barcodes.SetQRCodeCorrectionLevel, (byte)MapQRCodeCorrectionLevel(opts.CorrectionLevel),
+            .. GsParenK, (byte)(storeLength & 0xFF), (byte)(storeLength >> 8), .. Barcodes.StoreQRCodeData, .. data,
+            .. GsParenK, .. Barcodes.PrintQRCode
         ]);
         return Task.CompletedTask;
     }
 
-    // Model 2: byte-mode capacity of version 40 at the lowest correction level.
-    // Model 1 and Micro: the limits ESCPOS_NET applied, now counted in bytes.
     private static int MaxDataBytes(TwoDimensionCodeType model) => model switch
     {
-        TwoDimensionCodeType.QRCODE_MODEL1 => 707,
-        TwoDimensionCodeType.QRCODE_MICRO => 21,
-        _ => 2953
+        TwoDimensionCodeType.QRCODE_MODEL1 => Model1MaxBytes,
+        TwoDimensionCodeType.QRCODE_MICRO => MicroMaxBytes,
+        _ => Model2MaxBytes
     };
 
     private static TwoDimensionCodeType MapQRCodeModel(Models.QRCodeModel model) => model switch
