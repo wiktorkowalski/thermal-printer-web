@@ -26,12 +26,13 @@ internal sealed class ImageBlockHandler : IBlockHandler
     internal const int MaxSidePixels = 16384;
     internal const long MaxPixels = 64_000_000;
     // Second guard, for what the header check cannot see. 64 MP as Rgba32 = 256 MB.
+    // The limit is per buffer: a progressive 64 MP JPEG also holds its coefficient planes, 640 MB in total (measured).
     private const int AllocationLimitMegabytes = 256;
 
     // The pinned ImageSharp has open advisories in other decoders (BigTIFF loop): keep them off caller bytes.
     private static readonly Configuration PngAndJpegOnly = CreateConfiguration();
 
-    // One decode at a time: an accepted photo takes up to 256 MB while it is resized.
+    // One decode at a time: an accepted photo takes up to 640 MB while it is decoded.
     private static readonly SemaphoreSlim DecodeGate = new(1, 1);
 
     public ContentType Type => ContentType.Image;

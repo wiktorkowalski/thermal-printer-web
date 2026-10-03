@@ -26,6 +26,9 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // A long receipt is about 100 blocks.
     internal const int MaxBlocks = 500;
 
+    // One 64 MP image takes about 0.6 s of CPU inside the decode gate, whatever its output size.
+    internal const int MaxImageBlocks = 20;
+
     // Printer data for one job. A full-width image 4096 dots tall is 295 KB; text is 1 byte per character.
     internal const int MaxOutputBytes = 2 * 1024 * 1024;
 
@@ -85,6 +88,13 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             logger.LogWarning("Rejected print: the document has {BlockCount} blocks, the limit is {MaxBlocks}", content.Count, MaxBlocks);
             throw PrintContentException.OverLimit("block count", content.Count, MaxBlocks);
+        }
+
+        var imageBlocks = content.Count(block => block is { Type: ContentType.Image, Content.Length: > 0 });
+        if (imageBlocks > MaxImageBlocks)
+        {
+            logger.LogWarning("Rejected print: the document has {ImageBlockCount} image blocks, the limit is {MaxImageBlocks}", imageBlocks, MaxImageBlocks);
+            throw PrintContentException.OverLimit("image block count", imageBlocks, MaxImageBlocks);
         }
 
         var e = new EPSON();

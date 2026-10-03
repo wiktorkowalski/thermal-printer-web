@@ -94,6 +94,26 @@ public sealed class PayloadErrorTests
         Assert.DoesNotContain(Secret, entry.Message);
     }
 
+    [Theory]
+    [InlineData(20, true)]
+    [InlineData(21, false)]
+    public async Task PrintAsync_ImageBlocks_AreLimitedPerDocument(int count, bool accepted)
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        // Not an image: an accepted document fails later, at block 0.
+        var content = Enumerable.Range(0, count).Select(_ => new PrintContent { Type = ContentType.Image, Content = "AAAA" }).ToList();
+        // Image blocks with no picture do not count.
+        content.Add(new PrintContent { Type = ContentType.Image });
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        Assert.Equal(PrintFailure.Validation, result.Failure);
+        Assert.Equal(accepted, result.Error!.StartsWith("Block 0 (Image):", StringComparison.Ordinal));
+        if (!accepted)
+            Assert.Equal("image block count 21 is over the limit of 20", result.Error);
+        Assert.Equal(LogLevel.Warning, Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information).Level);
+    }
+
     [Fact]
     public async Task PrintAsync_TooMuchPrinterData_IsAValidationFailureLoggedOnce()
     {
