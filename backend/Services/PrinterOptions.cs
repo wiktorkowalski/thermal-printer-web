@@ -8,8 +8,8 @@ internal sealed class PrinterOptions
 {
     public const string SectionName = "Printer";
 
-    // The printer on the home network. Also the value in appsettings.json: the code
-    // default keeps production on the printer if that file is replaced.
+    // The printer on the home network. Not in appsettings.json: a value there also binds in
+    // Development when appsettings.Development.json is not found.
     public const string DefaultAddress = "192.168.123.100:9100";
 
     // "host" or "host:port". Empty: no printer, the service sends nothing (Development only).

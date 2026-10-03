@@ -17,6 +17,7 @@ public sealed class PrinterAddressTests
 {
     private const string ProductionAddress = "192.168.123.100:9100";
     private const string AddressVariable = "Printer__Address";
+    private static readonly TimeSpan EntryPointTimeout = TimeSpan.FromSeconds(30);
     private const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
 
     // The app with the real PrinterService and the settings files of the repo.
@@ -97,6 +98,16 @@ public sealed class PrinterAddressTests
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Level >= LogLevel.Warning && entry.Category == typeof(PrinterService).FullName);
     }
 
+    // On Linux the file lookup is case-sensitive: "development" does not find appsettings.Development.json.
+    [Fact]
+    public void Development_WithoutItsSettingsFile_HasNoPrinter()
+    {
+        using var app = new App("development");
+
+        Assert.Equal("", app.Address);
+        Assert.Equal(["Printer target: no printer (development); print and beep send nothing"], app.InformationLogs("Printer target"));
+    }
+
     [Fact]
     public void Development_WithAnAddressSetOnPurpose_UsesIt()
     {
@@ -131,26 +142,45 @@ public sealed class PrinterAddressTests
     [InlineData("", "Printer:Address is empty")]
     [InlineData("192.168.123.100:99999", "Printer:Address \"192.168.123.100:99999\" is not valid")]
     [InlineData("http://192.168.123.100:9100", "is not valid")]
-    public void Production_WithABadAddress_DoesNotStart(string address, string message)
+    public async Task Production_WithABadAddress_DoesNotStart(string address, string message)
+    {
+        var (exitCode, stderr) = await RunEntryPointAsync($"--Printer:Address={address}");
+
+        Assert.Equal(1, exitCode);
+        Assert.StartsWith("Printer settings are not valid, the app does not start: ", stderr);
+        Assert.Contains(message, stderr);
+        Assert.Contains("host or host:port", stderr);
+    }
+
+    [Theory]
+    [InlineData("3", "outside the range")]
+    [InlineData("3s", "Printer:ConnectTimeout")]
+    public async Task Production_WithABadConnectTimeout_DoesNotStart(string timeout, string message)
+    {
+        var (exitCode, stderr) = await RunEntryPointAsync($"--Printer:ConnectTimeout={timeout}");
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(message, stderr);
+    }
+
+    // The real entry point. With a bad setting it returns before the server listens.
+    private static async Task<(int ExitCode, string Stderr)> RunEntryPointAsync(string setting)
     {
         var stderr = Console.Error;
         using var captured = new StringWriter();
         Console.SetError(captured);
-        int exitCode;
         try
         {
-            // The real entry point: it returns before the server listens.
-            exitCode = (int)typeof(Program).Assembly.EntryPoint!.Invoke(null, [new[] { "--environment=Production", $"--Printer:Address={address}" }])!;
+            // The time limit: an accepted setting starts the server, and the call never returns.
+            var exitCode = await Task
+                .Run(() => (int)typeof(Program).Assembly.EntryPoint!.Invoke(null, [new[] { "--environment=Production", setting }])!)
+                .WaitAsync(EntryPointTimeout);
+            return (exitCode, captured.ToString());
         }
         finally
         {
             Console.SetError(stderr);
         }
-
-        Assert.Equal(1, exitCode);
-        Assert.StartsWith("Printer settings are not valid, the app does not start: ", captured.ToString());
-        Assert.Contains(message, captured.ToString());
-        Assert.Contains("host or host:port", captured.ToString());
     }
 
     [Theory]

@@ -45,6 +45,7 @@ builder.Services.AddControllers()
     });
 builder.Services.AddOptions<PrinterOptions>()
     // Development starts from no printer, also when appsettings.Development.json is not found. The binding below sets an address given on purpose.
+    // Keep Printer:Address out of appsettings.json: the binding would set it in Development too.
     .Configure<IHostEnvironment>((options, environment) => options.Address = environment.IsDevelopment() ? string.Empty : options.Address)
     .BindConfiguration(PrinterOptions.SectionName)
     .ValidateOnStart();
@@ -84,11 +85,13 @@ try
 {
     printerOptions = app.Services.GetRequiredService<IOptions<PrinterOptions>>().Value;
 }
-catch (OptionsValidationException ex)
+// Also a value that does not bind, for example a ConnectTimeout that is not a time.
+catch (Exception ex) when (ex is OptionsValidationException or InvalidOperationException)
 {
     // Exit with a code: an unhandled exception leaves the process alive when it is PID 1 in the container.
     // Not the logger: it writes on a background thread, and the process ends now.
     Console.Error.WriteLine($"Printer settings are not valid, the app does not start: {ex.Message}");
+    await app.DisposeAsync();
     return 1;
 }
 
