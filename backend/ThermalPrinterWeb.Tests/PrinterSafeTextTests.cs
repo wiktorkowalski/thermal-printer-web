@@ -3,7 +3,7 @@ using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Tests;
 
-public class PrinterSafeTextTests
+public sealed class PrinterSafeTextTests
 {
     private static readonly Encoding Pc852 = CodePages.GetEncoding("PC852");
 
@@ -81,6 +81,26 @@ public class PrinterSafeTextTests
         Assert.Equal(1, replaced);
     }
 
+    [Theory]
+    [InlineData("a◙b")]         // alone: best-fit gives 0x0A
+    [InlineData("a◙b\u001b")]   // next to another control character
+    public void Encode_BestFitLineFeed_IsNotALineBreak(string input)
+    {
+        var bytes = PrinterSafeText.Encode(input, Pc852, out _);
+
+        Assert.DoesNotContain((byte)0x0A, bytes);
+        Assert.StartsWith("a?b", Encoding.ASCII.GetString(bytes));
+    }
+
+    [Fact]
+    public void Encode_EmDash_PrintsAsHyphen()
+    {
+        var bytes = PrinterSafeText.Encode("a — b", Pc852, out var replaced);
+
+        Assert.Equal("a - b", Encoding.ASCII.GetString(bytes));
+        Assert.Equal(0, replaced);
+    }
+
     [Fact]
     public void Encode_CharacterWithNativeGlyph_IsNotTransliterated()
     {
@@ -101,6 +121,16 @@ public class PrinterSafeTextTests
 
     [Theory]
     [MemberData(nameof(AllCodePages))]
+    public void Encode_AstralAndLoneSurrogates_DoNotThrowOrYieldControlByte(string codePage)
+    {
+        var bytes = PrinterSafeText.Encode("\u001b\U0001F600\ud83d!\udc00", CodePages.GetEncoding(codePage), out var replaced);
+
+        Assert.DoesNotContain(bytes, b => b < 0x20 || b == 0x7F);
+        Assert.Equal(1, replaced);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllCodePages))]
     public void Encode_AnyBmpCharacter_NeverYieldsControlByte(string codePage)
     {
         var encoding = CodePages.GetEncoding(codePage);
@@ -113,7 +143,7 @@ public class PrinterSafeTextTests
 
         var bytes = PrinterSafeText.Encode(all.ToString(), encoding, out _);
 
-        // ReplaceLineEndings turns FF, NEL, LS and PS into LF; nothing else may be below 0x20.
+        // ReplaceLineEndings turns FF, NEL, LS and PS into LF; nothing else may be a control byte.
         Assert.DoesNotContain(bytes, b => (b < 0x20 && b != 0x0A) || b == 0x7F);
     }
 

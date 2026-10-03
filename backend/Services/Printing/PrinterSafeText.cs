@@ -11,8 +11,8 @@ internal static class PrinterSafeText
     private const byte LineFeed = 0x0A;
     private const byte Replacement = (byte)'?';
 
-    // Largest encoding in CodePages is UTF-8: 4 bytes per rune.
-    private const int MaxBytesPerRune = 8;
+    // UTF-8 is the widest encoding CodePages can return.
+    private const int MaxBytesPerRune = 4;
 
     private static readonly byte[] C0AndDelete = [.. Enumerable.Range(0, 0x20).Select(b => (byte)b), 0x7F];
     private static readonly SearchValues<byte> ControlBytes = SearchValues.Create(C0AndDelete);
@@ -40,14 +40,15 @@ internal static class PrinterSafeText
         [0x30FB] = "."u8.ToArray(),   // katakana middle dot
     };
 
-    // Encodes text for a Text or Separator block. The result has no byte below
-    // 0x20 except LF, and no DEL. `replaced` counts characters that became '?'.
+    // LF is the only control byte the result may hold.
     public static byte[] Encode(string text, Encoding encoding, out int replaced)
     {
         replaced = 0;
         var normalized = text.ReplaceLineEndings("\n");
         var bytes = encoding.GetBytes(normalized);
-        if (!bytes.AsSpan().ContainsAny(ControlBytesExceptLineFeed))
+        // Equal LF counts: no other character was best-fitted to 0x0A (PC852 does it for U+25D9).
+        if (!bytes.AsSpan().ContainsAny(ControlBytesExceptLineFeed)
+            && bytes.AsSpan().Count(LineFeed) == normalized.AsSpan().Count('\n'))
             return bytes;
 
         var output = new List<byte>(bytes.Length);
@@ -72,8 +73,8 @@ internal static class PrinterSafeText
         return [.. output];
     }
 
-    // Barcode data. ESCPOS_NET rejects non-ASCII itself, but passes C0 controls
-    // through for CODE128 and GS1-128.
+    // ESCPOS_NET validates the character set of most barcode types, but passes
+    // control characters through for CODE128 and GS1-128.
     public static string CleanBarcode(string content, out int replaced)
         => Clean(content, char.IsControl, out replaced);
 

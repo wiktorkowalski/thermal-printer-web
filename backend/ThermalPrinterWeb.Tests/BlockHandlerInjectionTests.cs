@@ -9,7 +9,7 @@ namespace ThermalPrinterWeb.Tests;
 
 // Runs caller content through the real block handlers and checks the bytes
 // that would go to the printer.
-public class BlockHandlerInjectionTests
+public sealed class BlockHandlerInjectionTests
 {
     private const string Attack = "\u001b@\u001dV\u0000\u0010\u0004\u0001";
     private static readonly byte[] CleanAttack = "?@?V????"u8.ToArray();
