@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
-import type { PrintRequest, PrintContent, PrintOptions } from "../types/printer";
+import type { PrintRequest, PrintContent, PrintOptions, PrintResponse } from "../types/printer";
+import { BUSY_RETRY_AFTER_SECONDS } from "./printer-limits";
 
 const API_BASE_URL = "/api";
 
@@ -13,14 +14,33 @@ const api = axios.create({
 
 export interface PrintError {
   message: string;
-  type: "network" | "printer" | "validation" | "timeout" | "unknown";
+  type: "network" | "printer" | "validation" | "busy" | "timeout" | "unknown";
   canRetry: boolean;
   details?: string;
+  /** Set when the backend names the block: its index in the sent content (from 0) and the reason alone. */
+  block?: { index: number; reason: string };
+  /** How long the backend asks to wait before the next try. */
+  retryAfterMs?: number;
+}
+
+// Used when a busy answer has no readable Retry-After header.
+const DEFAULT_BUSY_WAIT_MS = BUSY_RETRY_AFTER_SECONDS * 1000;
+const MAX_BUSY_WAIT_MS = 30000;
+
+function retryAfterMs(header: unknown): number {
+  const seconds = Number(header);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, MAX_BUSY_WAIT_MS) : DEFAULT_BUSY_WAIT_MS;
+}
+
+/** Splits "Block 2 (QRCode): reason" and "Block 2: reason". */
+function parseBlock(reason: string | null | undefined): PrintError["block"] {
+  const match = reason?.match(/^Block (\d+)(?: \([^)]*\))?: (.+)$/s);
+  return match ? { index: Number(match[1]), reason: match[2] } : undefined;
 }
 
 function parseError(error: unknown): PrintError {
   if (axios.isAxiosError(error)) {
-    const axiosError = error as AxiosError<{ error?: string; type?: string }>;
+    const axiosError = error as AxiosError<Partial<PrintResponse>>;
 
     if (!axiosError.response) {
       if (axiosError.code === "ECONNABORTED" || axiosError.message.includes("timeout")) {
@@ -42,12 +62,34 @@ function parseError(error: unknown): PrintError {
     const status = axiosError.response.status;
     const data = axiosError.response.data;
 
-    if (status === 400) {
+    // The payload is at fault: the same job fails again, so no retry.
+    if (status === 400 || data?.type === "validation") {
       return {
-        message: "[ERROR] Validation error",
+        message: "[ERROR] Print rejected",
         type: "validation",
         canRetry: false,
         details: data?.error || "Invalid print request data",
+        block: parseBlock(data?.error),
+      };
+    }
+
+    if (status === 413) {
+      return {
+        message: "[ERROR] Print too large",
+        type: "validation",
+        canRetry: false,
+        details: "The job is over the size limit of the server. Remove an image or use a smaller one.",
+      };
+    }
+
+    // The image decode queue is full. Nothing is wrong with the printer or the job.
+    if (data?.type === "busy") {
+      return {
+        message: "[ERROR] Server busy",
+        type: "busy",
+        canRetry: true,
+        details: "Other image jobs are in the queue. Print again in a few seconds.",
+        retryAfterMs: retryAfterMs(axiosError.response.headers["retry-after"]),
       };
     }
 
@@ -96,7 +138,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries: number = 2): Promi
       if (!lastError.canRetry || attempt === maxRetries) {
         throw lastError;
       }
-      const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+      const delay = lastError.retryAfterMs ?? Math.min(1000 * Math.pow(2, attempt), 5000);
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }

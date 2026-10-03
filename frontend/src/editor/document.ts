@@ -12,7 +12,28 @@ import {
   type PrintStyle,
 } from "@/types/printer";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
-import { validateBarcode, validateQRCode, validateSeparator } from "@/lib/validation";
+import {
+  BARCODE_MAX_HEIGHT_DOTS,
+  BARCODE_MIN_HEIGHT_DOTS,
+  IMAGE_MIN_PRINT_SIZE,
+  LINE_FEED_MAX_LINES,
+  MAX_BLOCKS,
+  MAX_FEED_BEFORE_CUT,
+  MAX_IMAGE_BLOCKS,
+  MAX_LINE_SPACING,
+  MAX_PAPER_DOTS,
+  MAX_REQUEST_BYTES,
+} from "@/lib/printer-limits";
+import { DOTS_PER_MM } from "@/lib/paper";
+import {
+  errorText,
+  validateBarcode,
+  validateImageContent,
+  validateQRCode,
+  validateSeparator,
+  validateText,
+  type ValidationResult,
+} from "@/lib/validation";
 
 export type Block = PrintContent & {
   id: string;
@@ -195,17 +216,21 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 // ---------------------------------------------------------------------------
 // Conversion and validation
 
-/** Printable content: drops screen-only fields and empty text blocks. */
+/** False for a block that is not sent: an empty text block, or an image or code with no data yet. */
+export function isPrintable(block: Block): boolean {
+  if (block.type === ContentType.Text) return !!(block.content ?? "").trim();
+  if (block.type === ContentType.Image || block.type === ContentType.QRCode || block.type === ContentType.Barcode) return !!block.content;
+  return true;
+}
+
+/** Printable content: drops screen-only fields and the blocks that are not sent. */
 export function toPrintContent(blocks: Block[]): PrintContent[] {
-  return blocks
-    .filter((b) => !(b.type === ContentType.Text && !(b.content ?? "").trim()))
-    .filter((b) => !((b.type === ContentType.Image || b.type === ContentType.QRCode || b.type === ContentType.Barcode) && !b.content))
-    .map((b) => {
-      const { id, placeholder, ...content } = b;
-      void id;
-      void placeholder;
-      return content;
-    });
+  return blocks.filter(isPrintable).map((b) => {
+    const { id, placeholder, ...content } = b;
+    void id;
+    void placeholder;
+    return content;
+  });
 }
 
 export function toPrintOptions(settings: JobSettings): PrintOptions {
@@ -216,25 +241,90 @@ export function fromPrintContent(content: PrintContent[]): Block[] {
   return content.map((c) => ({ ...c, id: newId() }));
 }
 
-/** Returns an error message for a block that would fail or print wrong, else null. */
-export function blockError(block: Block): string | null {
-  const strip = (message?: string) => (message ?? "").replace(/^\[ERROR\]\s*/, "");
+const inRange = (value: number, min: number, max: number) => value >= min && value <= max;
+
+/**
+ * Returns an error message for a block that would fail or print wrong, else null.
+ * Values come from saved drafts and templates too, so any number can be out of range.
+ */
+export function blockError(block: PrintContent): string | null {
+  const message = (result: ValidationResult) => (result.isValid ? null : errorText(result));
+  // An imported or hand-edited JSON can hold any value here.
+  if (block.content != null && typeof block.content !== "string") return "Content must be text";
   switch (block.type) {
+    case ContentType.Text:
+      return message(validateText(block.content ?? ""));
     case ContentType.Barcode: {
       if (!block.content) return null;
-      const result = validateBarcode(block.content, block.barcodeOptions?.type ?? BarcodeType.CODE128);
-      return result.isValid ? null : strip(result.error);
+      const height = block.barcodeOptions?.heightInDots;
+      if (height != null && !inRange(height, BARCODE_MIN_HEIGHT_DOTS, BARCODE_MAX_HEIGHT_DOTS)) {
+        return `Barcode height must be between ${BARCODE_MIN_HEIGHT_DOTS} and ${BARCODE_MAX_HEIGHT_DOTS} dots`;
+      }
+      return message(validateBarcode(block.content, block.barcodeOptions?.type ?? BarcodeType.CODE128));
     }
     case ContentType.QRCode: {
       if (!block.content) return null;
-      const result = validateQRCode(block.content);
-      return result.isValid ? null : strip(result.error);
+      return message(validateQRCode(block.content, block.qrCodeOptions?.model));
     }
-    case ContentType.Separator: {
-      const result = validateSeparator(block.separatorChar ?? "-", block.separatorLength ?? CHARS_PER_LINE.normal);
-      return result.isValid ? null : strip(result.error);
+    case ContentType.Image: {
+      if (!block.content) return null;
+      const { maxWidth, maxHeight } = block.imageOptions ?? {};
+      if ((maxWidth != null && !(maxWidth >= IMAGE_MIN_PRINT_SIZE)) || (maxHeight != null && !(maxHeight >= IMAGE_MIN_PRINT_SIZE))) {
+        return `Image max width and height must be at least ${IMAGE_MIN_PRINT_SIZE} dot`;
+      }
+      return message(validateImageContent(block.content));
     }
+    case ContentType.Separator:
+      return message(validateSeparator(block.separatorChar ?? "-", block.separatorLength ?? CHARS_PER_LINE.normal));
+    case ContentType.LineFeed:
+      return (block.lines ?? 1) > LINE_FEED_MAX_LINES ? `Too many lines: ${block.lines}. Max ${LINE_FEED_MAX_LINES} per line feed` : null;
     default:
       return null;
   }
+}
+
+/**
+ * Returns an error message for a job the backend rejects as a whole, else null.
+ * `content` is what is sent; `paperDots` comes from estimatePaperDots.
+ */
+export function documentError(content: PrintContent[], options: PrintOptions, paperDots: number): string | null {
+  if (content.length > MAX_BLOCKS) return `Too many blocks: ${content.length}. Max ${MAX_BLOCKS} per print`;
+
+  const images = content.filter((b) => b.type === ContentType.Image && b.content).length;
+  if (images > MAX_IMAGE_BLOCKS) return `Too many images: ${images}. Max ${MAX_IMAGE_BLOCKS} per print`;
+
+  if (!inRange(options.feedLinesAfterPrint ?? 0, 0, MAX_FEED_BEFORE_CUT)) return `Feed before cut must be between 0 and ${MAX_FEED_BEFORE_CUT}`;
+  if (!inRange(options.defaultLineSpacing ?? 0, 0, MAX_LINE_SPACING)) return `Line spacing must be between 0 and ${MAX_LINE_SPACING}`;
+
+  if (paperDots > MAX_PAPER_DOTS) {
+    return `Too long: ≈ ${(paperDots / DOTS_PER_MM / 1000).toFixed(1)} m of paper. Max ${MAX_PAPER_DOTS / DOTS_PER_MM / 1000} m per print`;
+  }
+
+  // Images are base64 text, so the characters are close to the bytes on the wire.
+  const bytes = content.reduce((sum, b) => sum + (b.content?.length ?? 0), 0);
+  if (bytes > MAX_REQUEST_BYTES) {
+    return `Too large to send: ≈ ${Math.round(bytes / 1_000_000)} MB. Max ${MAX_REQUEST_BYTES / 1_000_000} MB per print`;
+  }
+
+  return null;
+}
+
+/**
+ * Why the job cannot be sent, else null: the first invalid block, or the document.
+ * `locate` gets the index of the block in `content`. It can show the block and
+ * return its name on screen, such as "Block 3".
+ */
+export function contentError(
+  content: PrintContent[],
+  options: PrintOptions,
+  paperDots: number,
+  locate: (index: number) => string | undefined,
+): string | null {
+  for (const [index, block] of content.entries()) {
+    const message = blockError(block);
+    if (!message) continue;
+    const label = locate(index);
+    return label ? `${label}: ${message}` : message;
+  }
+  return documentError(content, options, paperDots);
 }

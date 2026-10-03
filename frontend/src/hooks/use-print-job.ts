@@ -35,8 +35,10 @@ export function usePrintJob(printer: PrinterStatusState) {
   }, [phase]);
 
   const { refresh } = printer;
+  // `locate` gets the index (from 0, in the sent content) of a block the server rejects.
+  // It can show the block and return its name on screen, such as "Block 3".
   const print = useCallback(
-    async (request: PrintRequest, title: string, mode: string): Promise<boolean> => {
+    async (request: PrintRequest, title: string, mode: string, locate?: (index: number) => string | undefined): Promise<boolean> => {
       setPhase("printing");
       try {
         await printerApi.print(request);
@@ -47,7 +49,9 @@ export function usePrintJob(printer: PrinterStatusState) {
       } catch (err) {
         const error = err as PrintError;
         setPhase("idle");
-        notify(error.message?.replace(/^\[ERROR\]\s*/, "") || "Print failed", "error", error.details);
+        const label = error.block && locate?.(error.block.index);
+        const detail = label && error.block ? `${label}: ${error.block.reason}` : error.details;
+        notify(error.message?.replace(/^\[ERROR\]\s*/, "") || "Print failed", "error", detail);
         return false;
       } finally {
         refresh();

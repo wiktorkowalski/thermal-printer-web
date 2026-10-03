@@ -125,6 +125,16 @@ export interface PrintOptions {
   feedLinesAfterPrint?: number;
 }
 
+/**
+ * Body of every answer from POST /api/printer. On failure `type` says whose fault it is:
+ * "validation" (400, the payload), "printer" (503) or "busy" (503 with Retry-After).
+ */
+export interface PrintResponse {
+  success: boolean;
+  error?: string | null;
+  type?: "validation" | "printer" | "busy" | null;
+}
+
 export interface PrintRequest {
   name?: string;
   message?: string;

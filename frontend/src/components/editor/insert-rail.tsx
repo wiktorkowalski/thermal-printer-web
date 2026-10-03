@@ -1,5 +1,6 @@
 import type { ContentType } from "@/types/printer";
 import { cn } from "@/lib/utils";
+import { EDITOR_MAX_FEED_BEFORE_CUT } from "@/lib/printer-limits";
 import { CODE_PAGES, type JobSettings } from "@/editor/document";
 import { INSERT_ITEMS } from "@/editor/insert-items";
 import { SectionLabel, Switch } from "./controls";
@@ -46,9 +47,9 @@ export function JobSettingsPanel({ settings, onChange }: { settings: JobSettings
           <input
             type="number"
             min={0}
-            max={10}
+            max={EDITOR_MAX_FEED_BEFORE_CUT}
             value={settings.feedLinesAfterPrint}
-            onChange={(e) => onChange({ feedLinesAfterPrint: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })}
+            onChange={(e) => onChange({ feedLinesAfterPrint: Math.max(0, Math.min(EDITOR_MAX_FEED_BEFORE_CUT, Number(e.target.value) || 0)) })}
             className="h-9 w-14 rounded-md border border-line bg-surface px-2 text-right"
           />
           lines

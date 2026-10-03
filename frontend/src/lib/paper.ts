@@ -1,5 +1,7 @@
 import type { PrintContent, PrintStyle } from "@/types/printer";
 import { getMaxChars, CHARS_PER_LINE } from "@/lib/printer-constants";
+import { QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE } from "@/lib/printer-limits";
+import { qrDataBytes } from "@/lib/validation";
 
 // Vretti V330M geometry. The head is 576 dots wide (72 mm printable on 80 mm
 // paper) at 8 dots/mm. Font A is 12x24 dots, so one `ch` on screen = 12 dots.
@@ -66,8 +68,18 @@ export interface JobOptions {
   feedLinesAfterPrint: number;
 }
 
-/** Rough paper length for the whole job, used for the "≈ N mm" hint. */
-export function estimateLengthMm(content: PrintContent[], options: JobOptions, imageDots = 0): number {
+// Same bound as backend/Services/Printing/PaperLength.cs QRCodeDots: the printer picks
+// the QR version, so this is the largest side the data can need.
+function qrModules(content: string): number {
+  return Math.min(QR_MAX_MODULES, Math.ceil(Math.sqrt(QR_MIN_MODULES * QR_MIN_MODULES + qrDataBytes(content) * QR_MODULES_PER_BYTE)));
+}
+
+/**
+ * Rough paper length for the whole job, in dots. Counts like the backend (PaperLength.cs)
+ * except the cut: the feed and the cutter offset count as drawn on screen, so this is
+ * about 26 mm above the backend for one auto-cut.
+ */
+export function estimatePaperDots(content: PrintContent[], options: JobOptions, imageDots = 0): number {
   let dots = imageDots;
   content.forEach((block) => {
     switch (block.type) {
@@ -85,11 +97,13 @@ export function estimateLengthMm(content: PrintContent[], options: JobOptions, i
         dots += (block.lines ?? 1) * LINE_DOTS;
         break;
       case "QRCode":
-        dots += 29 * QR_MODULE_DOTS[block.qrCodeOptions?.size ?? "Normal"] + LINE_DOTS;
+        dots += qrModules(block.content ?? "") * QR_MODULE_DOTS[block.qrCodeOptions?.size ?? "Normal"] + LINE_DOTS;
         break;
-      case "Barcode":
-        dots += (block.barcodeOptions?.heightInDots ?? DEFAULT_BARCODE_HEIGHT_DOTS) + LINE_DOTS;
+      case "Barcode": {
+        const captionLines = block.barcodeOptions?.labelPosition === "Both" ? 2 : 1;
+        dots += (block.barcodeOptions?.heightInDots ?? DEFAULT_BARCODE_HEIGHT_DOTS) + captionLines * LINE_DOTS;
         break;
+      }
       case "Cut":
         dots += options.feedLinesAfterPrint * LINE_DOTS;
         break;
@@ -98,5 +112,10 @@ export function estimateLengthMm(content: PrintContent[], options: JobOptions, i
   const hasCut = content.some((b) => b.type === "Cut");
   if (options.autoCut && !hasCut) dots += options.feedLinesAfterPrint * LINE_DOTS;
   if (options.autoCut || hasCut) dots += CUTTER_OFFSET_DOTS;
+  return dots;
+}
+
+/** The "≈ N mm" hint. */
+export function dotsToMm(dots: number): number {
   return Math.round(dots / DOTS_PER_MM);
 }

@@ -20,7 +20,8 @@ import {
   saveDefaultStore,
   saveTaxRates,
 } from "@/lib/receipt-utils";
-import { estimateLengthMm } from "@/lib/paper";
+import { dotsToMm, estimatePaperDots } from "@/lib/paper";
+import { contentError } from "@/editor/document";
 import { isBlocked, printerLight } from "@/lib/printer-light";
 import type { PrinterStatusState } from "@/hooks/use-printer-status";
 import { usePrintJob } from "@/hooks/use-print-job";
@@ -129,7 +130,7 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
 
   // The paper shows unnamed items too, so a new row is visible and clickable.
   const preview = receiptLayout(receipt(items.map((i) => (i.name.trim() ? i : { ...i, name: "[new item]" }))), taxRates);
-  const lengthMm = estimateLengthMm(preview.content, PRINT_OPTIONS);
+  const lengthMm = dotsToMm(estimatePaperDots(preview.content, PRINT_OPTIONS));
   const selectedIndex = items.findIndex((i) => i.id === selectedId);
   const selected = selectedIndex >= 0 ? items[selectedIndex] : null;
 
@@ -171,8 +172,21 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
       job.notify(`Item ${items.indexOf(unnamed) + 1} has a price but no name.`, "error");
       return;
     }
-    const request = { content: receiptLayout(receipt(filled), taxRates).content, options: PRINT_OPTIONS, source: "web/receipt" };
-    const ok = await job.print(request, `${store.name || "Receipt"} · ${formatCurrency(subtotal)} zł`, "receipt");
+    const layout = receiptLayout(receipt(filled), taxRates);
+    // Selects the item that owns a block of the sent content and returns its name on the paper.
+    const locate = (index: number) => {
+      const owner = layout.items.find((range) => index >= range.start && index < range.end);
+      if (!owner) return undefined;
+      setSelectedId(owner.id);
+      return `Item ${items.findIndex((i) => i.id === owner.id) + 1}`;
+    };
+    const invalid = contentError(layout.content, PRINT_OPTIONS, estimatePaperDots(layout.content, PRINT_OPTIONS), locate);
+    if (invalid) {
+      job.notify(invalid, "error");
+      return;
+    }
+    const request = { content: layout.content, options: PRINT_OPTIONS, source: "web/receipt" };
+    const ok = await job.print(request, `${store.name || "Receipt"} · ${formatCurrency(subtotal)} zł`, "receipt", locate);
     // A new receipt gets new fiscal numbers.
     if (ok) setSerials(newSerials());
   };
