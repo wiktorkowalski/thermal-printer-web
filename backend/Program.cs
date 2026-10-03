@@ -1,11 +1,17 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
+
+// A JSON body that does not parse or bind: truncated JSON, a string where a number goes, an enum name that does not exist.
+const string JsonPathError = "malformed JSON, wrong JSON type or unknown name";
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,8 +40,9 @@ builder.Services.AddControllers()
             if (entries.Any(IsJsonPath))
                 entries = entries.Where(IsJsonPath).ToList();
 
+            // The System.Text.Json message for a JSON path names CLR types: own text in its place.
             var errors = entries.SelectMany(entry => entry.Value!.Errors.Select(error =>
-                $"{entry.Key}: {error.ErrorMessage}".TrimStart(':', ' ')));
+                $"{entry.Key}: {(IsJsonPath(entry) ? JsonPathError : error.ErrorMessage)}".TrimStart(':', ' ')));
             return new BadRequestObjectResult(
                 new PrintResponse(false, string.Join("; ", errors), PrintResponse.ValidationType));
 
@@ -43,6 +50,8 @@ builder.Services.AddControllers()
                 => entry.Key.StartsWith('$');
         };
     });
+// After AddControllers: it registers the ProblemDetails factory.
+builder.Services.Replace(ServiceDescriptor.Singleton<IClientErrorFactory, PrintResponseClientErrorFactory>());
 builder.Services.AddOptions<PrinterOptions>()
     // Development starts from no printer, also when appsettings.Development.json is not found. The binding below sets an address given on purpose.
     // Keep Printer:Address out of appsettings.json: the binding would set it in Development too.

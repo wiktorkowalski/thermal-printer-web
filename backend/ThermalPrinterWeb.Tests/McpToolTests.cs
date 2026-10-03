@@ -253,13 +253,19 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [InlineData("print_note", $$$"""{"message":"{{{Secret}}}"}""", "'title' is missing")]
     [InlineData("print_note", """{"title":null,"message":null}""", "'title' and 'message' are missing")]
     // Wrong JSON types: these fail in the SDK, before the tool body.
-    [InlineData("print", $$$"""{"content":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
-    [InlineData("print", $$$"""{"content":{"type":"Text","content":"{{{Secret}}}"}}""", "an argument has the wrong JSON type")]
-    [InlineData("print", $$$"""{"content":[{"type":"{{{Secret}}}"}]}""", "the value at $[0].type has the wrong JSON type or is not a known name")]
-    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x","style":"{{{Secret}}}"}]}""", "the value at $[0].style has the wrong JSON type or is not a known name")]
-    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x"}],"options":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
-    [InlineData("print_note", $$$"""{"title":5,"message":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
-    [InlineData("beep", $$$"""{"count":"{{{Secret}}}"}""", "an argument has the wrong JSON type")]
+    // The message names the argument: the SDK path starts at the argument (#67).
+    [InlineData("print", $$$"""{"content":"{{{Secret}}}"}""", "'content' has the wrong JSON type")]
+    [InlineData("print", $$$"""{"content":{"type":"Text","content":"{{{Secret}}}"}}""", "'content' has the wrong JSON type")]
+    [InlineData("print", $$$"""{"content":[{"type":"{{{Secret}}}"}]}""", "the value at content[0].type has the wrong JSON type or is not a known name")]
+    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x"},{"type":"Text","lines":"{{{Secret}}}"}]}""", "the value at content[1].lines has the wrong JSON type or is not a known name")]
+    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x","style":"{{{Secret}}}"}]}""", "the value at content[0].style has the wrong JSON type or is not a known name")]
+    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x"}],"options":"{{{Secret}}}"}""", "'options' has the wrong JSON type")]
+    [InlineData("print", $$$"""{"content":[{"type":"Text","content":"x"}],"options":{"defaultLineSpacing":"{{{Secret}}}"}}""", "the value at options.defaultLineSpacing has the wrong JSON type or is not a known name")]
+    [InlineData("print_note", $$$"""{"title":5,"message":"{{{Secret}}}"}""", "'title' has the wrong JSON type")]
+    [InlineData("beep", $$$"""{"count":"{{{Secret}}}"}""", "'count' has the wrong JSON type")]
+    [InlineData("beep", $$$"""{"{{{Secret}}}":1,"duration":true}""", "'duration' has the wrong JSON type")]
+    // The JSON type fits the schema and the value does not: no argument is named.
+    [InlineData("beep", """{"count":1.5}""", "an argument has the wrong JSON type")]
     public async Task ToolsCall_WrongShape_AnswersWithTheCorrectShape(string tool, string? arguments, string expectedProblem)
     {
         app.Printer.Jobs.Clear();
@@ -271,6 +277,8 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         Assert.StartsWith($"Wrong arguments for '{tool}': {expectedProblem}. Example of a valid call: {{", text);
         Assert.Contains(PrinterTools.ValidCallFor(tool)!, text);
         Assert.DoesNotContain(Secret, text);
+        Assert.DoesNotContain("ThermalPrinterWeb.", text);
+        Assert.DoesNotContain("System.", text);
         Assert.Empty(app.Printer.Jobs);
 
         // The caller's mistake: logged once at Information, never as a warning or an error.

@@ -224,6 +224,13 @@ internal sealed class PrinterService(
             throw new PrintContentException($"Block {index}: must not be null");
         }
 
+        // JSON "type": 99 binds: the enum converter takes any number. A skipped block would report a print that did not happen.
+        if (!_handlers.TryGetValue(item.Type, out var handler))
+        {
+            logger.LogWarning("Rejected print: block {BlockIndex} has the unsupported type {Type}", index, item.Type);
+            throw new PrintContentException($"Block {index} ({item.Type}): type is not supported");
+        }
+
         var e = ctx.Emitter;
         ctx.Add(item.Alignment switch
         {
@@ -231,12 +238,6 @@ internal sealed class PrinterService(
             Alignment.Right => e.RightAlign(),
             _ => e.CenterAlign()
         });
-
-        if (!_handlers.TryGetValue(item.Type, out var handler))
-        {
-            logger.LogWarning("Unsupported content type: {Type}", item.Type);
-            return;
-        }
 
         try
         {

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
@@ -91,8 +92,22 @@ public sealed class PayloadErrorTests
         { new PrintContent { Type = ContentType.QRCode, Content = Secret + "\u001b@" }, $"Block 1 (QRCode): {QRCodeControl(0x1B, Secret.Length)}" },
         { new PrintContent { Type = ContentType.QRCode, Content = "a\tb" }, $"Block 1 (QRCode): {QRCodeControl('\t', 1)}" },
         // The same rule for both code types.
-        { new PrintContent { Type = ContentType.Barcode, Content = "AB\u001b@" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" }
+        { new PrintContent { Type = ContentType.Barcode, Content = "AB\u001b@" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" },
+        // JSON "type": 99 binds to a value with no name.
+        { new PrintContent { Type = (ContentType)(-1), Content = Secret }, "Block 1 (-1): type is not supported" }
     };
+
+    [Fact]
+    public async Task PrintAsync_UnknownBlockType_IsLoggedOnceAsAWarning()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+
+        var result = await NewService(logger).PrintAsync([Text(), new PrintContent { Type = (ContentType)99, Content = Secret }]);
+
+        Assert.Equal(PrintResult.Invalid("Block 1 (99): type is not supported"), result);
+        var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
+        Assert.Equal((LogLevel.Warning, "Rejected print: block 1 has the unsupported type 99"), entry);
+    }
 
     [Fact]
     public async Task BuildDocumentAsync_BlocksAtTheLimits_AreAccepted()
@@ -460,23 +475,167 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
 
     [Theory]
     [InlineData("""{"content":[{"type":"Bogus"}]}""", "$.content[0].type")]
+    [InlineData("""{"content":[{"type":true}]}""", "$.content[0].type")]
+    [InlineData("""{"content":[{"type":1.5}]}""", "$.content[0].type")]
+    [InlineData("""{"content":[{"type":99999999999}]}""", "$.content[0].type")]
+    [InlineData("""{"content":[{"type":"Text","alignment":"Middle"}]}""", "$.content[0].alignment")]
+    [InlineData("""{"content":[{"type":"Text","style":["Bold","Huge"]}]}""", "$.content[0].style[1]")]
+    [InlineData("""{"content":[{"type":"LineFeed","lines":"three"}]}""", "$.content[0].lines")]
+    [InlineData("""{"content":[{"type":"Text","content":5}]}""", "$.content[0].content")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"autoCut":"yes"}}""", "$.options.autoCut")]
     [InlineData("""{"content":"text"}""", "$.content")]
-    [InlineData("""{"content":[""", "$.content")]
-    public async Task PostPrinter_ModelBindingError_ReturnsPrintResponseShape(string json, string expectedInError)
+    [InlineData("""{"content":[""", "$.content[0]")]
+    [InlineData("""{"name":5,"message":"m"}""", "$.name")]
+    [InlineData("[]", "$")]
+    public async Task PostPrinter_ModelBindingError_ReturnsThePathWithOwnText(string json, string expectedPath)
     {
         var body = await PostBadRequestAsync(json);
 
-        Assert.StartsWith(expectedInError, body.Error);
+        // The whole text: no System.Text.Json message, so no CLR type name (ThermalPrinterWeb.Models.ContentType, System.Nullable`1[System.Int32]).
+        Assert.Equal($"{expectedPath}: malformed JSON, wrong JSON type or unknown name", body.Error);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("null")]
+    public async Task PostPrinter_NoBody_Returns400WithoutClrTypeName(string json)
+    {
+        var body = await PostBadRequestAsync(json);
+
+        Assert.NotNull(body.Error);
+        Assert.DoesNotContain("ThermalPrinterWeb", body.Error);
+        Assert.DoesNotContain("System.", body.Error);
+    }
+
+    // The closed loopback port answers 503 for a job that passes validation: a 400 shows that nothing went to the printer.
+    [Theory]
+    [InlineData("""{"content":[{"type":99}]}""", "Block 0 (99): type is not supported")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"},{"type":8,"content":"SECRET"}]}""", "Block 1 (8): type is not supported")]
+    [InlineData("""{"content":[{"type":-1}]}""", "Block 0 (-1): type is not supported")]
+    // The enum converter reads a number in a string as the number.
+    [InlineData("""{"content":[{"type":"99"}]}""", "Block 0 (99): type is not supported")]
+    public async Task PostPrinter_UnknownNumericBlockType_Returns400(string json, string expectedError)
+    {
+        var body = await PostBadRequestAsync(json);
+
+        Assert.Equal(expectedError, body.Error);
+    }
+
+    // A number that names a block type was valid before #67 and stays valid: the job reaches the printer step.
+    [Theory]
+    [InlineData("""{"content":[{"type":0,"content":"x"}]}""")]
+    [InlineData("""{"content":[{"type":"text","content":"x"}]}""")]
+    [InlineData("""{"content":[{"type":4},{"type":6},{"type":5}]}""")]
+    public async Task PostPrinter_BlockTypeAsNumberOrLowerCaseName_PassesValidation(string json)
+    {
+        var response = await _client.PostAsync("/api/printer", new StringContent(json, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(new PrintResponse(false, "Printer not ready: printer unreachable", "printer"), await response.Content.ReadFromJsonAsync<PrintResponse>());
     }
 
     [Fact]
-    public async Task PostBeep_BadQueryValue_ReturnsPrintResponseShape()
+    public async Task McpPrint_UnknownNumericBlockType_IsNotPrinted()
     {
-        var response = await _client.PostAsync("/api/printer/beep?count=abc", null);
+        var text = await PrinterFaultTests.CallToolAsync(_client, "print", """{"content":[{"type":99}]}""");
+
+        Assert.Equal("Not printed: Block 0 (99): type is not supported", text);
+    }
+
+    public static TheoryData<string, string?> WrongContentTypes() => new()
+    {
+        { "text/plain", null },
+        { "text/plain", "utf-8" },
+        { "application/x-www-form-urlencoded", null },
+        { "application/xml", null }
+    };
+
+    // MVC reads a form before it looks for a body formatter: a form with no boundary fails there.
+    [Fact]
+    public async Task PostPrinter_FormWithNoBoundary_Returns400InPrintResponseShape()
+    {
+        using var content = new ByteArrayContent("x"u8.ToArray());
+        content.Headers.ContentType = new MediaTypeHeaderValue("multipart/form-data");
+
+        var response = await _client.PostAsync("/api/printer", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            new PrintResponse(false, "Failed to read the request form. Missing content-type boundary.", "validation"),
+            await response.Content.ReadFromJsonAsync<PrintResponse>());
+    }
+
+    [Theory]
+    [MemberData(nameof(WrongContentTypes))]
+    public async Task PostPrinter_WrongContentType_Returns415InPrintResponseShape(string mediaType, string? charset)
+    {
+        using var content = new ByteArrayContent(Encoding.UTF8.GetBytes("""{"content":[{"type":"Text","content":"SECRET"}]}"""));
+        content.Headers.ContentType = new MediaTypeHeaderValue(mediaType) { CharSet = charset };
+
+        await AssertUnsupportedMediaTypeAsync(content);
+    }
+
+    [Fact]
+    public async Task PostPrinter_NoContentType_Returns415InPrintResponseShape()
+    {
+        using var content = new ByteArrayContent(Encoding.UTF8.GetBytes("""{"content":[{"type":"Text","content":"SECRET"}]}"""));
+        Assert.Null(content.Headers.ContentType);
+
+        await AssertUnsupportedMediaTypeAsync(content);
+    }
+
+    private async Task AssertUnsupportedMediaTypeAsync(HttpContent content)
+    {
+        var response = await _client.PostAsync("/api/printer", content);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        // The whole body: no ProblemDetails field (title, traceId) and no Content-Type from the request.
+        Assert.Equal(
+            """{"success":false,"error":"Content-Type must be application/json","type":"validation"}""",
+            await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("count=abc", "count: The value 'abc' is not valid.")]
+    [InlineData("duration=1.5", "duration: The value '1.5' is not valid.")]
+    // Over the int range.
+    [InlineData("count=99999999999", "count: The value '99999999999' is not valid.")]
+    [InlineData("count=", "count: The value '' is invalid.")]
+    public async Task PostBeep_BadQueryValue_ReturnsPrintResponseShape(string query, string expectedError)
+    {
+        var response = await _client.PostAsync($"/api/printer/beep?{query}", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<PrintResponse>();
-        Assert.Equal(new PrintResponse(false, "count: The value 'abc' is not valid.", "validation"), body);
+        Assert.Equal(new PrintResponse(false, expectedError, "validation"), body);
+    }
+
+    // The buzzer takes 1 to 9: a number outside it is clamped, not rejected. The closed loopback port answers 503.
+    [Theory]
+    [InlineData("count=0")]
+    [InlineData("count=-5&duration=100")]
+    [InlineData("count=2147483647")]
+    public async Task PostBeep_NumberOutsideTheBuzzerRange_IsNotAValidationError(string query)
+    {
+        var response = await _client.PostAsync($"/api/printer/beep?{query}", null);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(new PrintResponse(false, "Printer unreachable", "printer"), await response.Content.ReadFromJsonAsync<PrintResponse>());
+    }
+
+    [Theory]
+    [InlineData(nameof(PrinterController.Print), 400)]
+    [InlineData(nameof(PrinterController.Print), 415)]
+    [InlineData(nameof(PrinterController.Beep), 400)]
+    public void Action_ErrorStatus_IsDeclaredAsPrintResponse(string action, int status)
+    {
+        var declared = typeof(PrinterController).GetMethod(action)!
+            .GetCustomAttributes(typeof(ProducesResponseTypeAttribute), false)
+            .Cast<ProducesResponseTypeAttribute>()
+            .Single(attribute => attribute.StatusCode == status);
+
+        Assert.Equal(typeof(PrintResponse), declared.Type);
     }
 
     [Fact]

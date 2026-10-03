@@ -15,6 +15,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     [HttpPost]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status415UnsupportedMediaType)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Print([FromBody] PrintRequest request)
     {
@@ -66,6 +67,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
 
     [HttpPost("beep")]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Beep([FromQuery] int count = 1, [FromQuery] int duration = 1)
     {
