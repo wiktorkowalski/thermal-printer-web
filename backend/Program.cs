@@ -44,6 +44,8 @@ builder.Services.AddControllers()
     });
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<PrintJobLog>();
 
 // MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
 builder.Services.AddMcpServer(options => options.ServerInstructions = PrinterTools.ServerInstructions)

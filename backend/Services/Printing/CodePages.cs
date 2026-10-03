@@ -8,6 +8,9 @@ namespace ThermalPrinterWeb.Services.Printing;
 // encoding (text bytes fall back to UTF-8).
 internal static class CodePages
 {
+    // The longest known name is 12 characters.
+    internal const int MaxLoggedNameLength = 32;
+
     static CodePages()
         => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 

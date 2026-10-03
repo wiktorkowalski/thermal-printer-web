@@ -55,7 +55,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
-            logger.LogInformation("Connecting to printer at {Address}", PrinterAddress);
+            logger.LogDebug("Connecting to printer at {Address}", PrinterAddress);
             var printer = new ImmediateNetworkPrinter(new ImmediateNetworkPrinterSettings
             {
                 ConnectionString = PrinterAddress,
@@ -63,7 +63,6 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             });
 
             await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
-            logger.LogInformation("Printing complete");
             return PrintResult.Ok;
         }
         catch (PrintContentException ex)
@@ -107,11 +106,13 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             ctx.Add(e.CodePage(codePage.Value));
             ctx.Encoding = CodePages.GetEncoding(codePageName);
-            logger.LogDebug("Using code page {CodePage}", codePageName);
+            logger.LogDebug("Using code page {CodePage}", codePage.Value);
         }
         else
         {
-            logger.LogWarning("Unknown code page {CodePage}, printing raw UTF-8 bytes", codePageName);
+            logger.LogWarning(
+                "Unknown code page \"{CodePage}\", printing raw UTF-8 bytes",
+                LogSafeText.Clean(codePageName, CodePages.MaxLoggedNameLength));
         }
 
         if (options?.DefaultLineSpacing != null)

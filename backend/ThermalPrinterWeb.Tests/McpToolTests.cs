@@ -146,8 +146,8 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     }
 
     [Theory]
-    [InlineData("print", "content,options")]
-    [InlineData("print_note", "title,message,imageBase64")]
+    [InlineData("print", "content,options,source")]
+    [InlineData("print_note", "title,message,imageBase64,source")]
     [InlineData("beep", "count,duration")]
     public async Task ToolsList_EveryTool_HasOnlyOptionalDescribedArguments(string tool, string expectedArguments)
     {

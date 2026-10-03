@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
+using ThermalPrinterWeb.Services.Printing.Handlers;
 using BarcodeType = ThermalPrinterWeb.Models.BarcodeType;
 
 namespace ThermalPrinterWeb.Tests;
@@ -177,6 +179,28 @@ public sealed class PayloadErrorTests
         Assert.NotEmpty(bytes);
     }
 
+    // The name is caller text: it reaches the log cleaned and cut.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BuildDocumentAsync_UnknownCodePage_LogsACleanName(bool asBlock)
+    {
+        var hostile = "nope\r\nFAKE LOG LINE\u001b[31m" + new string('x', 10_240);
+        var logger = new RecordingLogger<PrinterService>();
+        var blockLogger = new RecordingLogger<CodePageBlockHandler>();
+        var service = new PrinterService(logger, [new TextBlockHandler(), new CodePageBlockHandler(blockLogger)]);
+
+        if (asBlock)
+            await service.BuildDocumentAsync([new PrintContent { Type = ContentType.CodePage, Content = hostile }, Text()], null);
+        else
+            await service.BuildDocumentAsync([Text()], new PrintOptions { CodePage = hostile });
+
+        var entry = Assert.Single(asBlock ? blockLogger.Entries : logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.StartsWith("Unknown code page \"nope??FAKE LOG LINE?[31mxxxxxxxx\"", entry.Message);
+        Assert.DoesNotContain('\n', entry.Message);
+        Assert.True(entry.Message.Length < 100, entry.Message);
+    }
+
     private sealed class FakePrinterService(PrintResult result) : IPrinterService
     {
         public Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null) => Task.FromResult(result);
@@ -186,7 +210,7 @@ public sealed class PayloadErrorTests
 
     private static async Task<ObjectResult> PrintViaControllerAsync(PrintResult result)
     {
-        var controller = new PrinterController(NullLogger<PrinterController>.Instance, new FakePrinterService(result));
+        var controller = new PrinterController(new FakePrinterService(result), new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()));
         return Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [Text()] }));
     }
 
