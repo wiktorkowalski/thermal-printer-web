@@ -36,7 +36,8 @@ public sealed class PayloadErrorTests
     // The production handler registration, so a new block type is covered here too.
     private static PrinterService NewService(ILogger<PrinterService>? logger = null) => new(
         logger ?? NullLogger<PrinterService>.Instance,
-        new ServiceCollection().AddLogging().AddPrinterBlockHandlers().BuildServiceProvider().GetServices<IBlockHandler>());
+        new ServiceCollection().AddLogging().AddPrinterBlockHandlers().BuildServiceProvider().GetServices<IBlockHandler>(),
+        NoPrinter.Options);
 
     private static PrintContent Text(string content = "ok") => new() { Type = ContentType.Text, Content = content };
 
@@ -151,7 +152,7 @@ public sealed class PayloadErrorTests
         var content = Enumerable.Range(0, 250).Select(_ => Text()).ToList();
 
         // Text and images pass the paper limit first, so the handler here adds bytes and no paper.
-        var result = await new PrinterService(logger, [new BulkHandler()]).PrintAsync(content);
+        var result = await new PrinterService(logger, [new BulkHandler()], NoPrinter.Options).PrintAsync(content);
 
         // 2 MiB / 10,003 bytes per block = 209 blocks fit.
         Assert.Equal(PrintResult.Invalid("Block 209: the document is over the limit of 2097152 bytes of printer data"), result);
@@ -370,7 +371,7 @@ public sealed class PayloadErrorTests
         var hostile = "nope\r\nFAKE LOG LINE\u001b[31m" + new string('x', 10_240);
         var logger = new RecordingLogger<PrinterService>();
         var blockLogger = new RecordingLogger<CodePageBlockHandler>();
-        var service = new PrinterService(logger, [new TextBlockHandler(), new CodePageBlockHandler(blockLogger)]);
+        var service = new PrinterService(logger, [new TextBlockHandler(), new CodePageBlockHandler(blockLogger)], NoPrinter.Options);
 
         if (asBlock)
             await service.BuildDocumentAsync([new PrintContent { Type = ContentType.CodePage, Content = hostile }, Text()], null);
@@ -429,7 +430,10 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
 {
     public sealed class ProductionApp : WebApplicationFactory<Program>
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.UseEnvironment("Production");
+        // Production defaults to the real printer: a request that passes validation by mistake must reach a closed loopback port only.
+        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder
+            .UseEnvironment("Production")
+            .ConfigureServices(services => services.Configure<PrinterOptions>(options => options.Address = "127.0.0.1:9"));
     }
 
     private readonly HttpClient _client = app.CreateClient();
