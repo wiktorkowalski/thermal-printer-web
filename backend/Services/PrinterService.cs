@@ -182,6 +182,11 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
 
+        // The printer keeps ESC 3 n after the job: without ESC 2 the next job prints
+        // with this spacing, and its paper estimate is too low.
+        if (options?.DefaultLineSpacing != null)
+            ctx.Add(e.ResetLineSpacing());
+
         return ctx.Output;
     }
 

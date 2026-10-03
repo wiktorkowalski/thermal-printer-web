@@ -211,9 +211,19 @@ public sealed class PayloadErrorTests
 
         var bytes = await NewService().BuildDocumentAsync([Text()], options);
 
-        // ESC 3 n, then GS V 65 n at the end.
+        // ESC 3 n, then GS V 65 n and ESC 2 at the end: the spacing must not stay for the next job.
         Assert.Contains(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x33, (byte)lineSpacing]));
-        Assert.Equal([0x1D, 0x56, 0x41, (byte)feed], bytes[^1]);
+        Assert.Equal([0x1D, 0x56, 0x41, (byte)feed], bytes[^2]);
+        Assert.Equal([0x1B, 0x32], bytes[^1]);
+    }
+
+    [Fact]
+    public async Task BuildDocumentAsync_NoLineSpacing_SendsNoSpacingCommand()
+    {
+        var bytes = await NewService().BuildDocumentAsync([Text()], new PrintOptions());
+
+        Assert.DoesNotContain(bytes, command => command.AsSpan().StartsWith([(byte)0x1B, (byte)0x33]));
+        Assert.DoesNotContain(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x32]));
     }
 
     public static TheoryData<List<PrintContent>, PrintOptions?, string?> PaperJobs()
