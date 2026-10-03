@@ -26,6 +26,24 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
+        // Build first: it needs no printer, so a bad payload is reported as such
+        // even while the printer is off.
+        List<byte[]> byteContent;
+        try
+        {
+            byteContent = await BuildDocumentAsync(content, options);
+        }
+        catch (PrintContentException ex)
+        {
+            return PrintResult.Invalid(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // Outside a block handler: only the print options are left as a cause.
+            logger.LogWarning("Rejected print: document build failed with {Exception}", ex.GetType().Name);
+            return PrintResult.Invalid("Print options are not valid");
+        }
+
         try
         {
             // Fire-and-forget writes buffer even when the printer can't print (cover open,
@@ -36,7 +54,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 logger.LogWarning(
                     "Refusing print: printer not ready ({Reason}); status={Raw}",
                     status.NotReadyReason, status.Raw);
-                return new PrintResult(false, $"Printer not ready: {status.NotReadyReason}");
+                return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
             logger.LogInformation("Connecting to printer at {Address}", PrinterAddress);
@@ -46,8 +64,6 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 PrinterName = "ThermalPrinter"
             });
 
-            var byteContent = await BuildDocumentAsync(content, options);
-
             await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
             logger.LogInformation("Printing complete");
             return new PrintResult(true);
@@ -55,7 +71,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         catch (Exception ex)
         {
             logger.LogError(ex, "Print failed");
-            return new PrintResult(false, ex.Message);
+            return PrintResult.PrinterFault(ex.Message);
         }
     }
 
@@ -85,7 +101,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         if (options?.DefaultLineSpacing != null)
             ctx.Add(e.SetLineSpacingInDots(options.DefaultLineSpacing.Value));
 
-        foreach (var item in content)
+        foreach (var (index, item) in content.Index())
         {
             ctx.Add(item.Alignment switch
             {
@@ -94,10 +110,27 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 _ => e.CenterAlign()
             });
 
-            if (_handlers.TryGetValue(item.Type, out var handler))
-                await handler.HandleAsync(item, ctx);
-            else
+            if (!_handlers.TryGetValue(item.Type, out var handler))
+            {
                 logger.LogWarning("Unsupported content type: {Type}", item.Type);
+                continue;
+            }
+
+            try
+            {
+                await handler.HandleAsync(item, ctx);
+            }
+            catch (Exception ex)
+            {
+                // Handlers do no printer I/O, so a throw here means the block cannot be
+                // printed as sent. Library messages repeat caller content: keep them out
+                // of the log and the response, the endpoint is public.
+                var reason = ex is PrintContentException ? ex.Message : "content is not valid for this block type";
+                logger.LogWarning(
+                    "Rejected print: block {Index} ({Type}) failed with {Exception}",
+                    index, item.Type, ex.GetType().Name);
+                throw new PrintContentException($"Block {index} ({item.Type}): {reason}");
+            }
         }
 
         // Count only: the content is caller input and the endpoint is public.

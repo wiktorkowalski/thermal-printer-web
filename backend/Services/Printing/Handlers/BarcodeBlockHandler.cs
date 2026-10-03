@@ -26,7 +26,17 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         if (opts.UseFontB.HasValue)
             ctx.Add(e.SetBarLabelFontB(opts.UseFontB.Value));
 
-        ctx.Add(e.PrintBarcode(MapBarcodeType(opts.Type), ctx.CleanBarcode(item.Content)));
+        try
+        {
+            ctx.Add(e.PrintBarcode(MapBarcodeType(opts.Type), ctx.CleanBarcode(item.Content)));
+        }
+        catch (ArgumentException)
+        {
+            // ESCPOS_NET checks length and character set per symbology. Its message
+            // repeats the content, so name the symbology only.
+            throw new PrintContentException($"content is not a valid {opts.Type} barcode");
+        }
+
         return Task.CompletedTask;
     }
 

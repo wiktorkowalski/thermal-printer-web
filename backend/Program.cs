@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
 
@@ -16,6 +18,12 @@ builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    })
+    // Model-binding failures answer in the same shape as every other print error.
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+            new BadRequestObjectResult(PrintResponse.FromModelState(context.ModelState));
     });
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
@@ -71,3 +79,6 @@ app.MapMcp("/mcp");
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+// Lets the test project host the app (WebApplicationFactory<Program>).
+public partial class Program;

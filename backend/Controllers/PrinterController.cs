@@ -29,15 +29,18 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
         }
         else
         {
-            return BadRequest(new PrintResponse(false, "Request must have Content array or both Name and Message", "validation"));
+            return BadRequest(new PrintResponse(false, "Request must have Content array or both Name and Message", PrintResponse.ValidationType));
         }
 
         var result = await printerService.PrintAsync(content, request.Options);
 
-        if (!result.Success)
-            return StatusCode(503, new PrintResponse(false, result.Error, "printer"));
+        if (result.Success)
+            return Ok(new PrintResponse(true));
 
-        return Ok(new PrintResponse(true));
+        // 503 tells clients to retry; a payload fault never gets better on retry.
+        return result.Failure == PrintFailure.Validation
+            ? BadRequest(new PrintResponse(false, result.Error, PrintResponse.ValidationType))
+            : StatusCode(503, new PrintResponse(false, result.Error, PrintResponse.PrinterType));
     }
 
     [HttpGet("status")]
@@ -57,6 +60,6 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
         var ok = await printerService.BeepAsync(count, duration);
         return ok
             ? Ok(new PrintResponse(true))
-            : StatusCode(503, new PrintResponse(false, "Printer unreachable", "printer"));
+            : StatusCode(503, new PrintResponse(false, "Printer unreachable", PrintResponse.PrinterType));
     }
 }
