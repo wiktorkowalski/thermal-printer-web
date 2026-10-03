@@ -93,7 +93,7 @@ public sealed class PrinterFaultTests
         return (response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
-    private static async Task<string> CallToolAsync(HttpClient client, string tool, string argumentsJson)
+    internal static async Task<string> CallToolAsync(HttpClient client, string tool, string argumentsJson)
     {
         var rpc = """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"TOOL","arguments":ARGUMENTS}}"""
             .Replace("TOOL", tool)

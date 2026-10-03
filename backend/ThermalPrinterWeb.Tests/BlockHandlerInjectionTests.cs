@@ -92,15 +92,29 @@ public sealed class BlockHandlerInjectionTests
     }
 
     [Fact]
-    public async Task QRCode_ControlCharacters_AreReplacedAndWideCharactersAreUtf8()
+    public async Task QRCode_ControlCharacters_RejectTheBlock()
+    {
+        var ctx = NewContext();
+        var block = new PrintContent { Type = ContentType.QRCode, Content = "AB" + Attack + "ĐĄā" };
+
+        // A QR code with '?' in place of a character scans to other data: no bytes at all.
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => new QRCodeBlockHandler().HandleAsync(block, ctx));
+
+        Assert.StartsWith("content holds the control character U+001B at index 2;", ex.Message);
+        Assert.Empty(ctx.Output);
+        Assert.Equal(0, ctx.ReplacedCharacters);
+    }
+
+    [Fact]
+    public async Task QRCode_WideCharacters_AreUtf8NotLowBytes()
     {
         var (bytes, ctx) = await RunAsync(
             new QRCodeBlockHandler(),
-            new PrintContent { Type = ContentType.QRCode, Content = "AB" + Attack + "ĐĄā" });
+            new PrintContent { Type = ContentType.QRCode, Content = "ABĐĄā" });
 
         // ĐĄā: the low bytes are 10 04 01 (DLE EOT 1). As UTF-8 they are data bytes above 0x7F.
-        AssertContains([.. "AB"u8, .. CleanAttack, .. "ĐĄā"u8], bytes);
+        AssertContains([.. "AB"u8, .. "ĐĄā"u8], bytes);
         AssertDoesNotContain([0x10, 0x04, 0x01], bytes);
-        Assert.Equal(6, ctx.ReplacedCharacters);
+        Assert.Equal(0, ctx.ReplacedCharacters);
     }
 }

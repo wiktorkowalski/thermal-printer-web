@@ -164,7 +164,8 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [Fact]
     public async Task ToolsList_PrintTool_DescribesEveryNestedProperty()
     {
-        var properties = (await ToolAsync("print")).GetProperty("inputSchema").GetProperty("properties");
+        var tool = await ToolAsync("print");
+        var properties = tool.GetProperty("inputSchema").GetProperty("properties");
         var block = properties.GetProperty("content").GetProperty("items");
 
         AssertEveryPropertyDescribed(block, "content[]");
@@ -176,6 +177,11 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         // The numbers a caller needs to avoid a mid-word wrap.
         var content = block.GetProperty("properties").GetProperty("content").GetProperty("description").GetString();
         Assert.Contains("48 characters per line", content);
+        // Code content is rejected, never changed: a caller must not expect the '?' that text gets.
+        Assert.Contains("any other control character (tab and a CR with no \\n included) rejects the block", content);
+        Assert.Contains("printable ASCII only; any other character rejects the block", content);
+        Assert.DoesNotContain("same control character rules", content);
+        Assert.Contains("A control character in QRCode or Barcode content rejects the document", tool.GetProperty("description").GetString());
         Assert.Contains("2953", block.GetProperty("properties").GetProperty("qrCodeOptions").GetProperty("properties").GetProperty("model").GetProperty("description").GetString());
     }
 
