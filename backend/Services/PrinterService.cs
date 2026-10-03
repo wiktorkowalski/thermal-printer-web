@@ -106,12 +106,12 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             ctx.Add(e.CodePage(codePage.Value));
             ctx.Encoding = CodePages.GetEncoding(codePageName);
-            logger.LogDebug("Using code page {CodePage}", codePageName);
+            logger.LogDebug("Using code page {CodePage}", codePage.Value);
         }
         else
         {
             logger.LogWarning(
-                "Unknown code page {CodePage}, printing raw UTF-8 bytes",
+                "Unknown code page \"{CodePage}\", printing raw UTF-8 bytes",
                 LogSafeText.Clean(codePageName, CodePages.MaxLoggedNameLength));
         }
 

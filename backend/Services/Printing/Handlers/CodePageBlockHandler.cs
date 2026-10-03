@@ -19,7 +19,7 @@ internal sealed class CodePageBlockHandler(ILogger<CodePageBlockHandler> logger)
             else
             {
                 logger.LogWarning(
-                    "Unknown code page {CodePage} in content, keeping current encoding",
+                    "Unknown code page \"{CodePage}\" in content, keeping current encoding",
                     LogSafeText.Clean(item.Content, CodePages.MaxLoggedNameLength));
             }
         }

@@ -9,7 +9,7 @@ internal static class LogSafeText
 
     private const char Replacement = '?';
 
-    // Caller text: no character may start a new log line, hide text or close the quotes around the value.
+    // Caller text: no character may start a new log line, hide text or close the quotes the template puts around the value.
     public static string Clean(string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))

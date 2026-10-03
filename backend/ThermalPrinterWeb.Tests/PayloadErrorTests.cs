@@ -196,7 +196,7 @@ public sealed class PayloadErrorTests
             await service.BuildDocumentAsync([Text()], new PrintOptions { CodePage = hostile });
 
         var entry = Assert.Single(asBlock ? blockLogger.Entries : logger.Entries, e => e.Level == LogLevel.Warning);
-        Assert.StartsWith("Unknown code page nope??FAKE LOG LINE?[31mxxxxxxx", entry.Message);
+        Assert.StartsWith("Unknown code page \"nope??FAKE LOG LINE?[31mxxxxxxxx\"", entry.Message);
         Assert.DoesNotContain('\n', entry.Message);
         Assert.True(entry.Message.Length < 100, entry.Message);
     }
