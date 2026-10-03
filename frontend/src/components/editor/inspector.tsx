@@ -12,6 +12,7 @@ import {
 } from "@/types/printer";
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
+import { BARCODE_MAX_HEIGHT_DOTS, EDITOR_BARCODE_MIN_HEIGHT_DOTS, EDITOR_LINE_FEED_MAX_LINES } from "@/lib/printer-limits";
 import { HEAD_DOTS, LINE_DOTS, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { SectionLabel, Segmented, Switch, ToggleChip, fieldLabelClass, inputClass, quietButtonClass } from "./controls";
@@ -294,8 +295,8 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
             <input
               id={`${id}-h`}
               type="range"
-              min={16}
-              max={255}
+              min={EDITOR_BARCODE_MIN_HEIGHT_DOTS}
+              max={BARCODE_MAX_HEIGHT_DOTS}
               value={height}
               onChange={(e) => onUpdate({ barcodeOptions: { ...options, heightInDots: Number(e.target.value) } })}
               className="accent-accent"
@@ -347,9 +348,9 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
             id={`${id}-lines`}
             type="number"
             min={1}
-            max={20}
+            max={EDITOR_LINE_FEED_MAX_LINES}
             value={block.lines ?? 1}
-            onChange={(e) => onUpdate({ lines: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
+            onChange={(e) => onUpdate({ lines: Math.max(1, Math.min(EDITOR_LINE_FEED_MAX_LINES, Number(e.target.value) || 1)) })}
             className={cn(inputClass, "font-mono")}
           />
         </Field>
@@ -379,6 +380,12 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
         <SectionLabel>Block {String(index + 1).padStart(2, "0")}</SectionLabel>
         <span className="font-serif text-[22px]">{BLOCK_LABELS[block.type]}</span>
       </div>
+      {/* QR code and barcode show their error under the data field. */}
+      {error && block.type !== "QRCode" && block.type !== "Barcode" && (
+        <p role="alert" className="text-xs text-danger-text">
+          {error}
+        </p>
+      )}
       {body}
       <div className="grid grid-cols-2 gap-2">
         <button type="button" onClick={() => onMove(-1)} disabled={index === 0} className={quietButtonClass}>
