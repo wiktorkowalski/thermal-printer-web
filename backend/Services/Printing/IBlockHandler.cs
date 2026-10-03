@@ -18,26 +18,18 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     // Characters turned into '?' across the whole document.
     public int ReplacedCharacters { get; private set; }
 
-    // The only ways caller text becomes printer bytes: handlers must not encode on their own.
-    public byte[] EncodeText(string text)
+    // The only ways caller text becomes printer bytes: handlers must not encode on
+    // their own. Barcode content is the exception: its handler rejects all but printable ASCII.
+    public byte[] EncodeText(string text) => Encode(text, Encoding);
+
+    // QR data is UTF-8 whatever the code page: phone scanners read it that way.
+    public byte[] EncodeQRCode(string content) => Encode(content, Encoding.UTF8);
+
+    private byte[] Encode(string text, Encoding encoding)
     {
-        var bytes = PrinterSafeText.Encode(text, Encoding, out var replaced);
+        var bytes = PrinterSafeText.Encode(text, encoding, out var replaced);
         ReplacedCharacters += replaced;
         return bytes;
-    }
-
-    public string CleanBarcode(string content)
-    {
-        var cleaned = PrinterSafeText.CleanBarcode(content, out var replaced);
-        ReplacedCharacters += replaced;
-        return cleaned;
-    }
-
-    public string CleanQRCode(string content)
-    {
-        var cleaned = PrinterSafeText.CleanQRCode(content, out var replaced);
-        ReplacedCharacters += replaced;
-        return cleaned;
     }
 
     public void Add(byte[] bytes) => Output.Add(bytes);

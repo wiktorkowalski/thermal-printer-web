@@ -1,4 +1,5 @@
 using ThermalPrinterWeb.Models;
+using EPSON = ESCPOS_NET.Emitters.EPSON;
 using EscBarcodeType = ESCPOS_NET.Emitters.BarcodeType;
 using EscBarWidth = ESCPOS_NET.Emitters.BarWidth;
 using EscBarLabelPosition = ESCPOS_NET.Emitters.BarLabelPrintPosition;
@@ -7,6 +8,10 @@ namespace ThermalPrinterWeb.Services.Printing.Handlers;
 
 internal sealed class BarcodeBlockHandler : IBlockHandler
 {
+    // GS k m n: the fourth byte is the payload length.
+    private const int HeaderLength = 4;
+    private const int LengthIndex = 3;
+
     public ContentType Type => ContentType.Barcode;
 
     public Task HandleAsync(PrintContent item, BlockContext ctx)
@@ -17,6 +22,9 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         var e = ctx.Emitter;
         var opts = item.BarcodeOptions ?? new BarcodeOptions();
 
+        // First: a rejected barcode must not leave its settings in the document.
+        var command = BuildCommand(e, item.Content, opts.Type);
+
         if (opts.HeightInDots.HasValue)
             ctx.Add(e.SetBarcodeHeightInDots(opts.HeightInDots.Value));
         if (opts.Width.HasValue)
@@ -26,18 +34,35 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         if (opts.UseFontB.HasValue)
             ctx.Add(e.SetBarLabelFontB(opts.UseFontB.Value));
 
+        ctx.Add(command);
+        return Task.CompletedTask;
+    }
+
+    private static byte[] BuildCommand(EPSON emitter, string content, Models.BarcodeType type)
+    {
+        // No symbology here encodes more, and ESCPOS_NET lets control characters
+        // through for CODE128 and GS1-128. UTF-8 bytes of other characters have no bars.
+        if (content.AsSpan().ContainsAnyExceptInRange(' ', '~'))
+            throw new PrintContentException($"a {type} barcode holds printable ASCII only");
+
+        byte[] command;
         try
         {
-            ctx.Add(e.PrintBarcode(MapBarcodeType(opts.Type), ctx.CleanBarcode(item.Content)));
+            command = emitter.PrintBarcode(MapBarcodeType(type), content);
         }
         catch (ArgumentException)
         {
             // ESCPOS_NET checks length and character set per symbology. Its message
             // repeats the content, so name the symbology only.
-            throw new PrintContentException($"content is not a valid {opts.Type} barcode");
+            throw new PrintContentException($"content is not a valid {type} barcode");
         }
 
-        return Task.CompletedTask;
+        // ESCPOS_NET grows CODE128 content (code set prefix, doubled '{') after its
+        // length check; past 255 bytes the length byte wraps and the rest prints as text.
+        if (command.Length - HeaderLength != command[LengthIndex])
+            throw new PrintContentException($"content is too long for a {type} barcode");
+
+        return command;
     }
 
     private static EscBarcodeType MapBarcodeType(Models.BarcodeType type) => type switch
