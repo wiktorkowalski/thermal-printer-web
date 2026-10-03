@@ -14,7 +14,7 @@ internal sealed class QRCodeBlockHandler : IBlockHandler
 
         var opts = item.QRCodeOptions ?? new QRCodeOptions();
         ctx.Add(ctx.Emitter.PrintQRCode(
-            item.Content!,
+            ctx.CleanQRCode(item.Content),
             type: MapQRCodeModel(opts.Model),
             size: MapQRCodeSize(opts.Size),
             correction: MapQRCodeCorrectionLevel(opts.CorrectionLevel)

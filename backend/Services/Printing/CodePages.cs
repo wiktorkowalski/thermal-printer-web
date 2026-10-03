@@ -38,6 +38,8 @@ internal static class CodePages
             ["ISO-8859-2"] = (CodePage.ISO8859_2_LATIN2, 28592),
         };
 
+    public static IEnumerable<string> Names => Map.Keys;
+
     public static CodePage? Resolve(string name)
         => Map.TryGetValue(name, out var entry) ? entry.PrinterCodePage : null;
 
