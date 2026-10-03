@@ -54,7 +54,10 @@ public sealed class CodeContentEncodingTests
         "\U0001F600 ok ✓",
         "日本語のテキスト",
         "https://example.com/path?q=1&r=%C5%BC#frag",
-        "café"
+        "café",
+        "Đ", // U+0110: the low byte is DLE
+        "WIFI:T:WPA;S:Sieć Đorđa;P:hasło;;\nGoście: pokój 2\nDo 22:00 \U0001F600",
+        "BEGIN:VCARD\nVERSION:3.0\nFN:Łukasz Żółw\nTEL:+48 600 100 200\nEND:VCARD"
     ];
 
     [Theory]
@@ -118,35 +121,70 @@ public sealed class CodeContentEncodingTests
         Assert.Equal(0, ctx.ReplacedCharacters);
     }
 
-    [Fact]
-    public async Task QRCode_Tab_BecomesASpace()
-    {
-        // Same rule as text: HT is a printer command byte. The swap is not counted as a replacement.
-        var (bytes, ctx) = await RunQRAsync("a\tb");
+    // Every C0 character but LF, then DEL, then every C1 character.
+    public static TheoryData<int> ControlCodePoints() =>
+        [.. Enumerable.Range(0, 0x20).Where(c => c != '\n'), 0x7F, .. Enumerable.Range(0x80, 0x20)];
 
-        Assert.Equal("a b"u8.ToArray(), ReadStoreCommand(bytes).Data);
+    [Theory]
+    [MemberData(nameof(ControlCodePoints))]
+    public async Task QRCode_ControlCharacter_IsRejectedBeforeAnyByte(int codePoint)
+    {
+        var ctx = NewContext();
+        var block = new PrintContent { Type = ContentType.QRCode, Content = "ab" + (char)codePoint + "cd" };
+
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => new QRCodeBlockHandler().HandleAsync(block, ctx));
+
+        Assert.Equal(PayloadErrorTests.QRCodeControl(codePoint, 2), ex.Message);
+        Assert.Empty(ctx.Output);
         Assert.Equal(0, ctx.ReplacedCharacters);
     }
 
+    // The first control character is the one named. A tab or a CR with no LF is not changed to fit.
+    [Theory]
+    [InlineData("AB\u001dV\u0000", 0x1D, 2)]          // GS V 0: cut
+    [InlineData("AB\u0010\u0004\u0001", 0x10, 2)]     // DLE EOT 1: status
+    [InlineData("AB\u0010\u0014\u0001\u0000\u0001", 0x10, 2)] // DLE DC4: pulse
+    [InlineData("a\r\n\tb", 0x09, 3)]
+    [InlineData("a\r\n\r", 0x0D, 3)]                  // CR at the end, after a valid CRLF
+    [InlineData("a\n\rb", 0x0D, 2)]                   // LF CR is not CRLF
+    public async Task QRCode_CommandSequenceOrStrayCarriageReturn_IsRejected(string content, int codePoint, int index)
+    {
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunQRAsync(content));
+
+        Assert.Equal(PayloadErrorTests.QRCodeControl(codePoint, index), ex.Message);
+    }
+
+    // LS, PS and NBSP are in this range: not control characters, so they stay as they are.
     [Fact]
-    public async Task QRCode_AnyCharacter_NeverYieldsControlByteInData()
+    public async Task QRCode_EveryCharacterOutsideTheControlRanges_IsStoredUnchangedWithNoControlByte()
     {
         var all = new StringBuilder();
-        for (var c = 0; c <= 0x2FFF; c++)
+        for (var c = 0x20; c <= 0x2FFF; c++)
         {
-            if (c != '\n' && c != '\r')
+            if (c is < 0x7F or > 0x9F)
                 all.Append((char)c);
         }
-        all.Append("\ud83d!\udc00\U0001F600"); // lone surrogates and an astral character
+        all.Append("\n\U0001F600");
 
         var content = all.ToString();
         for (var start = 0; start < content.Length; start += 700)
         {
-            var (bytes, _) = await RunQRAsync(content.Substring(start, Math.Min(700, content.Length - start)));
+            var part = content.Substring(start, Math.Min(700, content.Length - start));
 
-            // ReplaceLineEndings turns FF, NEL, LS and PS into LF; nothing else may be a control byte.
-            Assert.DoesNotContain(ReadStoreCommand(bytes).Data, b => (b < 0x20 && b != 0x0A) || b == 0x7F);
+            var data = ReadStoreCommand((await RunQRAsync(part)).Bytes).Data;
+
+            Assert.Equal(Encoding.UTF8.GetBytes(part), data);
+            Assert.DoesNotContain(data, b => (b < 0x20 && b != 0x0A) || b == 0x7F);
         }
+    }
+
+    // UTF-8 has no form for half a pair: each becomes U+FFFD, three bytes above 0x7F.
+    [Fact]
+    public async Task QRCode_LoneSurrogates_YieldNoControlByteInData()
+    {
+        var (bytes, _) = await RunQRAsync("\ud83d!\udc00");
+
+        Assert.DoesNotContain(ReadStoreCommand(bytes).Data, b => b < 0x20 || b == 0x7F);
     }
 
     [Theory]

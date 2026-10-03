@@ -59,6 +59,9 @@ public sealed class PayloadErrorTests
     internal static string OverPaper(int block, ContentType type)
         => $"Block {block} ({type}): the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)";
 
+    internal static string QRCodeControl(int codePoint, int index)
+        => $"content holds the control character U+{codePoint:X4} at index {index}; a QR code takes no control character but a line break (\\n or \\r\\n)";
+
     public static TheoryData<PrintContent, string> InvalidBlocks() => new()
     {
         { new PrintContent { Type = ContentType.Separator, SeparatorChar = "" }, "Block 1 (Separator): separatorChar must not be empty" },
@@ -83,7 +86,11 @@ public sealed class PayloadErrorTests
         // A barcode block with no content prints nothing; the height is still checked.
         { Barcode(256, content: ""), "Block 1 (Barcode): barcodeOptions.heightInDots 256 is outside the range 1 to 255" },
         { Barcode(int.MinValue), "Block 1 (Barcode): barcodeOptions.heightInDots -2147483648 is outside the range 1 to 255" },
-        { new PrintContent { Type = ContentType.QRCode, Content = new string('ż', 1477) }, "Block 1 (QRCode): content is 2954 bytes as UTF-8; a Model2 QR code holds at most 2953" }
+        { new PrintContent { Type = ContentType.QRCode, Content = new string('ż', 1477) }, "Block 1 (QRCode): content is 2954 bytes as UTF-8; a Model2 QR code holds at most 2953" },
+        { new PrintContent { Type = ContentType.QRCode, Content = Secret + "\u001b@" }, $"Block 1 (QRCode): {QRCodeControl(0x1B, Secret.Length)}" },
+        { new PrintContent { Type = ContentType.QRCode, Content = "a\tb" }, $"Block 1 (QRCode): {QRCodeControl('\t', 1)}" },
+        // The same rule for both code types.
+        { new PrintContent { Type = ContentType.Barcode, Content = "AB\u001b@" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" }
     };
 
     [Fact]
@@ -320,6 +327,33 @@ public sealed class PayloadErrorTests
     }
 
     [Fact]
+    public async Task PrintAsync_QRCodeWithControlCharacter_IsLoggedOnceWithNoContentAndNoReplacementCount()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+
+        var result = await NewService(logger).PrintAsync([new PrintContent { Type = ContentType.QRCode, Content = Secret + "\u001b@\u0000" }]);
+
+        Assert.Equal(PrintFailure.Validation, result.Failure);
+        var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal($"Rejected print: block 0 (QRCode) failed with PrintContentException: {QRCodeControl(0x1B, Secret.Length)}", entry.Message);
+        Assert.All(logger.Entries, e => Assert.DoesNotContain(Secret, e.Message));
+        Assert.All(logger.Entries, e => Assert.DoesNotContain("Replaced", e.Message));
+    }
+
+    [Fact]
+    public async Task BuildDocumentAsync_QRCodeNextToReplacedText_CountsOnlyTheText()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+
+        await NewService(logger).BuildDocumentAsync(
+            [Text("a\u001bb"), new PrintContent { Type = ContentType.QRCode, Content = "line 1\r\nline 2\nŻółw" }],
+            null);
+
+        Assert.Contains(logger.Entries, e => e is { Level: LogLevel.Information, Message: "Replaced 1 unprintable character(s) with '?'" });
+    }
+
+    [Fact]
     public async Task PrintAsync_NullBlock_IsAValidationFailure()
     {
         var result = await NewService().PrintAsync([Text(), null!]);
@@ -458,6 +492,36 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
         var body = await PostBadRequestAsync(json);
 
         Assert.Equal(expectedError, body.Error);
+    }
+
+    // The same answer as a barcode: a '?' in place of the character gives a code that scans to other data.
+    [Theory]
+    [InlineData("""{"content":[{"type":"QRCode","content":"SECRET\u001b@"}]}""", 0, 0x1B, 6)]
+    [InlineData("""{"content":[{"type":"Text","content":"x"},{"type":"QRCode","content":"\u001dV\u0000"}]}""", 1, 0x1D, 0)]
+    [InlineData("""{"content":[{"type":"QRCode","content":"a\tb"}]}""", 0, 0x09, 1)]
+    [InlineData("""{"content":[{"type":"QRCode","content":"BEGIN:VCARD\r\nFN:A\rEND:VCARD"}]}""", 0, 0x0D, 17)]
+    public async Task PostPrinter_ControlCharacterInQRCode_Returns400WithReason(string json, int block, int codePoint, int index)
+    {
+        var body = await PostBadRequestAsync(json);
+
+        Assert.Equal($"Block {block} (QRCode): {PayloadErrorTests.QRCodeControl(codePoint, index)}", body.Error);
+        Assert.DoesNotContain("SECRET", body.Error);
+    }
+
+    [Fact]
+    public async Task PostPrinter_ControlCharacterInBarcode_Returns400WithReason()
+    {
+        var body = await PostBadRequestAsync("""{"content":[{"type":"Barcode","content":"AB\u001b@"}]}""");
+
+        Assert.Equal("Block 0 (Barcode): a CODE128 barcode holds printable ASCII only", body.Error);
+    }
+
+    [Fact]
+    public async Task McpPrint_ControlCharacterInQRCode_GivesTheSameReason()
+    {
+        var text = await PrinterFaultTests.CallToolAsync(_client, "print", """{"content":[{"type":"QRCode","content":"SECRET\u001b@"}]}""");
+
+        Assert.Equal($"Not printed: Block 0 (QRCode): {PayloadErrorTests.QRCodeControl(0x1B, 6)}", text);
     }
 
     [Fact]

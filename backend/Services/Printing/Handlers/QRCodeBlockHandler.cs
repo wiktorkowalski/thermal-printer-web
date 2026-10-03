@@ -1,3 +1,4 @@
+using System.Text;
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Emitters.BaseCommandValues;
 using ThermalPrinterWeb.Models;
@@ -26,7 +27,7 @@ internal sealed class QRCodeBlockHandler : IBlockHandler
 
         var opts = item.QRCodeOptions ?? new QRCodeOptions();
         var model = MapQRCodeModel(opts.Model);
-        var data = ctx.EncodeQRCode(item.Content);
+        var data = Encode(item.Content);
 
         var maxBytes = MaxDataBytes(model);
         if (data.Length > maxBytes)
@@ -47,6 +48,26 @@ internal sealed class QRCodeBlockHandler : IBlockHandler
             .. GsParenK, .. Barcodes.PrintQRCode
         ]);
         return Task.CompletedTask;
+    }
+
+    // UTF-8 whatever the code page: phone scanners read it that way.
+    // A control character is rejected, not replaced: a '?' in its place gives a code
+    // that scans to other data. So LF is the only control byte in the result; CRLF counts as LF.
+    private static byte[] Encode(string content)
+    {
+        for (var i = 0; i < content.Length; i++)
+        {
+            var c = content[i];
+            if (c == '\n' || !char.IsControl(c))
+                continue;
+            if (c == '\r' && i + 1 < content.Length && content[i + 1] == '\n')
+                continue;
+
+            throw new PrintContentException(
+                $"content holds the control character U+{(int)c:X4} at index {i}; a QR code takes no control character but a line break (\\n or \\r\\n)");
+        }
+
+        return Encoding.UTF8.GetBytes(content.Replace("\r\n", "\n", StringComparison.Ordinal));
     }
 
     private static int MaxDataBytes(TwoDimensionCodeType model) => model switch
