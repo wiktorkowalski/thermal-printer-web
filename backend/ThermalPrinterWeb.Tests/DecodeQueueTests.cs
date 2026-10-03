@@ -265,7 +265,7 @@ public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app
             waiters = [.. Enumerable.Range(0, ImageBlockHandler.MaxDecodeWaiters).Select(_ => queue.RunAsync(() => Task.CompletedTask))];
             Assert.Equal(ImageBlockHandler.MaxDecodeWaiters, queue.Waiting);
 
-            response = await client.PostAsJsonAsync("/api/printer", new { content =new[] { new { type = "Image", content = PngBase64() } } });
+            response = await client.PostAsJsonAsync("/api/printer", new { content = new[] { new { type = "Image", content = PngBase64() } } });
 
             Assert.Equal(ImageBlockHandler.MaxDecodeWaiters, queue.Waiting);
         }
