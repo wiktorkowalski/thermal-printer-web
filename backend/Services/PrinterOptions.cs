@@ -1,8 +1,9 @@
+using System.Globalization;
+using System.Net;
 using Microsoft.Extensions.Options;
 
 namespace ThermalPrinterWeb.Services;
 
-// Configuration section "Printer". Environment variables: Printer__Address, Printer__ConnectTimeout.
 internal sealed class PrinterOptions
 {
     public const string SectionName = "Printer";
@@ -32,7 +33,6 @@ internal sealed class PrinterOptions
 
 internal readonly record struct PrinterEndpoint(string Host, int Port)
 {
-    // The raw TCP print port.
     public const int DefaultPort = 9100;
 
     // IPv6 is out: ESCPOS_NET splits its connection string at each colon.
@@ -48,7 +48,9 @@ internal readonly record struct PrinterEndpoint(string Host, int Port)
             return false;
 
         var port = DefaultPort;
-        if (parts.Length == 2 && !(int.TryParse(parts[1], out port) && port is >= 1 and <= 65535))
+        // Digits only: no sign, no space.
+        if (parts.Length == 2
+            && !(int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= IPEndPoint.MaxPort))
             return false;
 
         endpoint = new PrinterEndpoint(host, port);
@@ -60,10 +62,16 @@ internal readonly record struct PrinterEndpoint(string Host, int Port)
 
 internal sealed class PrinterOptionsValidator(IHostEnvironment environment) : IValidateOptions<PrinterOptions>
 {
+    private static readonly TimeSpan MaxConnectTimeout = TimeSpan.FromMinutes(1);
+
     public ValidateOptionsResult Validate(string? name, PrinterOptions options)
     {
-        if (options.ConnectTimeout < TimeSpan.Zero)
-            return ValidateOptionsResult.Fail($"Printer:ConnectTimeout {options.ConnectTimeout} is negative.");
+        // "3" binds as 3 days.
+        if (options.ConnectTimeout < TimeSpan.Zero || options.ConnectTimeout > MaxConnectTimeout)
+        {
+            return ValidateOptionsResult.Fail(
+                $"Printer:ConnectTimeout {options.ConnectTimeout} is outside the range 00:00:00 to {MaxConnectTimeout}. Use the form hh:mm:ss.");
+        }
 
         if (!options.HasPrinter)
         {

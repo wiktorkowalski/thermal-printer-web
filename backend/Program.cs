@@ -43,7 +43,11 @@ builder.Services.AddControllers()
                 => entry.Key.StartsWith('$');
         };
     });
-builder.Services.AddOptions<PrinterOptions>().BindConfiguration(PrinterOptions.SectionName).ValidateOnStart();
+builder.Services.AddOptions<PrinterOptions>()
+    // Development starts from no printer, also when appsettings.Development.json is not found. The binding below sets an address given on purpose.
+    .Configure<IHostEnvironment>((options, environment) => options.Address = environment.IsDevelopment() ? string.Empty : options.Address)
+    .BindConfiguration(PrinterOptions.SectionName)
+    .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<PrinterOptions>, PrinterOptionsValidator>();
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
@@ -75,8 +79,19 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
-// A bad printer setting throws here: the host does not start.
-var printerOptions = app.Services.GetRequiredService<IOptions<PrinterOptions>>().Value;
+PrinterOptions printerOptions;
+try
+{
+    printerOptions = app.Services.GetRequiredService<IOptions<PrinterOptions>>().Value;
+}
+catch (OptionsValidationException ex)
+{
+    // Exit with a code: an unhandled exception leaves the process alive when it is PID 1 in the container.
+    // Not the logger: it writes on a background thread, and the process ends now.
+    Console.Error.WriteLine($"Printer settings are not valid, the app does not start: {ex.Message}");
+    return 1;
+}
+
 if (printerOptions.ResolveEndpoint() is { } printerEndpoint)
     app.Logger.LogInformation("Printer target: {Address}", printerEndpoint);
 else
@@ -109,3 +124,4 @@ app.MapMcp("/mcp");
 app.MapFallbackToFile("index.html");
 
 app.Run();
+return 0;

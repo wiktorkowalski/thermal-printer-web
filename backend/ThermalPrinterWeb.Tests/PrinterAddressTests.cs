@@ -72,13 +72,14 @@ public sealed class PrinterAddressTests
     public async Task Development_HasNoPrinter_StatusPrintAndBeepAnswerAndSendNothing()
     {
         using var app = new App(Environments.Development);
+        // Before the first request: a Printer__Address in the shell of the developer must not turn this test into a real print.
+        Assert.Equal("", app.Address);
         var client = app.CreateClient();
 
         var status = await client.GetAsync("/api/printer/status");
         var print = await client.PostAsync("/api/printer", Json(PrintJson));
         var beep = await client.PostAsync("/api/printer/beep?count=2&duration=3", null);
 
-        Assert.Equal("", app.Address);
         Assert.Equal(["Printer target: no printer (Development); print and beep send nothing"], app.InformationLogs("Printer target"));
 
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
@@ -132,12 +133,24 @@ public sealed class PrinterAddressTests
     [InlineData("http://192.168.123.100:9100", "is not valid")]
     public void Production_WithABadAddress_DoesNotStart(string address, string message)
     {
-        using var app = new App(Environments.Production, address);
+        var stderr = Console.Error;
+        using var captured = new StringWriter();
+        Console.SetError(captured);
+        int exitCode;
+        try
+        {
+            // The real entry point: it returns before the server listens.
+            exitCode = (int)typeof(Program).Assembly.EntryPoint!.Invoke(null, [new[] { "--environment=Production", $"--Printer:Address={address}" }])!;
+        }
+        finally
+        {
+            Console.SetError(stderr);
+        }
 
-        var ex = Assert.Throws<OptionsValidationException>(() => app.Services);
-
-        Assert.Contains(message, ex.Message);
-        Assert.Contains("host or host:port", ex.Message);
+        Assert.Equal(1, exitCode);
+        Assert.StartsWith("Printer settings are not valid, the app does not start: ", captured.ToString());
+        Assert.Contains(message, captured.ToString());
+        Assert.Contains("host or host:port", captured.ToString());
     }
 
     [Theory]
@@ -162,6 +175,8 @@ public sealed class PrinterAddressTests
     [InlineData("host:0")]
     [InlineData("host:65536")]
     [InlineData("host:-1")]
+    [InlineData("host:+9100")]
+    [InlineData("host: 9100")]
     [InlineData("host:port")]
     [InlineData("host:9100:1")]
     [InlineData("::1")]
@@ -184,11 +199,14 @@ public sealed class PrinterAddressTests
         Assert.Equal(valid, result.Succeeded);
     }
 
-    [Fact]
-    public void Validator_NegativeConnectTimeout_Fails()
+    // The configuration value "3" binds as 3 days.
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3 * 24 * 60 * 60)]
+    public void Validator_ConnectTimeoutOutOfRange_Fails(int seconds)
     {
         var result = Validator("Production")
-            .Validate(null, new PrinterOptions { ConnectTimeout = TimeSpan.FromSeconds(-1) });
+            .Validate(null, new PrinterOptions { ConnectTimeout = TimeSpan.FromSeconds(seconds) });
 
         Assert.True(result.Failed);
         Assert.Contains("Printer:ConnectTimeout", result.FailureMessage);
