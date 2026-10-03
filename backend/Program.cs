@@ -24,12 +24,13 @@ builder.Services.AddPrinterBlockHandlers();
 builder.Services.AddMcpServer()
     .WithHttpTransport(o => o.Stateless = true)
     .WithToolsFromAssembly();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
-// Add CORS for React frontend (development only)
+// Development only: Swagger (it lists every endpoint) and CORS for the React dev server.
 if (builder.Environment.IsDevelopment())
 {
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen();
+
     builder.Services.AddCors(options =>
     {
         options.AddPolicy("AllowReact", policy =>
@@ -44,13 +45,15 @@ if (builder.Environment.IsDevelopment())
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+else
 {
     app.UseExceptionHandler("/Error");
 }
-
-app.UseSwagger();
-app.UseSwaggerUI();
 
 app.UseStaticFiles();
 app.UseRouting();
