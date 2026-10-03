@@ -23,16 +23,12 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
 
     public int? LineSpacing => Options?.DefaultLineSpacing;
 
-    // The only ways caller text becomes printer bytes: handlers must not encode on
-    // their own. Barcode content is the exception: its handler rejects all but printable ASCII.
-    public byte[] EncodeText(string text) => Encode(text, Encoding);
-
-    // QR data is UTF-8 whatever the code page: phone scanners read it that way.
-    public byte[] EncodeQRCode(string content) => Encode(content, Encoding.UTF8);
-
-    private byte[] Encode(string text, Encoding encoding)
+    // The only way printed text becomes printer bytes: handlers must not encode on
+    // their own. Code content is the exception: its handler rejects what it cannot hold
+    // (QR: a control character; barcode: all but printable ASCII) and replaces nothing.
+    public byte[] EncodeText(string text)
     {
-        var bytes = PrinterSafeText.Encode(text, encoding, out var replaced);
+        var bytes = PrinterSafeText.Encode(text, Encoding, out var replaced);
         ReplacedCharacters += replaced;
         return bytes;
     }

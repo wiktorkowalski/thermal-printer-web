@@ -98,6 +98,7 @@ public static class PrinterTools
         + "so keep each line within the limit (one Text block per line, or \\n inside content). "
         + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
         + "Polish letters print; emoji print as '?'. "
+        + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks. "
         + "Image content is base64 PNG or JPEG; other formats are rejected. "
         + "One document holds at most 500 blocks, 20 of them images, and prints at most 4 m of paper. "
         + "Example: " + PrintExample)]
