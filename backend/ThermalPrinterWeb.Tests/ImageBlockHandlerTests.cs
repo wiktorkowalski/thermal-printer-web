@@ -58,7 +58,7 @@ public sealed class ImageBlockHandlerTests
     }
 
     // A PNG that only declares its size: valid header, one compressed pixel row of zeros.
-    private static byte[] PngDeclaring(int width, int height, byte bitDepth = 8)
+    private static byte[] PngDeclaring(int width, int height, byte bitDepth = 8, (string Type, byte[] Data)? extraChunk = null)
     {
         using var ms = new MemoryStream();
         ms.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
@@ -69,13 +69,85 @@ public sealed class ImageBlockHandlerTests
         header[8] = bitDepth;
         header[9] = 6; // RGBA
         WriteChunk(ms, "IHDR", header);
+        if (extraChunk is { } chunk)
+            WriteChunk(ms, chunk.Type, chunk.Data);
 
-        using var data = new MemoryStream();
-        using (var zlib = new ZLibStream(data, CompressionLevel.Optimal, leaveOpen: true))
-            zlib.Write(new byte[16]);
-        WriteChunk(ms, "IDAT", data.ToArray());
+        WriteChunk(ms, "IDAT", Deflate(new byte[16]));
         WriteChunk(ms, "IEND", []);
         return ms.ToArray();
+    }
+
+    private static byte[] Deflate(byte[] data)
+    {
+        using var ms = new MemoryStream();
+        using (var zlib = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true))
+            zlib.Write(data);
+        return ms.ToArray();
+    }
+
+    // Compressed text chunks: 64 MB of zeros in about 64 KB.
+    public static TheoryData<string, byte[]> TextBombChunks()
+    {
+        var zeros = Deflate(new byte[64 * 1024 * 1024]);
+        return new()
+        {
+            // keyword, NUL, compression method, data
+            { "zTXt", [.. "Comment"u8, 0, 0, .. zeros] },
+            // keyword, NUL, compressed flag, method, empty language, NUL, empty translated keyword, NUL, data
+            { "iTXt", [.. "Comment"u8, 0, 1, 0, 0, 0, .. zeros] }
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(TextBombChunks))]
+    public async Task Png_CompressedTextChunk_IsNotInflated(string type, byte[] data)
+    {
+        // Oversize too, so the handler throws before its first await and the count is for this thread.
+        var bomb = Convert.ToBase64String(PngDeclaring(30000, 30000, extraChunk: (type, data)));
+        var ctx = NewContext();
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(bomb, ctx));
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Contains("30000x30000 pixels is over the limit", ex.Message);
+        Assert.True(allocated < 4 * 1024 * 1024, $"allocated {allocated} bytes");
+    }
+
+    [Theory]
+    [InlineData(0, 576, "maxWidth 0")]
+    [InlineData(-1, 576, "maxWidth -1")]
+    [InlineData(576, 0, "maxHeight 0")]
+    [InlineData(576, int.MinValue, "maxHeight -2147483648")]
+    public async Task MaxSize_BelowOne_IsRejected(int maxWidth, int maxHeight, string expected)
+    {
+        var ctx = NewContext();
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(
+            Convert.ToBase64String(Png()), ctx, new ImageOptions { MaxWidth = maxWidth, MaxHeight = maxHeight }));
+
+        Assert.Equal($"imageOptions.{expected} must be at least 1", ex.Message);
+        Assert.Empty(ctx.Output);
+    }
+
+    [Theory]
+    [InlineData(576, 72)]
+    [InlineData(577, 72)]
+    [InlineData(568, 71)]
+    public async Task MaxWidth_AtTheHeadWidth_IsTheUpperLimit(int maxWidth, int expectedWidthBytes)
+    {
+        var ctx = await RunAsync(
+            Convert.ToBase64String(Png(width: 1200, height: 40)),
+            new ImageOptions { MaxWidth = maxWidth });
+
+        Assert.Equal(expectedWidthBytes, RasterSize(ctx).WidthBytes);
+    }
+
+    [Fact]
+    public async Task Jpeg_PhotoSized12Megapixels_IsResizedAndPrints()
+    {
+        var ctx = await RunAsync(Convert.ToBase64String(Encode(new JpegEncoder(), 4032, 3024)));
+
+        Assert.Equal((72, 432), RasterSize(ctx));
     }
 
     // The decoder checks the CRC of every critical chunk.

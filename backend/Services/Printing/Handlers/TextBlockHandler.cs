@@ -14,11 +14,12 @@ internal sealed class TextBlockHandler : IBlockHandler
     {
         var text = item.Content ?? string.Empty;
         if (text.Length > MaxLength)
-            throw new PrintContentException($"text of {text.Length} characters is over the limit of {MaxLength}");
+            throw PrintContentException.OverLimit("text length", text.Length, MaxLength);
 
-        var lines = text.AsSpan().Count('\n') + 1;
+        // Same line breaks as the encoder: it turns CR, FF, NEL, LS and PS into LF.
+        var lines = text.ReplaceLineEndings("\n").AsSpan().Count('\n') + 1;
         if (lines > MaxLines)
-            throw new PrintContentException($"text of {lines} lines is over the limit of {MaxLines}");
+            throw PrintContentException.OverLimit("text line count", lines, MaxLines);
 
         ctx.AddRange(StyledText.Build(ctx, text, item.Style));
         return Task.CompletedTask;

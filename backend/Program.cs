@@ -12,8 +12,7 @@ var port = Environment.GetEnvironmentVariable("PORT") ?? "5160";
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.ListenAnyIP(int.Parse(port)); // Listen on all interfaces
-    // The Kestrel default, set here because the image size limit in ImageBlockHandler depends on it.
-    serverOptions.Limits.MaxRequestBodySize = 30_000_000;
+    serverOptions.Limits.MaxRequestBodySize = PrinterService.MaxRequestBodyBytes;
 });
 
 // Add services to the container.

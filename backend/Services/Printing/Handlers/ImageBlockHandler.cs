@@ -19,7 +19,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
 
     // Limits on the image the caller sends. The endpoint is public, so the header
     // must not decide how much memory a decode takes.
-    // 16 MiB as base64 is 22.4 MB, below MaxRequestBodySize in Program.cs.
+    // 16 MiB as base64 is 22.4 MB, below PrinterService.MaxRequestBodyBytes.
     internal const int MaxImageBytes = 16 * 1024 * 1024;
     internal const int MaxBase64Length = (MaxImageBytes + 2) / 3 * 4;
     // Phone photos must pass: 12 MP 4032x3024, 48 MP 8064x6048, 50 MP 8160x6144, panorama 16382x3628.
@@ -29,10 +29,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
     private const int AllocationLimitMegabytes = 256;
 
     // The pinned ImageSharp has open advisories in other decoders (BigTIFF loop): keep them off caller bytes.
-    private static readonly Configuration PngAndJpegOnly = new(new PngConfigurationModule(), new JpegConfigurationModule())
-    {
-        MemoryAllocator = MemoryAllocator.Create(new MemoryAllocatorOptions { AllocationLimitMegabytes = AllocationLimitMegabytes })
-    };
+    private static readonly Configuration PngAndJpegOnly = CreateConfiguration();
 
     // One decode at a time: an accepted photo takes up to 256 MB while it is resized.
     private static readonly SemaphoreSlim DecodeGate = new(1, 1);
@@ -46,47 +43,67 @@ internal sealed class ImageBlockHandler : IBlockHandler
             return;
 
         // Cheap checks first: a rejected image does not wait for the gate.
+        var options = item.ImageOptions ?? new ImageOptions();
+        var maxWidth = PrintLimit(options.MaxWidth, HeadWidth, HeadWidth, "maxWidth");
+        var maxHeight = PrintLimit(options.MaxHeight, DefaultMaxHeight, MaxPrintHeight, "maxHeight");
         var source = DecodeBase64(item.Content);
         var format = CheckHeader(source);
 
-        byte[] imageBytes;
         await DecodeGate.WaitAsync();
         try
         {
-            imageBytes = await ResizeToPngAsync(source, format, item.ImageOptions);
+            var png = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
+            // ESCPOS_NET decodes the PNG again, so this stays inside the gate.
+            ctx.Add(ctx.Emitter.PrintImage(png, options.HighDensity, isLegacy: options.UseLegacyMode));
         }
         finally
         {
             DecodeGate.Release();
         }
-
-        var legacy = item.ImageOptions?.UseLegacyMode ?? true;
-        var highDensity = item.ImageOptions?.HighDensity ?? true;
-        ctx.Add(ctx.Emitter.PrintImage(imageBytes, highDensity, isLegacy: legacy));
     }
 
-    private static async Task<byte[]> ResizeToPngAsync(byte[] source, IImageFormat format, ImageOptions? options)
+    private static Configuration CreateConfiguration()
+    {
+        var configuration = new Configuration(new PngConfigurationModule(), new JpegConfigurationModule())
+        {
+            MemoryAllocator = MemoryAllocator.Create(new MemoryAllocatorOptions { AllocationLimitMegabytes = AllocationLimitMegabytes })
+        };
+
+        // Metadata is not printed. A compressed PNG text chunk (zTXt, iTXt) inflates to gigabytes
+        // on the managed heap, where the allocator limit does not apply.
+        configuration.ImageFormatsManager.SetDecoder(PngFormat.Instance, new PngDecoder { IgnoreMetadata = true });
+        configuration.ImageFormatsManager.SetDecoder(JpegFormat.Instance, new JpegDecoder { IgnoreMetadata = true });
+        return configuration;
+    }
+
+    // The caller can ask for less than the printer limit, not for more. ImageSharp reads 0 as
+    // "any size", so a value below 1 would switch the limit off.
+    private static int PrintLimit(int? requested, int defaultValue, int limit, string name)
+    {
+        var value = requested ?? defaultValue;
+        if (value < 1)
+            throw new PrintContentException($"imageOptions.{name} {value} must be at least 1");
+
+        return Math.Min(value, limit);
+    }
+
+    private static async Task<byte[]> ResizeToPngAsync(byte[] source, IImageFormat format, Size max, bool preserveAspectRatio)
     {
         using var image = Decode(format, source, static bytes => Image.Load(PngAndJpegOnly, bytes));
 
-        // The caller can ask for less than the head width, not for more.
-        var opts = options ?? new ImageOptions();
-        var maxWidth = Math.Min(opts.MaxWidth ?? HeadWidth, HeadWidth);
-        var maxHeight = Math.Min(opts.MaxHeight ?? DefaultMaxHeight, MaxPrintHeight);
-
-        if (image.Width > maxWidth || image.Height > maxHeight)
+        if (image.Width > max.Width || image.Height > max.Height)
         {
-            if (opts.PreserveAspectRatio)
+            if (preserveAspectRatio)
             {
                 image.Mutate(x => x.Resize(new ResizeOptions
                 {
-                    Size = new Size(maxWidth, maxHeight),
+                    Size = max,
                     Mode = ResizeMode.Max
                 }));
             }
             else
             {
-                image.Mutate(x => x.Resize(maxWidth, maxHeight));
+                image.Mutate(x => x.Resize(max.Width, max.Height));
             }
         }
 

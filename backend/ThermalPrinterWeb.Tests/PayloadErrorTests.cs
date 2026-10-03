@@ -55,8 +55,13 @@ public sealed class PayloadErrorTests
         { new PrintContent { Type = ContentType.Separator, SeparatorLength = 65 }, "Block 1 (Separator): separatorLength 65 is over the limit of 64" },
         { new PrintContent { Type = ContentType.Separator, SeparatorLength = int.MaxValue }, "Block 1 (Separator): separatorLength 2147483647 is over the limit of 64" },
         { new PrintContent { Type = ContentType.LineFeed, Lines = 101 }, "Block 1 (LineFeed): lines 101 is over the limit of 100" },
-        { Text(new string('x', 10_001)), "Block 1 (Text): text of 10001 characters is over the limit of 10000" },
-        { Text(new string('\n', 500)), "Block 1 (Text): text of 501 lines is over the limit of 500" }
+        { Text(new string('x', 10_001)), "Block 1 (Text): text length 10001 is over the limit of 10000" },
+        { Text(new string('\n', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        // The encoder turns each of these into LF.
+        { Text(new string('\r', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        { Text(new string('\f', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        { Text(new string('\u2028', 500)), "Block 1 (Text): text line count 501 is over the limit of 500" },
+        { new PrintContent { Type = ContentType.Image, Content = "AAAA", ImageOptions = new ImageOptions { MaxWidth = 0 } }, "Block 1 (Image): imageOptions.maxWidth 0 must be at least 1" }
     };
 
     [Fact]
@@ -83,10 +88,25 @@ public sealed class PayloadErrorTests
 
         var result = await NewService(logger).PrintAsync(content);
 
-        Assert.Equal(PrintResult.Invalid("Document has 501 blocks, over the limit of 500"), result);
+        Assert.Equal(PrintResult.Invalid("block count 501 is over the limit of 500"), result);
         var entry = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.DoesNotContain(Secret, entry.Message);
+    }
+
+    [Fact]
+    public async Task PrintAsync_TooMuchPrinterData_IsAValidationFailureLoggedOnce()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        var block = new string('x', 10_000);
+        var content = Enumerable.Range(0, 250).Select(_ => Text(block)).ToList();
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        // 2 MiB / 10,019 bytes per block = 209 blocks fit.
+        Assert.Equal(PrintResult.Invalid("Block 209: the document is over the limit of 2097152 bytes of printer data"), result);
+        var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
+        Assert.Equal(LogLevel.Warning, entry.Level);
     }
 
     [Theory]

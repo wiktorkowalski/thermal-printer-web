@@ -19,7 +19,7 @@ internal sealed class SeparatorBlockHandler : IBlockHandler
         if (length < 0)
             throw new PrintContentException("separatorLength must not be negative");
         if (length > MaxLength)
-            throw new PrintContentException($"separatorLength {length} is over the limit of {MaxLength}");
+            throw PrintContentException.OverLimit("separatorLength", length, MaxLength);
 
         var sep = new string(separatorChar[0], length);
         ctx.AddRange(StyledText.Build(ctx, sep, item.Style));
