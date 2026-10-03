@@ -12,18 +12,29 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
     private const int HeaderLength = 4;
     private const int LengthIndex = 3;
 
+    // GS h n takes one byte; 0 is not a height.
+    internal const int MinHeightInDots = 1;
+    internal const int MaxHeightInDots = 255;
+
     public ContentType Type => ContentType.Barcode;
 
     public Task HandleAsync(PrintContent item, BlockContext ctx)
     {
+        var opts = item.BarcodeOptions ?? new BarcodeOptions();
+        if (opts.HeightInDots is < MinHeightInDots or > MaxHeightInDots)
+            throw PrintContentException.OutOfRange("barcodeOptions.heightInDots", opts.HeightInDots.Value, MinHeightInDots, MaxHeightInDots);
+
         if (string.IsNullOrEmpty(item.Content))
             return Task.CompletedTask;
 
         var e = ctx.Emitter;
-        var opts = item.BarcodeOptions ?? new BarcodeOptions();
 
         // First: a rejected barcode must not leave its settings in the document.
         var command = BuildCommand(e, item.Content, opts.Type);
+
+        // The bars plus the caption lines. A null height keeps what the printer has: count the tallest.
+        var captionLines = opts.LabelPosition == BarLabelPosition.Both ? 2 : 1;
+        ctx.AddPaper((opts.HeightInDots ?? MaxHeightInDots) + captionLines * PaperLength.LineDots(ctx.LineSpacing));
 
         if (opts.HeightInDots.HasValue)
             ctx.Add(e.SetBarcodeHeightInDots(opts.HeightInDots.Value));

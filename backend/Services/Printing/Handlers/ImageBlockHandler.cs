@@ -48,7 +48,9 @@ internal sealed class ImageBlockHandler : IBlockHandler
         var maxWidth = PrintLimit(options.MaxWidth, HeadWidth, HeadWidth, "maxWidth");
         var maxHeight = PrintLimit(options.MaxHeight, DefaultMaxHeight, MaxPrintHeight, "maxHeight");
         var source = DecodeBase64(item.Content);
-        var format = CheckHeader(source);
+        var (format, size) = CheckHeader(source);
+        // Before the gate: a job over the paper limit is not decoded.
+        ctx.AddPaper(PaperLength.ImageDots(size.Width, size.Height, maxWidth, maxHeight, options.PreserveAspectRatio));
 
         await DecodeGate.WaitAsync();
         try
@@ -114,7 +116,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
     }
 
     // Format and dimensions from the header: no pixel buffer yet.
-    private static IImageFormat CheckHeader(byte[] imageBytes)
+    private static (IImageFormat Format, Size Size) CheckHeader(byte[] imageBytes)
     {
         // The format comes from the bytes. A declared MIME type in a data URI is ignored.
         var format = Image.DetectFormat(imageBytes);
@@ -130,7 +132,7 @@ internal sealed class ImageBlockHandler : IBlockHandler
                 $"and {MaxPixels} in total ({Facts(format, imageBytes.Length)}).");
         }
 
-        return format;
+        return (format, new Size(info.Width, info.Height));
     }
 
     private static T Decode<T>(IImageFormat format, byte[] imageBytes, Func<byte[], T> read)

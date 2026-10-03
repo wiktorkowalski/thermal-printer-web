@@ -10,6 +10,7 @@ internal sealed class CutBlockHandler : IBlockHandler
     {
         ctx.HasCut = true;
         var feedLines = ctx.Options?.FeedLinesAfterPrint ?? 3;
+        ctx.AddPaper(PaperLength.CutDots(feedLines));
         ctx.Add(item.PartialCut == true
             ? ctx.Emitter.PartialCutAfterFeed(feedLines)
             : ctx.Emitter.FullCutAfterFeed(feedLines));

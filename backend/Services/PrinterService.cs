@@ -11,9 +11,14 @@ namespace ThermalPrinterWeb.Services;
 internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable<IBlockHandler> handlers) : IPrinterService
 {
     private readonly IReadOnlyDictionary<ContentType, IBlockHandler> _handlers = handlers.ToDictionary(h => h.Type);
-    private const string PrinterAddress = "192.168.123.100:9100";
+    private const string DefaultPrinterAddress = "192.168.123.100:9100";
     private const int DefaultPrinterPort = 9100;
-    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
+
+    // The only text a caller gets for these faults. The exception holds the printer
+    // address and socket details: it stays in the server log.
+    internal const string UnreachableError = "Printer unreachable";
+    internal const string InternalError = "Print failed: internal error";
+
     private static readonly TimeSpan StatusReadTimeout = TimeSpan.FromSeconds(2);
 
     // The printer renders single-byte code pages only; raw UTF-8 prints as garbage
@@ -32,9 +37,17 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     // Printer data for one job. A full-width image 4096 dots tall is 295 KB; text is 1 byte per character.
     internal const int MaxOutputBytes = 2 * 1024 * 1024;
 
+    // ESC 3 n and GS V m n take one byte each.
+    internal const int MaxLineSpacing = 255;
+    internal const int MaxFeedBeforeCut = 255;
+
     // ESC B n t (1B 42): buzzer - n beeps each of length t. Both clamp to 1..9.
     private const int BuzzerMin = 1;
     private const int BuzzerMax = 9;
+
+    // Tests set a loopback address and a zero timeout.
+    internal string PrinterAddress { get; init; } = DefaultPrinterAddress;
+    internal TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
@@ -49,9 +62,14 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             var status = await GetStatusAsync();
             if (!status.Ready)
             {
-                logger.LogWarning(
-                    "Refusing print: printer not ready ({Reason}); status={Raw}",
-                    status.NotReadyReason, status.Raw);
+                // An unreachable printer is logged in GetStatusAsync, with the exception.
+                if (status.Reachable)
+                {
+                    logger.LogWarning(
+                        "Refusing print: printer not ready ({Reason}); status={Raw}",
+                        status.NotReadyReason, status.Raw);
+                }
+
                 return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
@@ -62,7 +80,18 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 PrinterName = "ThermalPrinter"
             });
 
-            await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
+            var job = ByteSplicer.Combine(byteContent.ToArray());
+            try
+            {
+                await printer.WriteAsync(job);
+            }
+            catch (Exception ex)
+            {
+                // The status read passed, then the connection for the job failed: the job is lost.
+                logger.LogError(ex, "Print failed: no connection to the printer at {Address}", PrinterAddress);
+                return PrintResult.PrinterFault(UnreachableError);
+            }
+
             return PrintResult.Ok;
         }
         catch (PrintContentException ex)
@@ -72,8 +101,9 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         }
         catch (Exception ex)
         {
+            // Not a printer fault and not the payload: a fault in this service.
             logger.LogError(ex, "Print failed");
-            return PrintResult.PrinterFault(ex.Message);
+            return PrintResult.PrinterFault(InternalError);
         }
     }
 
@@ -94,6 +124,12 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             logger.LogWarning("Rejected print: the document has {ImageBlockCount} image blocks, the limit is {MaxImageBlocks}", imageBlocks, MaxImageBlocks);
             throw PrintContentException.OverLimit("image block count", imageBlocks, MaxImageBlocks);
+        }
+
+        if (options is not null)
+        {
+            CheckOptionRange("options.defaultLineSpacing", options.DefaultLineSpacing, MaxLineSpacing);
+            CheckOptionRange("options.feedLinesAfterPrint", options.FeedLinesAfterPrint, MaxFeedBeforeCut);
         }
 
         var e = new EPSON();
@@ -141,11 +177,26 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
         if (options?.AutoCut != false && !ctx.HasCut)
         {
+            // Not counted as paper: one cut, under 5 cm.
             var feedLines = options?.FeedLinesAfterPrint ?? 3;
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
 
+        // The printer keeps ESC 3 n after the job: without ESC 2 the next job prints
+        // with this spacing, and its paper estimate is too low.
+        if (options?.DefaultLineSpacing != null)
+            ctx.Add(e.ResetLineSpacing());
+
         return ctx.Output;
+    }
+
+    private void CheckOptionRange(string field, int? value, int max)
+    {
+        if (value is not { } number || (number >= 0 && number <= max))
+            return;
+
+        logger.LogWarning("Rejected print: {Field} {Value} is outside the range {Min} to {Max}", field, number, 0, max);
+        throw PrintContentException.OutOfRange(field, number, 0, max);
     }
 
     private async Task AddBlockAsync(int index, PrintContent? item, BlockContext ctx)
@@ -234,7 +285,8 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to read printer status from {Address}", PrinterAddress);
-            return new PrinterStatus(false, false, false, false, false, ex.Message);
+            // No exception text: the status goes to the caller as it is.
+            return new PrinterStatus(false, false, false, false, false);
         }
     }
 

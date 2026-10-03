@@ -148,6 +148,31 @@ public sealed class ImageBlockHandlerTests
         var ctx = await RunAsync(Convert.ToBase64String(Encode(new JpegEncoder(), 4032, 3024)));
 
         Assert.Equal((72, 432), RasterSize(ctx));
+        // The paper limit counts the printed height.
+        Assert.Equal(432, ctx.PaperDots);
+    }
+
+    [Theory]
+    [InlineData(432, true)]
+    [InlineData(431, false)]
+    public async Task Image_OverThePaperLimit_IsRejectedBeforeTheDecode(int dotsLeft, bool printed)
+    {
+        var ctx = NewContext();
+        ctx.AddPaper(PaperLength.MaxDots - dotsLeft);
+        // 4032 x 3024 prints 432 dots high.
+        var run = RunAsync(Convert.ToBase64String(PngDeclaring(4032, 3024)), ctx);
+
+        if (printed)
+        {
+            await run;
+            Assert.Equal(PaperLength.MaxDots, ctx.PaperDots);
+            Assert.NotEmpty(ctx.Output);
+            return;
+        }
+
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => run);
+        Assert.Equal("the document is over the limit of 32000 dots of paper (4 m)", ex.Message);
+        Assert.Empty(ctx.Output);
     }
 
     // The decoder checks the CRC of every critical chunk.
