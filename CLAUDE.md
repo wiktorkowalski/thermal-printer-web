@@ -52,15 +52,20 @@ Located in `backend/` directory.
 
 **Core Components**:
 - `backend/Program.cs` - Entry point, configures services and middleware, sets up CORS for React frontend (dev only)
-- `backend/Controllers/PrinterController.cs` - Single unified REST API endpoint:
+- `backend/Controllers/PrinterController.cs` - REST API:
   - `POST /api/printer` - Handles both simple printing (name + message) and template printing (content array)
+  - `GET /api/printer/status` - Printer readiness
+  - `POST /api/printer/beep` - Sounds the buzzer
+- `backend/Mcp/PrinterTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`)
 - `backend/Services/PrinterService.cs` - Service implementing `IPrinterService`, handles all printer communication via ESCPOS_NET library
 
 **Printer Configuration**: Hardcoded to `192.168.123.100:9100` in `Services/PrinterService.cs`
 
 **Key Dependencies**:
-- `ESCPOS_NET` (v3.0.0) - ESC/POS thermal printer protocol implementation
-- `SixLabors.ImageSharp` (v2.1.10) - Image processing and format conversion
+- `ESCPOS_NET` - ESC/POS thermal printer protocol implementation
+- `SixLabors.ImageSharp` - Image processing and format conversion
+
+Versions are pinned in `backend/ThermalPrinterWeb.Api.csproj`.
 
 ### Frontend (React)
 
