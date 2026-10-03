@@ -16,7 +16,8 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 /
 ├── backend/                    # ASP.NET Core Web API (ThermalPrinterWeb.Api.csproj)
 │   ├── Controllers/
-│   │   └── PrinterController.cs
+│   │   ├── PrinterController.cs
+│   │   └── PrintResponseClientErrorFactory.cs  # 415 and other bodiless client errors as PrintResponse
 │   ├── Mcp/                    # PrinterTools, ArgumentShapeFilter, ToolArgumentException
 │   ├── Services/
 │   │   ├── IPrinterService.cs
@@ -207,7 +208,8 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 | 503 | `printer` | Printer fault, fixed text: `Printer not ready: <reason>`, `Printer unreachable` or `Print failed: internal error`. Details stay in the server log. |
 | 503 | `busy` | Too many image jobs wait for a decode. Header `Retry-After: 5`. The job is fine; send it again. |
 
-- 413: the body is over the request body limit (Kestrel rejects it). 415: the `Content-Type` is not `application/json`.
+- 415: the `Content-Type` is not `application/json`. The body is a `PrintResponse` with type `validation` (`PrintResponseClientErrorFactory`).
+- 413: the body is over the request body limit. Kestrel rejects it; the controller does not run and no test covers the body.
 - `GET /api/printer/status` answers a `PrinterStatus` body: with 200, or with 503 when the printer is unreachable.
 - `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
 
