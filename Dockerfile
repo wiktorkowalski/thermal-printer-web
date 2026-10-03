@@ -11,8 +11,12 @@ RUN npm run build -- --outDir=dist
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
 WORKDIR /src
 COPY backend/*.csproj ./
-RUN dotnet restore
+COPY backend/ThermalPrinterWeb.Tests/*.csproj ./ThermalPrinterWeb.Tests/
+# The test project references the API project: one restore covers both.
+RUN dotnet restore ThermalPrinterWeb.Tests
 COPY backend/ ./
+# A red test fails the image build. Before the frontend copy: a frontend change does not run the tests again.
+RUN dotnet test ThermalPrinterWeb.Tests -c Release --no-restore
 # Copy frontend build output to backend wwwroot
 COPY --from=frontend-build /app/frontend/dist ./wwwroot
 RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
