@@ -6,7 +6,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
@@ -37,13 +36,10 @@ public sealed class PrinterFaultTests
             builder.UseEnvironment("Production");
             builder.ConfigureServices(services =>
             {
-                services.RemoveAll<IPrinterService>();
-                services.AddSingleton<IPrinterService>(provider => new PrinterService(
-                    provider.GetRequiredService<ILogger<PrinterService>>(),
-                    provider.GetServices<IBlockHandler>())
+                services.Configure<PrinterOptions>(options =>
                 {
-                    PrinterAddress = $"{Loopback}:{port}",
-                    ConnectTimeout = connectTimeout ?? TimeSpan.FromSeconds(3)
+                    options.Address = $"{Loopback}:{port}";
+                    options.ConnectTimeout = connectTimeout ?? options.ConnectTimeout;
                 });
                 services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs));
             });
@@ -216,7 +212,7 @@ public sealed class PrinterFaultTests
     public async Task PrintAsync_UnexpectedException_ReturnsFixedTextAndLogsTheExceptionOnce()
     {
         var logs = new McpToolTests.RecordingLoggerProvider();
-        var service = new PrinterService(new LoggerFactory([logs]).CreateLogger<PrinterService>(), []);
+        var service = new PrinterService(new LoggerFactory([logs]).CreateLogger<PrinterService>(), [], NoPrinter.Options);
 
         var result = await service.PrintAsync(null!);
 

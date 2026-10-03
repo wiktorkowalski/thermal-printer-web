@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.Extensions.Options;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
@@ -42,6 +43,8 @@ builder.Services.AddControllers()
                 => entry.Key.StartsWith('$');
         };
     });
+builder.Services.AddOptions<PrinterOptions>().BindConfiguration(PrinterOptions.SectionName).ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<PrinterOptions>, PrinterOptionsValidator>();
 builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
 builder.Services.AddHttpContextAccessor();
@@ -71,6 +74,13 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
+
+// A bad printer setting throws here: the host does not start.
+var printerOptions = app.Services.GetRequiredService<IOptions<PrinterOptions>>().Value;
+if (printerOptions.ResolveEndpoint() is { } printerEndpoint)
+    app.Logger.LogInformation("Printer target: {Address}", printerEndpoint);
+else
+    app.Logger.LogInformation("Printer target: no printer ({Environment}); print and beep send nothing", app.Environment.EnvironmentName);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

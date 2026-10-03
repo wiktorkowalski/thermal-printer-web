@@ -224,7 +224,7 @@ public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app
     {
         var queue = new DecodeQueue(maxWaiters: 0, DecodeQueueTests.NoTimeout);
         var logger = new RecordingLogger<PrinterService>();
-        var service = new PrinterService(logger, [new ImageBlockHandler(queue)]);
+        var service = new PrinterService(logger, [new ImageBlockHandler(queue)], NoPrinter.Options);
 
         PrintResult result;
         await using (new HeldSlot(queue))
