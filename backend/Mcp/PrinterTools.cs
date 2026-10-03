@@ -8,8 +8,8 @@ namespace ThermalPrinterWeb.Mcp;
 
 // Public on purpose: WithToolsFromAssembly() discovers tools by reflecting over
 // public [McpServerToolType] classes / [McpServerTool] methods. IPrinterService
-// and PrintJobLog are injected from the request's DI scope; the remaining
-// parameters form each tool's input schema.
+// and PrintJobLog are injected from DI; the remaining parameters form each
+// tool's input schema.
 // Every schema parameter is optional, so a call with the wrong argument names
 // reaches the tool body and gets the correct shape back.
 [McpServerToolType]

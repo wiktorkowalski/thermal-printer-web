@@ -187,17 +187,17 @@ public sealed class PrintJobLogTests(McpToolTests.McpApp app) : IClassFixture<Mc
     [InlineData("a\u202Eb\u200Bc\uFEFFd", "a?b?c?d")]
     [InlineData("say \"hi\"", "say 'hi'")]
     public void Clean_CallerText_IsSafeForOneLogLine(string? value, string expected)
-        => Assert.Equal(expected, PrintJobLog.Clean(value, 64));
+        => Assert.Equal(expected, LogSafeText.Clean(value, PrintJobLog.MaxSourceLength));
 
     [Fact]
     public void Clean_Cut_NeverSplitsASurrogatePair()
     {
-        var cleaned = PrintJobLog.Clean("abc\U0001F600", 4);
+        var cleaned = LogSafeText.Clean("abc\U0001F600", 4);
 
         Assert.Equal("abc", cleaned);
     }
 
     [Fact]
     public void Clean_LoneSurrogate_IsReplaced()
-        => Assert.Equal("a\uFFFDb", PrintJobLog.Clean("a\uD83Db", 64));
+        => Assert.Equal("a\uFFFDb", LogSafeText.Clean("a\uD83Db", PrintJobLog.MaxSourceLength));
 }

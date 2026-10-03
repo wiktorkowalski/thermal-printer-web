@@ -63,8 +63,6 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             });
 
             await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
-            // The caller writes the job line (PrintJobLog).
-            logger.LogDebug("Printing complete");
             return PrintResult.Ok;
         }
         catch (PrintContentException ex)
@@ -112,7 +110,9 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         }
         else
         {
-            logger.LogWarning("Unknown code page {CodePage}, printing raw UTF-8 bytes", codePageName);
+            logger.LogWarning(
+                "Unknown code page {CodePage}, printing raw UTF-8 bytes",
+                LogSafeText.Clean(codePageName, CodePages.MaxLoggedNameLength));
         }
 
         if (options?.DefaultLineSpacing != null)
