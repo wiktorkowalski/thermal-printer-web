@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Printing;
@@ -45,9 +46,10 @@ builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
 
 // MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
-builder.Services.AddMcpServer()
+builder.Services.AddMcpServer(options => options.ServerInstructions = PrinterTools.ServerInstructions)
     .WithHttpTransport(o => o.Stateless = true)
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly()
+    .WithRequestFilters(filters => filters.AddCallToolFilter(ArgumentShapeFilter.Wrap));
 
 // Development only: Swagger (it lists every endpoint) and CORS for the React dev server.
 if (builder.Environment.IsDevelopment())
