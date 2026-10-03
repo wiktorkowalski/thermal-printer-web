@@ -153,6 +153,14 @@ export function validateBarcode(data: string, type: string): ValidationResult {
     };
   }
 
+  // ESCPOS_NET gives GS1-128 the same two-byte prefix as CODE128.
+  if (type === 'GS1_128' && data.length > CODE128_MAX_PAYLOAD) {
+    return {
+      isValid: false,
+      error: `[ERROR] GS1-128 holds at most ${CODE128_MAX_PAYLOAD} characters`
+    };
+  }
+
   // The printer sends each '{' twice, so it takes two places.
   if (type === 'CODE128' && data.length + (data.split('{').length - 1) > CODE128_MAX_PAYLOAD) {
     return {
