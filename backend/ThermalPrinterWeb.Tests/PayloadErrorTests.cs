@@ -494,7 +494,7 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
         Assert.Equal(expectedError, body.Error);
     }
 
-    // #68: the same answer as a barcode. Before, the control character became '?' and the job printed.
+    // The same answer as a barcode: a '?' in place of the character gives a code that scans to other data.
     [Theory]
     [InlineData("""{"content":[{"type":"QRCode","content":"SECRET\u001b@"}]}""", 0, 0x1B, 6)]
     [InlineData("""{"content":[{"type":"Text","content":"x"},{"type":"QRCode","content":"\u001dV\u0000"}]}""", 1, 0x1D, 0)]

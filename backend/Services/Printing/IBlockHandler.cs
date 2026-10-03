@@ -25,7 +25,7 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
 
     // The only way printed text becomes printer bytes: handlers must not encode on
     // their own. Code content is the exception: its handler rejects what it cannot hold
-    // (QR: a control character; barcode: all but printable ASCII) and replaces nothing.
+    // (QR: a control character; barcode: all but printable ASCII) with no '?' in its place.
     public byte[] EncodeText(string text)
     {
         var bytes = PrinterSafeText.Encode(text, Encoding, out var replaced);
