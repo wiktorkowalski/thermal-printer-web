@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Printing.Handlers;
 
 namespace ThermalPrinterWeb.Tests;
 
@@ -175,6 +176,23 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         var content = block.GetProperty("properties").GetProperty("content").GetProperty("description").GetString();
         Assert.Contains("48 characters per line", content);
         Assert.Contains("2953", block.GetProperty("properties").GetProperty("qrCodeOptions").GetProperty("properties").GetProperty("model").GetProperty("description").GetString());
+    }
+
+    // The numbers in the descriptions are typed by hand: an attribute cannot read the constants.
+    [Fact]
+    public async Task ToolsList_PrintTool_StatesTheLimitsTheCodeApplies()
+    {
+        var tool = await ToolAsync("print");
+        var block = tool.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties");
+        string Description(string property) => block.GetProperty(property).GetProperty("description").GetString()!;
+        var imageOptions = block.GetProperty("imageOptions").GetProperty("properties");
+
+        Assert.Contains($"at most {PrinterService.MaxBlocks} blocks, {PrinterService.MaxImageBlocks} of them images", tool.GetProperty("description").GetString());
+        Assert.Contains($"at most {TextBlockHandler.MaxLength} characters and {TextBlockHandler.MaxLines} lines", Description("content"));
+        Assert.Contains($"at most {ImageBlockHandler.MaxImageBytes / (1024 * 1024)} MB, {ImageBlockHandler.MaxSidePixels} pixels per side and {ImageBlockHandler.MaxPixels / 1_000_000} megapixels", Description("content"));
+        Assert.Contains($"at most {LineFeedBlockHandler.MaxLines}.", Description("lines"));
+        Assert.Contains($"at most {SeparatorBlockHandler.MaxLength}.", Description("separatorLength"));
+        Assert.Contains($"1 to {ImageBlockHandler.MaxPrintHeight}.", imageOptions.GetProperty("maxHeight").GetProperty("description").GetString());
     }
 
     [Theory]
