@@ -10,6 +10,8 @@ internal static class StyledText
     public static List<byte[]> Build(BlockContext ctx, string text, List<Models.PrintStyle>? styles)
     {
         var e = ctx.Emitter;
+        var encoded = ctx.EncodeText(text);
+        ctx.AddPaper(PaperLength.TextDots(encoded, ctx.LineSpacing, styles));
         List<byte[]> bytes = [];
         var hasReverse = styles?.Contains(Models.PrintStyle.ReverseMode) == true;
         var hasUpsideDown = styles?.Contains(Models.PrintStyle.UpsideDownMode) == true;
@@ -21,7 +23,7 @@ internal static class StyledText
 
         bytes.Add(e.SetStyles(MapPrintStyles(styles)));
 
-        bytes.Add([.. ctx.EncodeText(text), 0x0A]); // trailing LF
+        bytes.Add([.. encoded, 0x0A]); // trailing LF
 
         bytes.Add(e.SetStyles(EscPrintStyle.None));
 
