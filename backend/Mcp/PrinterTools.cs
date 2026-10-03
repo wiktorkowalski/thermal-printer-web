@@ -8,8 +8,8 @@ namespace ThermalPrinterWeb.Mcp;
 
 // Public on purpose: WithToolsFromAssembly() discovers tools by reflecting over
 // public [McpServerToolType] classes / [McpServerTool] methods. IPrinterService
-// is injected from the request's DI scope; the remaining parameters form each
-// tool's input schema.
+// and PrintJobLog are injected from the request's DI scope; the remaining
+// parameters form each tool's input schema.
 // Every schema parameter is optional, so a call with the wrong argument names
 // reaches the tool body and gets the correct shape back.
 [McpServerToolType]
@@ -27,6 +27,9 @@ public static class PrinterTools
         + """{"type":"Separator","separatorLength":48},"""
         + """{"type":"Text","content":"Body line, 48 characters max.","alignment":"Left","style":["DoubleHeight"]},"""
         + """{"type":"QRCode","content":"https://example.com"}]}""";
+
+    private const string SourceDescription =
+        "Optional. Short name of the caller, for example 'claude-code'. It goes to the server log only and is not printed.";
 
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =
@@ -51,9 +54,11 @@ public static class PrinterTools
         + "Example: " + PrintNoteExample)]
     public static async Task<string> PrintNoteAsync(
         IPrinterService printer,
+        PrintJobLog jobLog,
         [Description("Needed. Title, printed large (double width and height) and centered at the top. 24 characters per line.")] string? title = null,
         [Description("Needed. Message body, printed centered under the title. 48 characters per line; use \\n for line breaks.")] string? message = null,
-        [Description("Optional base64-encoded PNG or JPEG to print under the message. Other formats are rejected.")] string? imageBase64 = null)
+        [Description("Optional base64-encoded PNG or JPEG to print under the message. Other formats are rejected.")] string? imageBase64 = null,
+        [Description(SourceDescription)] string? source = null)
     {
         if (title is null || message is null)
         {
@@ -67,6 +72,7 @@ public static class PrinterTools
         }
 
         var result = await printer.PrintAsync(SimpleNote.Build(title, message, imageBase64));
+        jobLog.Write(PrintJobLog.McpTransport(PrintNoteName), source, result);
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 
@@ -97,13 +103,16 @@ public static class PrinterTools
         + "Example: " + PrintExample)]
     public static async Task<string> PrintAsync(
         IPrinterService printer,
+        PrintJobLog jobLog,
         [Description("Needed. Ordered content blocks to print, top to bottom.")] List<PrintContent>? content = null,
-        [Description("Optional print options: code page, line spacing, auto-cut.")] PrintOptions? options = null)
+        [Description("Optional print options: code page, line spacing, auto-cut.")] PrintOptions? options = null,
+        [Description(SourceDescription)] string? source = null)
     {
         if (content is null)
             throw new ToolArgumentException(PrintName, "'content' is missing");
 
         var result = await printer.PrintAsync(content, options);
+        jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result);
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 

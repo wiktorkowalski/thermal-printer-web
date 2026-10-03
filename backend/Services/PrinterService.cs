@@ -55,7 +55,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
-            logger.LogInformation("Connecting to printer at {Address}", PrinterAddress);
+            logger.LogDebug("Connecting to printer at {Address}", PrinterAddress);
             var printer = new ImmediateNetworkPrinter(new ImmediateNetworkPrinterSettings
             {
                 ConnectionString = PrinterAddress,
@@ -63,7 +63,8 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             });
 
             await printer.WriteAsync(ByteSplicer.Combine(byteContent.ToArray()));
-            logger.LogInformation("Printing complete");
+            // The caller writes the job line (PrintJobLog).
+            logger.LogDebug("Printing complete");
             return PrintResult.Ok;
         }
         catch (PrintContentException ex)

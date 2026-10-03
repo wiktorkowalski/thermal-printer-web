@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -186,7 +187,7 @@ public sealed class PayloadErrorTests
 
     private static async Task<ObjectResult> PrintViaControllerAsync(PrintResult result)
     {
-        var controller = new PrinterController(NullLogger<PrinterController>.Instance, new FakePrinterService(result));
+        var controller = new PrinterController(new FakePrinterService(result), new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()));
         return Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [Text()] }));
     }
 

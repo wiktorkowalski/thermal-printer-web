@@ -7,7 +7,7 @@ namespace ThermalPrinterWeb.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PrinterController(ILogger<PrinterController> logger, IPrinterService printerService) : ControllerBase
+public class PrinterController(IPrinterService printerService, PrintJobLog jobLog) : ControllerBase
 {
     [HttpPost]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
@@ -15,8 +15,6 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Print([FromBody] PrintRequest request)
     {
-        logger.LogInformation("Received print request");
-
         List<PrintContent> content;
 
         if (request.Content != null && request.Content.Count > 0)
@@ -29,10 +27,12 @@ public class PrinterController(ILogger<PrinterController> logger, IPrinterServic
         }
         else
         {
+            jobLog.WriteRejected(PrintJobLog.HttpTransport, request.Source);
             return BadRequest(new PrintResponse(false, "Request must have Content array or both Name and Message", PrintResponse.ValidationType));
         }
 
         var result = await printerService.PrintAsync(content, request.Options);
+        jobLog.Write(PrintJobLog.HttpTransport, request.Source, result);
 
         if (result.Success)
             return Ok(new PrintResponse(true));
