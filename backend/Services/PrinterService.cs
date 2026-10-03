@@ -3,16 +3,25 @@ using System.Text;
 using ESCPOS_NET;
 using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
+using Microsoft.Extensions.Options;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Services;
 
-internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable<IBlockHandler> handlers) : IPrinterService
+internal sealed class PrinterService(
+    ILogger<PrinterService> logger,
+    IEnumerable<IBlockHandler> handlers,
+    IOptions<PrinterOptions> printerOptions) : IPrinterService
 {
     private readonly IReadOnlyDictionary<ContentType, IBlockHandler> _handlers = handlers.ToDictionary(h => h.Type);
-    private const string DefaultPrinterAddress = "192.168.123.100:9100";
-    private const int DefaultPrinterPort = 9100;
+
+    // Null: no printer is configured, and no call opens a connection.
+    private readonly PrinterEndpoint? _endpoint = printerOptions.Value.ResolveEndpoint();
+    private readonly TimeSpan _connectTimeout = printerOptions.Value.ConnectTimeout;
+
+    // What the status read answers with no printer: ready, so the print path runs to its end.
+    private static readonly PrinterStatus NoPrinterStatus = new(true, true, false, false, false, "no printer");
 
     // The only text a caller gets for these faults. The exception holds the printer
     // address and socket details: it stays in the server log.
@@ -45,10 +54,6 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     private const int BuzzerMin = 1;
     private const int BuzzerMax = 9;
 
-    // Tests set a loopback address and a zero timeout.
-    internal string PrinterAddress { get; init; } = DefaultPrinterAddress;
-    internal TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(3);
-
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
         try
@@ -73,14 +78,20 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
                 return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
-            logger.LogDebug("Connecting to printer at {Address}", PrinterAddress);
+            var job = ByteSplicer.Combine(byteContent.ToArray());
+            if (_endpoint is not { } endpoint)
+            {
+                logger.LogInformation("No printer configured: print job of {ByteCount} bytes not sent", job.Length);
+                return PrintResult.Ok;
+            }
+
+            logger.LogDebug("Connecting to printer at {Address}", endpoint);
             var printer = new ImmediateNetworkPrinter(new ImmediateNetworkPrinterSettings
             {
-                ConnectionString = PrinterAddress,
+                ConnectionString = endpoint.ToString(),
                 PrinterName = "ThermalPrinter"
             });
 
-            var job = ByteSplicer.Combine(byteContent.ToArray());
             try
             {
                 await printer.WriteAsync(job);
@@ -88,7 +99,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
             catch (Exception ex)
             {
                 // The status read passed, then the connection for the job failed: the job is lost.
-                logger.LogError(ex, "Print failed: no connection to the printer at {Address}", PrinterAddress);
+                logger.LogError(ex, "Print failed: no connection to the printer at {Address}", endpoint);
                 return PrintResult.PrinterFault(UnreachableError);
             }
 
@@ -247,12 +258,15 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
 
     public async Task<PrinterStatus> GetStatusAsync()
     {
-        var (host, port) = ParseAddress(PrinterAddress);
+        // No log line: the UI polls the status.
+        if (_endpoint is not { } endpoint)
+            return NoPrinterStatus;
+
         try
         {
             using var client = new TcpClient();
-            using var connectCts = new CancellationTokenSource(ConnectTimeout);
-            await client.ConnectAsync(host, port, connectCts.Token);
+            using var connectCts = new CancellationTokenSource(_connectTimeout);
+            await client.ConnectAsync(endpoint.Host, endpoint.Port, connectCts.Token);
             using var stream = client.GetStream();
 
             // ESC/POS real-time status (DLE EOT n) — each query returns one byte.
@@ -290,7 +304,7 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to read printer status from {Address}", PrinterAddress);
+            logger.LogWarning(ex, "Failed to read printer status from {Address}", endpoint);
             // No exception text: the status goes to the caller as it is.
             return new PrinterStatus(false, false, false, false, false);
         }
@@ -300,21 +314,26 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
     {
         var n = Math.Clamp(count, BuzzerMin, BuzzerMax);
         var t = Math.Clamp(duration, BuzzerMin, BuzzerMax);
-        var (host, port) = ParseAddress(PrinterAddress);
+        byte[] command = [0x1B, 0x42, (byte)n, (byte)t]; // ESC B n t
+        if (_endpoint is not { } endpoint)
+        {
+            logger.LogInformation("No printer configured: buzzer command of {ByteCount} bytes not sent", command.Length);
+            return true;
+        }
+
         try
         {
             using var client = new TcpClient();
-            using var connectCts = new CancellationTokenSource(ConnectTimeout);
-            await client.ConnectAsync(host, port, connectCts.Token);
+            using var connectCts = new CancellationTokenSource(_connectTimeout);
+            await client.ConnectAsync(endpoint.Host, endpoint.Port, connectCts.Token);
             using var stream = client.GetStream();
-            byte[] command = [0x1B, 0x42, (byte)n, (byte)t]; // ESC B n t
             await stream.WriteAsync(command);
             logger.LogInformation("Buzzer beeped {Count} time(s), duration {Duration}", n, t);
             return true;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Buzzer beep failed ({Address})", PrinterAddress);
+            logger.LogWarning(ex, "Buzzer beep failed ({Address})", endpoint);
             return false;
         }
     }
@@ -334,13 +353,5 @@ internal sealed class PrinterService(ILogger<PrinterService> logger, IEnumerable
         {
             return null;
         }
-    }
-
-    private static (string Host, int Port) ParseAddress(string address)
-    {
-        var parts = address.Split(':');
-        return parts.Length > 1 && int.TryParse(parts[1], out var port)
-            ? (parts[0], port)
-            : (parts[0], DefaultPrinterPort);
     }
 }
