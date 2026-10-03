@@ -2,7 +2,7 @@ import { useCallback, useState, type DragEvent, type ReactNode, type Ref } from 
 import { ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
-import { validateImage } from "@/lib/validation";
+import { IMAGE_ACCEPT, validateImage } from "@/lib/validation";
 import { DEFAULT_ALIGNMENT, HEAD_DOTS, countPrintedLines, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
@@ -231,9 +231,9 @@ function ImagePicker({ onPicked, onError }: { onPicked: (base64: string) => void
       }}
     >
       <ImagePlus className="size-5" aria-hidden="true" />
-      <span className="font-sans text-sm">Choose, drop or paste an image</span>
+      <span className="font-sans text-sm">Choose, drop or paste a PNG or JPEG</span>
       <span className="font-sans text-xs">Max 5 MB · printed 1-bit, up to 576 dots wide</span>
-      <input type="file" accept="image/*" className="sr-only" onChange={(e) => void pick(e.target.files?.[0])} />
+      <input type="file" accept={IMAGE_ACCEPT} className="sr-only" onChange={(e) => void pick(e.target.files?.[0])} />
     </label>
   );
 }
