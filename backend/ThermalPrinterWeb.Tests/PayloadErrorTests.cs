@@ -396,7 +396,10 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
 {
     public sealed class ProductionApp : WebApplicationFactory<Program>
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.UseEnvironment("Production");
+        // Production defaults to the real printer: a request that passes validation by mistake must reach a closed loopback port only.
+        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder
+            .UseEnvironment("Production")
+            .ConfigureServices(services => services.Configure<PrinterOptions>(options => options.Address = "127.0.0.1:9"));
     }
 
     private readonly HttpClient _client = app.CreateClient();
