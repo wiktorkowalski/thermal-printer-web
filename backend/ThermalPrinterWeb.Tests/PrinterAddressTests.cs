@@ -76,7 +76,7 @@ public sealed class PrinterAddressTests
 
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
         Assert.Equal(
-            """{"reachable":true,"online":true,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":"no printer","ready":true,"notReadyReason":null}""",
+            """{"reachable":true,"online":true,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":"no printer","cutterError":false,"unrecoverableError":false,"autoRecoverableError":false,"recoverableError":false,"ready":true,"notReadyReason":null}""",
             await status.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.OK, print.StatusCode);

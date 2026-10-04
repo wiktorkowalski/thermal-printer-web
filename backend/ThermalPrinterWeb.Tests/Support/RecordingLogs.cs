@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using ThermalPrinterWeb.Services;
 
 namespace ThermalPrinterWeb.Tests.Support;
 
@@ -19,6 +20,15 @@ public sealed class RecordingLoggerProvider : ILoggerProvider
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             => entries.Enqueue((logLevel, category, formatter(state, exception) + exception));
     }
+}
+
+internal static class RecordedLogs
+{
+    private static readonly string PrinterServiceCategory = typeof(PrinterService).FullName!;
+
+    // What PrinterService wrote at Information or above.
+    public static List<(LogLevel Level, string Category, string Message)> PrinterServiceLogs(this TestApp app)
+        => [.. app.Logs.Entries.Where(entry => entry.Category == PrinterServiceCategory && entry.Level >= LogLevel.Information)];
 }
 
 // Log capture for one object that a test builds by hand.
