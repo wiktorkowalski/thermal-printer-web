@@ -6,15 +6,14 @@ using ThermalPrinterWeb.Services.Journal;
 
 namespace ThermalPrinterWeb.Controllers;
 
-// The print journal over HTTP: list, one job, reprint. No auth (issue #51), so the answers hold allow-listed fields only
-// (PrintJobDtos.cs). No endpoint here deletes a row.
+// The print journal over HTTP: list, one job, reprint, statistics, search, papercut ledger.
+// No auth (issue #51), so the answers hold allow-listed fields only (PrintJobDtos.cs). No endpoint here deletes a row.
 [ApiController]
 [Route("api/printer/jobs")]
 [JournalAnswerHeaders]
 public sealed class PrintJobsController(
-    IPrinterService printerService,
-    PrintJobLog jobLog,
     PrintJournalReader journal,
+    PrintJobReprinter reprinter,
     ILogger<PrintJobsController> logger) : ControllerBase
 {
     // A reprint call has no body. Nothing reads one, and the journal stores none (JournaledAttribute.NoBody);
@@ -22,11 +21,11 @@ public sealed class PrintJobsController(
     internal const int MaxReprintBodyBytes = 1024;
 
     // Fixed texts: no detail of the storage goes to the caller.
-    internal const string JournalOffError = "The print journal is off";
-    internal const string JournalUnavailableError = "The print journal is not available";
     internal const string InvalidIdError = "The job id is not valid";
     internal const string InvalidCursorError = "before is not a valid job id";
     internal const string NotFoundError = "Job not found";
+    internal static readonly string InvalidQueryError =
+        $"q must hold {PrintJournalReader.MinQueryLength} to {PrintJournalReader.MaxQueryLength} characters";
 
     // Newest first. "before" is the "next" value of the page before; "printed=true" leaves out every job that did not print.
     [HttpGet]
@@ -38,16 +37,52 @@ public sealed class PrintJobsController(
         [FromQuery] int limit = PrintJournalReader.DefaultPageSize,
         [FromQuery] bool printed = false)
     {
-        Guid? cursor = null;
-        if (!string.IsNullOrEmpty(before))
-        {
-            if (!TryParseId(before, out var parsed))
-                return BadRequest(new PrintResponse(false, InvalidCursorError, PrintResponse.ValidationType));
-            cursor = parsed;
-        }
+        if (!PrintJournalReader.TryParseCursor(before, out var cursor))
+            return Invalid(InvalidCursorError);
 
-        var (list, fault) = await ReadAsync(null, token => journal.ListAsync(cursor, limit, printed, token));
+        var (list, fault) = await ReadAsync(PrintJournalReader.ListRead, null, token => journal.ListAsync(cursor, limit, printed, token));
         return fault ?? Ok(list);
+    }
+
+    // Counts and sums for the last "days" UTC days: no row content but the source names.
+    [HttpGet("stats")]
+    [ProducesResponseType(typeof(PrintJobStats), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Stats([FromQuery] int days = PrintJournalReader.DefaultStatsDays)
+    {
+        var (stats, fault) = await ReadAsync(PrintJournalReader.StatsRead, null, token => journal.StatsAsync(days, token));
+        return fault ?? Ok(stats);
+    }
+
+    // Finds "q" in the printed text, newest first. "before" is the "next" value of the answer before.
+    // The query text goes to no log.
+    [HttpGet("search")]
+    [ProducesResponseType(typeof(PrintJobSearchResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Search(
+        [FromQuery] string? q = null,
+        [FromQuery] string? before = null,
+        [FromQuery] int limit = PrintJournalReader.DefaultPageSize)
+    {
+        if (PrintJournalReader.CleanQuery(q) is not { } query)
+            return Invalid(InvalidQueryError);
+        if (!PrintJournalReader.TryParseCursor(before, out var cursor))
+            return Invalid(InvalidCursorError);
+
+        var (result, fault) = await ReadAsync(PrintJournalReader.SearchRead, null, token => journal.SearchAsync(query, cursor, limit, token));
+        return fault ?? Ok(result);
+    }
+
+    // The strips with the papercut header, grouped by subject.
+    [HttpGet("papercuts")]
+    [ProducesResponseType(typeof(PapercutLedger), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Papercuts()
+    {
+        var (ledger, fault) = await ReadAsync(PrintJournalReader.PapercutsRead, null, journal.PapercutsAsync);
+        return fault ?? Ok(ledger);
     }
 
     [HttpGet("{id}")]
@@ -57,10 +92,10 @@ public sealed class PrintJobsController(
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Get(string id)
     {
-        if (!TryParseId(id, out var jobId))
-            return BadRequest(new PrintResponse(false, InvalidIdError, PrintResponse.ValidationType));
+        if (!PrintJournalReader.TryParseId(id, out var jobId))
+            return Invalid(InvalidIdError);
 
-        var (job, fault) = await ReadAsync(jobId, token => journal.GetAsync(jobId, token));
+        var (job, fault) = await ReadAsync(PrintJournalReader.JobRead, jobId, token => journal.GetAsync(jobId, token));
         return fault ?? (job is null ? JobNotFound() : Ok(job));
     }
 
@@ -74,67 +109,35 @@ public sealed class PrintJobsController(
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Reprint(string id, [FromQuery] string? source = null)
     {
-        if (!TryParseId(id, out var jobId))
-            return BadRequest(new PrintResponse(false, InvalidIdError, PrintResponse.ValidationType));
+        if (!PrintJournalReader.TryParseId(id, out var jobId))
+            return Invalid(InvalidIdError);
 
-        // No job yet: no row and no "Print job:" line.
-        if (!journal.TryBeginReprint())
-            return this.ToResponse(PrintResult.ReprintBusy);
-
-        try
+        var outcome = await reprinter.ReprintAsync(jobId, PrintJobLog.ReprintTransport, source, logger, HttpContext.RequestAborted);
+        return outcome switch
         {
-            var (stored, fault) = await ReadAsync(jobId, token => journal.LoadForReprintAsync(jobId, token));
-            if (fault is not null)
-                return fault;
-            if (stored is null)
-                return JobNotFound();
-
-            PrintJobTrace.Current?.ReprintOf = stored.OriginalId;
-            // The reason is one of the fixed texts of the reader: no row content.
-            if (stored.Content is null)
-                logger.LogWarning("Rejected reprint: job {JobId} has no full copy in the journal ({Reason})", jobId, stored.NoCopyReason);
-
-            // The journal holds no full copy: a refused job, with the reason.
-            var result = stored.Content is null
-                ? PrintResult.Invalid(stored.NoCopyReason!)
-                : await printerService.PrintAsync(stored.Content, stored.Options);
-            jobLog.Write(PrintJobLog.ReprintTransport, source, result, stored.Content, stored.Options);
-            return this.ToResponse(result);
-        }
-        finally
-        {
-            journal.EndReprint();
-        }
+            { Fault: { } fault } => JournalFaultAnswer(fault),
+            { NotFound: true } => JobNotFound(),
+            _ => this.ToResponse(outcome.Result!)
+        };
     }
 
-    // One journal read. A fault answer in place of the value: the journal is off, not open yet, or the read failed.
-    // No detail of the storage goes to the caller; the log gets one Warning with the job id.
-    private async Task<(T? Value, IActionResult? Fault)> ReadAsync<T>(Guid? jobId, Func<CancellationToken, Task<T>> read)
+    // One journal read. A fault answer in place of the value: the journal is off, not open yet, busy, or the read failed.
+    private async Task<(T? Value, IActionResult? Fault)> ReadAsync<T>(string what, Guid? jobId, Func<CancellationToken, Task<T>> read)
     {
-        if (!journal.IsOn)
-            return (default, JournalFault(JournalOffError, PrintResponse.JournalOffType));
-
-        try
-        {
-            return (await read(HttpContext.RequestAborted), null);
-        }
-        catch (Exception ex) when (!HttpContext.RequestAborted.IsCancellationRequested)
-        {
-            if (jobId is null)
-                logger.LogWarning(ex, "Journal read failed: the job list");
-            else
-                logger.LogWarning(ex, "Journal read failed: job {JobId}", jobId);
-            return (default, JournalFault(JournalUnavailableError, PrintResponse.JournalType));
-        }
+        var (value, fault) = await journal.TryReadAsync(read, logger, what, jobId, HttpContext.RequestAborted);
+        return (value, fault is null ? null : JournalFaultAnswer(fault));
     }
 
-    // The form the list gives out. Any other text is not an id.
-    private static bool TryParseId(string text, out Guid id) => Guid.TryParseExact(text, "D", out id);
+    private ObjectResult JournalFaultAnswer(JournalFault fault)
+    {
+        if (fault == JournalFault.Busy)
+            Response.Headers.RetryAfter = PrintResultResponse.BusyRetryAfterSeconds;
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, new PrintResponse(false, fault.Error, fault.Type));
+    }
+
+    private BadRequestObjectResult Invalid(string error) => BadRequest(new PrintResponse(false, error, PrintResponse.ValidationType));
 
     private NotFoundObjectResult JobNotFound() => NotFound(new PrintResponse(false, NotFoundError, PrintResponse.ValidationType));
-
-    private ObjectResult JournalFault(string error, string type)
-        => StatusCode(StatusCodes.Status503ServiceUnavailable, new PrintResponse(false, error, type));
 }
 
 // The journal holds what was printed: no search engine indexes it and no cache keeps it.

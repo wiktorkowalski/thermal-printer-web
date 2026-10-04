@@ -1,5 +1,15 @@
 import axios, { AxiosError } from "axios";
-import type { PrintRequest, PrintContent, PrintOptions, PrintResponse, PrintJobList, PrintJobDetail } from "../types/printer";
+import type {
+  PrintRequest,
+  PrintContent,
+  PrintOptions,
+  PrintResponse,
+  PrintJobList,
+  PrintJobDetail,
+  PrintJobStats,
+  PrintJobSearchResult,
+  PapercutLedger,
+} from "../types/printer";
 import { BUSY_RETRY_AFTER_SECONDS } from "./printer-limits";
 
 const API_BASE_URL = "/api";
@@ -181,6 +191,15 @@ export interface PrinterStatus {
   notReadyReason: string | null;
 }
 
+/** One read of the statistics, the search or the ledger. The server runs few of these at a time: a busy answer gets one more try. */
+async function journalQuery<T>(url: string, params: Record<string, string | number | undefined>, isValid: (data: T | undefined) => boolean): Promise<T> {
+  return withRetry(async () => {
+    const response = await api.get<T>(url, { params, timeout: 10000 });
+    if (!isValid(response.data)) throw new Error("Unexpected journal response");
+    return response.data;
+  }, 1);
+}
+
 export const printerApi = {
   /**
    * Printer readiness. The backend answers 503 with the same body when the
@@ -237,9 +256,24 @@ export const printerApi = {
     }
   },
 
+  /** Counts and paper for the last `days` UTC days. A busy answer is tried once more. */
+  async getStats(days: number): Promise<PrintJobStats> {
+    return journalQuery<PrintJobStats>("/printer/jobs/stats", { days }, (data) => Array.isArray(data?.byDay));
+  },
+
+  /** The jobs whose printed text holds `query`, newest first. `before` is `next` of the answer before. */
+  async searchJobs(query: string, before?: string | null): Promise<PrintJobSearchResult> {
+    return journalQuery<PrintJobSearchResult>("/printer/jobs/search", { q: query, before: before ?? undefined }, (data) => Array.isArray(data?.hits));
+  },
+
+  /** The papercut strips, grouped by subject. */
+  async getPapercuts(): Promise<PapercutLedger> {
+    return journalQuery<PapercutLedger>("/printer/jobs/papercuts", {}, (data) => Array.isArray(data?.papercuts));
+  },
+
   /** Prints a stored job again. The server builds it from the journal; one call is one print. */
-  async reprint(id: string): Promise<void> {
-    await withRetry(() => api.post(`/printer/jobs/${encodeURIComponent(id)}/reprint`, null, { params: { source: "web/tray" } }));
+  async reprint(id: string, source: string): Promise<void> {
+    await withRetry(() => api.post(`/printer/jobs/${encodeURIComponent(id)}/reprint`, null, { params: { source } }));
   },
 
   /**

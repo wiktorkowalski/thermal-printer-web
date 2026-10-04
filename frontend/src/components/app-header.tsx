@@ -8,6 +8,7 @@ const MODES = [
   { to: "/", label: "Note", end: true },
   { to: "/template", label: "Template", end: false },
   { to: "/receipt", label: "Receipt", end: false },
+  { to: "/journal", label: "Journal", end: false },
 ];
 
 const DOT: Record<StatusTone, string> = {
@@ -31,7 +32,7 @@ interface AppHeaderProps {
 
 export function ModeSwitch({ className }: { className?: string }) {
   return (
-    <nav aria-label="Mode" className={cn("grid grid-cols-3 gap-1 rounded-full bg-well p-1 text-sm", className)}>
+    <nav aria-label="Mode" className={cn("grid grid-cols-4 gap-1 rounded-full bg-well p-1 text-sm", className)}>
       {MODES.map((mode) => (
         <NavLink
           key={mode.to}
@@ -39,7 +40,7 @@ export function ModeSwitch({ className }: { className?: string }) {
           end={mode.end}
           className={({ isActive }) =>
             cn(
-              "flex h-10 items-center justify-center rounded-full px-5 transition-colors",
+              "flex h-10 items-center justify-center rounded-full px-3 transition-colors lg:px-5",
               isActive ? "bg-ink text-on-ink" : "text-ink-2 hover:text-ink",
             )
           }
@@ -62,7 +63,7 @@ export function AppHeader({ tone, label, detail, onBeep, trayCount, trayHasMore,
       <div className="mx-auto flex h-[72px] max-w-[1600px] items-center justify-between gap-4 px-4 md:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
           <span className="truncate font-serif text-2xl md:text-[30px]">Vittore’s Printer</span>
-          <span className="hidden font-serif text-[17px] text-ink-3 italic xl:inline">80 mm, one roll at a time</span>
+          <span className="hidden font-serif text-[17px] text-ink-3 italic 2xl:inline">80 mm, one roll at a time</span>
         </div>
 
         <ModeSwitch className="hidden md:grid" />
@@ -77,7 +78,7 @@ export function AppHeader({ tone, label, detail, onBeep, trayCount, trayHasMore,
             <span className={cn("size-2 rounded-full", DOT[tone])} aria-hidden="true" />
             <span className="hidden font-medium text-ink sm:inline">V330M</span>
             <span>{label}</span>
-            <span className="hidden lg:inline">· {detail}</span>
+            <span className="hidden whitespace-nowrap xl:inline">· {detail}</span>
           </div>
           <button
             type="button"

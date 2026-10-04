@@ -12,6 +12,7 @@ internal sealed class JournalDbContext(DbContextOptions<JournalDbContext> option
 {
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<PrintJobPayload> PrintJobPayloads => Set<PrintJobPayload>();
+    public DbSet<PrintJobText> PrintJobTexts => Set<PrintJobText>();
 
     // No pool: the last connection that closes folds the write-ahead log into the one database file.
     public static string ConnectionString(string databasePath)
@@ -27,9 +28,14 @@ internal sealed class JournalDbContext(DbContextOptions<JournalDbContext> option
                 .WithOne()
                 .HasForeignKey<PrintJobPayload>(payload => payload.JobId)
                 .OnDelete(DeleteBehavior.Cascade);
+            job.HasOne(j => j.Text)
+                .WithOne()
+                .HasForeignKey<PrintJobText>(text => text.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PrintJobPayload>().HasKey(payload => payload.JobId);
+        modelBuilder.Entity<PrintJobText>().HasKey(text => text.JobId);
     }
 }
 

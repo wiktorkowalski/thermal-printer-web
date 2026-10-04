@@ -67,8 +67,8 @@ export function usePrintJob(printer: PrinterStatusState) {
     [send],
   );
 
-  /** Prints a job of the tray again, by its journal id. */
-  const reprint = useCallback((id: string) => send(() => printerApi.reprint(id)), [send]);
+  /** Prints a stored job again, by its journal id. `source` names the screen: `web/tray` or `web/journal`. */
+  const reprint = useCallback((id: string, source: string) => send(() => printerApi.reprint(id, source)), [send]);
 
   return { phase, printing: phase === "printing", notice, notify, dismiss, print, reprint };
 }
