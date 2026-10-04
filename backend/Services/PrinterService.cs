@@ -231,16 +231,19 @@ internal sealed class PrinterService(
             throw new PrintContentException($"Block {index} ({item.Type}): type is not supported");
         }
 
-        var e = ctx.Emitter;
-        ctx.Add(item.Alignment switch
-        {
-            Alignment.Left => e.LeftAlign(),
-            Alignment.Right => e.RightAlign(),
-            _ => e.CenterAlign()
-        });
-
         try
         {
+            // First: after it, every enum value of the block has a name.
+            BlockEnums.Check(item);
+
+            var e = ctx.Emitter;
+            ctx.Add(item.Alignment switch
+            {
+                Alignment.Left => e.LeftAlign(),
+                Alignment.Right => e.RightAlign(),
+                _ => e.CenterAlign()
+            });
+
             await handler.HandleAsync(item, ctx);
         }
         // Busy is server load, not the payload: it must not turn into a 400.
