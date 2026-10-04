@@ -204,7 +204,7 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 | Status | `type` | Meaning |
 |--------|--------|---------|
 | 200 | - | Printed |
-| 400 | `validation` | The payload is at fault; a retry fails again. A block fault reads `Block N (Type): reason`, N from 0. A block type number with no name reads `Block N (99): type is not supported`. A body that does not bind reads `<JSON path>: malformed JSON, wrong JSON type or unknown name` (path such as `$.content[0].type`); the text names no CLR type. |
+| 400 | `validation` | The payload is at fault; a retry fails again. A block fault reads `Block N (Type): reason` or `Block N: reason`, N from 0. A block type number with no name reads `Block N (99): type is not supported`. A JSON value that does not parse or bind reads `<JSON path>: malformed JSON, wrong JSON type or unknown name` (path such as `$.content[0].type`); the text names no CLR type. |
 | 503 | `printer` | Printer fault, fixed text: `Printer not ready: <reason>`, `Printer unreachable` or `Print failed: internal error`. Details stay in the server log. |
 | 503 | `busy` | Too many image jobs wait for a decode. Header `Retry-After: 5`. The job is fine; send it again. |
 
@@ -222,7 +222,7 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 
 ### Limits
 
-Over a limit the job gets a 400 (413 for the request body). The constants are the source of truth.
+Over a limit the job gets a 400. Two exceptions: the request body gets a 413, and the image printed size is clamped. The constants are the source of truth.
 
 | Limit | Value | Constant |
 |-------|-------|----------|
