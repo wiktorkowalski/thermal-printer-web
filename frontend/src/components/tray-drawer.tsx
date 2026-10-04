@@ -9,7 +9,7 @@ import { isBlocked } from "@/lib/printer-light";
 import type { PrintContent } from "@/types/printer";
 import { PaperGutters } from "./paper/paper-context";
 import { PaperDocument } from "./paper/paper-document";
-import { Toast, noteClass } from "./print-chrome";
+import { Toast, noteClass, pillButtonClass } from "./print-chrome";
 
 /** A stored job is caller data from any device: a block that does not render must not take the tray down. */
 class PreviewBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
@@ -117,7 +117,7 @@ export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; on
           {status === "error" && (
             <li className={cn(noteClass, "flex flex-col items-start gap-3")} role="alert">
               The tray did not load. The server did not answer, or it cannot read its print history at the moment.
-              <button type="button" onClick={refresh} className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] text-ink hover:bg-well">
+              <button type="button" onClick={refresh} className={pillButtonClass}>
                 <RefreshCw className="size-3.5" aria-hidden="true" />
                 Try again
               </button>
@@ -143,7 +143,7 @@ export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; on
                       disabled={!entry.canReprint || job.printing || isBlocked(printer)}
                       onClick={() => void job.reprint(entry.id, "web/tray")}
                       aria-label={`Reprint ${title}`}
-                      className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] hover:bg-well disabled:opacity-40"
+                      className={pillButtonClass}
                     >
                       <Printer className="size-3.5" aria-hidden="true" />
                       Reprint

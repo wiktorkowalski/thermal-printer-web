@@ -114,7 +114,8 @@ public sealed class JournalQueryTests
             Row(Noon(0).AddMinutes(2), JobResult.Validation, source: "a", paperDots: 50),
             Row(Noon(0).AddMinutes(3), paperDots: 100, reprintOf: first.Id),
             Row(Noon(1), source: "b", paperDots: 80),
-            Row(Noon(1).AddMinutes(1), JobResult.Printer, source: "b"),
+            // A reprint that did not print is not in the reprint count.
+            Row(Noon(1).AddMinutes(1), JobResult.Printer, source: "b", reprintOf: first.Id),
             // Before the default 30 days.
             Row(Noon(40), source: "old", paperDots: 1000));
 

@@ -87,7 +87,8 @@ public sealed partial class PrintJournalReader
                 {
                     Jobs = day.Sum(cell => cell.Jobs),
                     Printed = printed.Sum(cell => cell.Jobs),
-                    Reprints = day.Sum(cell => cell.Reprints),
+                    // Like "Printed": the reprints that printed.
+                    Reprints = printed.Sum(cell => cell.Reprints),
                     PaperDots = printed.Sum(cell => cell.PaperDots)
                 };
             });
@@ -220,6 +221,12 @@ public sealed partial class PrintJournalReader
                 (job, text) => new { job.Id, job.CreatedAt, Head = text.Text.Substring(0, PapercutHeadLength) })
             .ToListAsync(timeout.Token);
 
+        // A walk over the id index only: is a job older than the ones that were looked at?
+        var hasOlderJobs = await db.PrintJobs.AsNoTracking()
+            .OrderByDescending(job => job.Id)
+            .Skip(MaxPapercutJobs)
+            .AnyAsync(timeout.Token);
+
         var papercuts = new Dictionary<string, PapercutEntry>(StringComparer.OrdinalIgnoreCase);
         var strips = 0;
         // Newest first: the first strip of a subject gives the text and the id that the ledger shows.
@@ -241,7 +248,7 @@ public sealed partial class PrintJournalReader
             .ThenByDescending(entry => entry.LastAt)
             .Take(MaxPapercuts)
             .ToList();
-        return new PapercutLedger(ledger, strips, rows.Count > MaxPapercutStrips || papercuts.Count > MaxPapercuts);
+        return new PapercutLedger(ledger, strips, hasOlderJobs || rows.Count > MaxPapercutStrips || papercuts.Count > MaxPapercuts);
     });
 
     // The job with its printed text, for a reader that takes text and no blocks (MCP). Null: no such job.

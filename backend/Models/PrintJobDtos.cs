@@ -33,7 +33,8 @@ public sealed record PrintJobSearchHit(PrintJobSummary Job, string Snippet);
 // A page can hold no hit and still have a Next: one call reads a limited number of jobs.
 public sealed record PrintJobSearchResult(IReadOnlyList<PrintJobSearchHit> Hits, Guid? Next);
 
-// Counts and sums only. Paper is the paper of the jobs that printed, in printer dots (8 dots per mm).
+// Counts and sums only. Reprints is the number of printed jobs that are a reprint.
+// Paper is the paper of the jobs that printed, in printer dots (8 dots per mm).
 public sealed record PrintJobCounts(int Jobs, int Printed, int Reprints, long PaperDots);
 
 // One UTC day.
@@ -58,5 +59,5 @@ public sealed record PrintJobStats(
 // One papercut: the strips with the same subject line. Subject is printed text.
 public sealed record PapercutEntry(string Subject, int Count, DateTime FirstAt, DateTime LastAt, Guid LastJobId);
 
-// The papercut strips, grouped. Strips is the number of strips read; More says that older strips were not read.
+// The papercut strips, grouped. Strips is the number of strips read; More says that the answer is cut: older jobs or strips were not read, or more subjects exist.
 public sealed record PapercutLedger(IReadOnlyList<PapercutEntry> Papercuts, int Strips, bool More);

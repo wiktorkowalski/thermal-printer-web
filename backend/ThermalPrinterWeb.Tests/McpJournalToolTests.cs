@@ -332,6 +332,37 @@ public sealed class McpJournalToolTests
         Assert.InRange(found.Length, 1, MaxAnswerLength);
     }
 
+    // A text that fits exactly is whole: no cut mark.
+    [Fact]
+    public async Task GetJob_TextOfExactlyTheLimit_IsNotMarkedAsCut()
+    {
+        await using var app = new App();
+        var client = app.CreateClient();
+        await app.JournalIdleAsync();
+        var id = Guid.CreateVersion7();
+        var half = new string('x', JournalTools.MaxTextLength / 2);
+        await using (var db = app.JournalDb())
+        {
+            db.PrintJobs.Add(new PrintJob
+            {
+                Id = id,
+                CreatedAt = DateTime.UtcNow,
+                Transport = "http",
+                HttpStatus = 200,
+                AppVersion = "test",
+                Payload = new PrintJobPayload { JobId = id, Headers = "{}" },
+                Text = new PrintJobText { JobId = id, Text = $"{half}\n\n{half}\n" }
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var (_, answer) = await client.CallToolAsync(GetJob, Args(new { id }));
+
+        var json = AnswerJson(answer);
+        Assert.Equal([half, half], json.GetProperty("printedLines").EnumerateArray().Select(line => line.GetString()));
+        Assert.False(json.TryGetProperty("printedTextCut", out _));
+    }
+
     [Fact]
     public async Task GetJob_LongText_AnswersTheFactsAndTheStartOfTheText()
     {

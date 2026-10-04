@@ -35,7 +35,7 @@ const PERIODS = [
   { value: String(STATS_MAX_DAYS), label: "Year" },
 ];
 
-// One search reads a limited number of prints. With no hit yet, the page asks for the next part by itself this many times.
+// One search reads a limited number of prints. With no hit yet, the page reads up to this many parts in a row.
 const SEARCH_ROUNDS = 3;
 
 function paper(dots: number): string {
@@ -78,7 +78,7 @@ function DayBars({ days }: { days: PrintJobDayStats[] }) {
       <div
         role="img"
         aria-label={`Prints per day from ${day(days[0].day)} to ${day(days[days.length - 1].day)}, at most ${most} on one day`}
-        className="flex h-28 items-end gap-px border-b border-line-strong"
+        className={cn("flex h-28 items-end border-b border-line-strong", days.length <= 90 && "gap-px")}
       >
         {days.map((entry) => (
           <div
