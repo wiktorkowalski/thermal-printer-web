@@ -50,6 +50,11 @@ export const BUSY_RETRY_AFTER_SECONDS = 5;
 // backend/Services/Journal/PrintJobEntry.cs: ImageHashPrefix. A stored image block holds a hash that starts with it.
 export const IMAGE_HASH_PREFIX = "sha256:";
 
+// backend/Services/Journal/PrintJournalReader.Queries.cs: MinQueryLength, MaxQueryLength, MaxStatsDays
+export const SEARCH_MIN_QUERY_LENGTH = 2;
+export const SEARCH_MAX_QUERY_LENGTH = 100;
+export const STATS_MAX_DAYS = 365;
+
 // Stricter in the editor on purpose. The backend takes more, the editor does not offer it.
 // A file over this does not fit the draft in localStorage.
 export const EDITOR_IMAGE_MAX_BYTES = 5 * 1024 * 1024;

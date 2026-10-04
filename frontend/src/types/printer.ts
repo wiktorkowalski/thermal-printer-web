@@ -169,6 +169,69 @@ export interface PrintJobDetail {
   options: PrintOptions | null;
 }
 
+/** One hit of GET /api/printer/jobs/search. `snippet` is printed text around the match, on one line. */
+export interface PrintJobSearchHit {
+  job: PrintJobSummary;
+  snippet: string;
+}
+
+export interface PrintJobSearchResult {
+  hits: PrintJobSearchHit[];
+  /** The `before` value that continues the search in the older jobs. A page can hold no hit and still have one. */
+  next: string | null;
+}
+
+/** Paper is the paper of the jobs that printed, in printer dots. */
+export interface PrintJobCounts {
+  jobs: number;
+  printed: number;
+  reprints: number;
+  paperDots: number;
+}
+
+export interface PrintJobDayStats {
+  /** A UTC day, `yyyy-MM-dd`. */
+  day: string;
+  jobs: number;
+  printed: number;
+  paperDots: number;
+}
+
+export interface PrintJobSourceStats {
+  /** Caller text; null stands for the jobs with no source. */
+  source: string | null;
+  jobs: number;
+  printed: number;
+  paperDots: number;
+}
+
+/** GET /api/printer/jobs/stats. `byDay` holds every day from `from` to `to`, oldest first. */
+export interface PrintJobStats {
+  from: string;
+  to: string;
+  totals: PrintJobCounts;
+  byDay: PrintJobDayStats[];
+  bySource: PrintJobSourceStats[];
+  moreSources: boolean;
+  byResult: { result: string; jobs: number }[];
+}
+
+/** One papercut: the strips with the same subject line. `subject` is printed text. */
+export interface PapercutEntry {
+  subject: string;
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  lastJobId: string;
+}
+
+/** GET /api/printer/jobs/papercuts. `more` says that older strips or more subjects exist than the answer holds. */
+export interface PapercutLedger {
+  papercuts: PapercutEntry[];
+  strips: number;
+  more: boolean;
+}
+
 export interface PrintRequest {
   name?: string;
   message?: string;

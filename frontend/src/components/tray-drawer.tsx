@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Printer, RefreshCw, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, when } from "@/lib/utils";
 import { loadTrayCopy } from "@/lib/tray";
 import type { TrayState } from "@/hooks/use-tray";
 import { usePrintJob } from "@/hooks/use-print-job";
@@ -10,12 +10,6 @@ import type { PrintContent } from "@/types/printer";
 import { PaperGutters } from "./paper/paper-context";
 import { PaperDocument } from "./paper/paper-document";
 import { Toast } from "./print-chrome";
-
-function when(iso: string): string {
-  const date = new Date(iso);
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
-}
 
 /** A stored job is caller data from any device: a block that does not render must not take the tray down. */
 class PreviewBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Editor from "./pages/Editor";
 import Receipts from "./pages/Receipts";
+import Journal from "./pages/Journal";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppHeader } from "@/components/app-header";
 import { describeStatus, usePrinterStatus } from "@/hooks/use-printer-status";
@@ -56,6 +57,7 @@ function Shell() {
           path="/receipt"
           element={<Receipts printer={printer} />}
         />
+        <Route path="/journal" element={<Journal printer={printer} />} />
         <Route path="/builder" element={<Navigate to="/template" replace />} />
         <Route path="/receipts" element={<Navigate to="/receipt" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
