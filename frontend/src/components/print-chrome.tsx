@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Printer, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Notice } from "@/hooks/use-print-job";
-import type { PrinterStatusState } from "@/hooks/use-printer-status";
+import { printerFault, type PrinterFault, type PrinterStatusState } from "@/hooks/use-printer-status";
 import { isBlocked } from "@/lib/printer-light";
 
 export function Toast({ notice, onDismiss }: { notice: Notice | null; onDismiss: () => void }) {
@@ -73,7 +73,19 @@ export const pillButtonClass =
 export const roundButtonClass =
   "flex size-14 items-center justify-center rounded-full border border-line-strong bg-surface shadow-[0_4px_12px_rgba(60,45,20,.1)]";
 
-const STEPS: Record<string, { title: string; steps: string[] }> = {
+const STEPS: Record<PrinterFault, { title: string; steps: string[] }> = {
+  cutter: {
+    title: "Cutter error",
+    steps: ["Switch the printer off.", "Open the cover and take the paper out of the cutter.", "Close the cover and switch the printer on."],
+  },
+  unrecoverable: {
+    title: "Printer fault",
+    steps: ["Switch the printer off.", "Wait 10 seconds, then switch it on again.", "If the fault comes back, the printer needs a repair."],
+  },
+  autoRecoverable: {
+    title: "Printer paused",
+    steps: ["Wait a few minutes: the print head cools down.", "The light turns green by itself."],
+  },
   paper: {
     title: "Out of paper",
     steps: ["Open the cover.", "Drop in a new 80 mm roll, paper end towards you.", "Close the cover. The light turns green."],
@@ -96,8 +108,7 @@ const STEPS: Record<string, { title: string; steps: string[] }> = {
 export function PrinterAlert({ printer }: { printer: PrinterStatusState }) {
   const { status } = printer;
   if (!isBlocked(printer) || !status) return null;
-  const kind = !status.reachable ? "offline" : status.paperOut ? "paper" : status.coverOpen ? "cover" : "error";
-  const { title, steps } = STEPS[kind];
+  const { title, steps } = STEPS[printerFault(status)];
   return (
     <section
       role="alert"
