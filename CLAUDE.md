@@ -245,7 +245,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
 - No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
-- The call takes no body. A body over 1024 bytes is refused (`PrintJobsController.MaxReprintBodyBytes`); no body is stored.
+- The call takes no body. A body that a caller sends is not read and not stored (`JournaledAttribute.NoBody`); the request size limit of the endpoint is 1024 bytes (`PrintJobsController.MaxReprintBodyBytes`).
 - The reprint is a new journal row: transport `http:reprint`, `ReprintOf` = the id of the first job (also for a reprint of a reprint). The row is a reference plus the small facts: no `Request`, `Bytes`, `Blocks`, `Options` or `PlainText` (`PrintJobEntry.ToRow`). So a repeated reprint of a large job adds about 1 KB per call. The content of a reprint row is read from its first job, for `GET /jobs/{id}` and for the next reprint. It writes the one `Print job:` line. An unknown id, a bad id and a busy answer store no row and write no line.
 
 ### Content rules

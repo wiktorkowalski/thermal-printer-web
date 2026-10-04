@@ -17,7 +17,8 @@ public sealed class PrintJobsController(
     PrintJournalReader journal,
     ILogger<PrintJobsController> logger) : ControllerBase
 {
-    // A reprint call has no body: Kestrel refuses a large one, and the journal stores none (JournaledAttribute.NoBody).
+    // A reprint call has no body. Nothing reads one, and the journal stores none (JournaledAttribute.NoBody);
+    // the limit is for any later code that does read it.
     internal const int MaxReprintBodyBytes = 1024;
 
     // Fixed texts: no detail of the storage goes to the caller.
