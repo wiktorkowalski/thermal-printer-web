@@ -2,7 +2,7 @@ using ThermalPrinterWeb.Models;
 
 namespace ThermalPrinterWeb.Services.Printing;
 
-// The width and height multipliers a text prints with.
+// Resolved from the styles and the size field in one place, so the bytes and the paper estimate agree.
 internal readonly record struct TextScale(int Width, int Height)
 {
     // A size field wins over DoubleWidth and DoubleHeight: one rule, whatever the styles say.

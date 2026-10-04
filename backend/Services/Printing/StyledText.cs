@@ -28,7 +28,7 @@ internal static class StyledText
         if (hasUpsideDown)
             bytes.Add(e.UpsideDownMode(true));
 
-        // No size field: ESC ! n alone, with its two size bits. A block of an older caller keeps its bytes.
+        // No size field: ESC ! n alone, with its two size bits. Callers and stored jobs rely on these bytes.
         // With a size field: ESC ! n without the two size bits, then GS ! n. ESC ! sets the size too,
         // so it must come first.
         var sized = size is not null;

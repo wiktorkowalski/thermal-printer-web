@@ -291,7 +291,7 @@ public sealed class TextSizeTests
     }
 
     private static string JobJson(string size)
-        => """{"content":[{"type":"Text","content":"Big","size":SIZE}],"options":{"autoCut":false}}""".Replace("SIZE", size);
+        => """{"content":[{"type":"Text","content":"Big","size":SIZE}],"options":{"autoCut":false}}""".Replace("SIZE", size, StringComparison.Ordinal);
 
     // The JSON of the API, through the real pipeline: the size reaches the printer bytes, the journal and a reprint.
     [Fact]

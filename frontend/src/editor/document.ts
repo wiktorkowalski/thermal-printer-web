@@ -118,7 +118,7 @@ export function createBlock(type: ContentType): Block {
 
 /**
  * The fields that give a block this text size. Up to 2x the size is the DoubleWidth and
- * DoubleHeight styles, the form of every saved job from before the size field. Above 2x
+ * DoubleHeight styles, the form that saved drafts and templates hold. Above 2x
  * it is `size`, with the two styles removed: the printer takes the size alone.
  */
 export function textSizePatch(block: PrintContent, width: number, height: number): Pick<PrintContent, "style" | "size"> {

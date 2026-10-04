@@ -140,7 +140,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         var range = $"{TextSize.Min} to {TextSize.Max}";
         var size = block.GetProperty("size").GetProperty("properties");
         var width = size.GetProperty("width").GetProperty("description").GetString();
-        var widths = Enumerable.Range(TextSize.Min, TextSize.Max).ToList();
+        var widths = Enumerable.Range(TextSize.Min, TextSize.Max - TextSize.Min + 1).ToList();
         Assert.Contains($"multipliers of {range}", Description("size"));
         Assert.Contains($"from {range}.", width);
         Assert.Contains($"from {range}.", size.GetProperty("height").GetProperty("description").GetString());

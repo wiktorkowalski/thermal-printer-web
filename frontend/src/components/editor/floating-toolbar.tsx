@@ -48,7 +48,7 @@ export function FloatingToolbar({ block, onToggleStyle, onAlign }: FloatingToolb
         </button>
       ))}
       {sizeButtons.map(({ style, name, multiplier, unit }) => (
-        <button key={style} type="button" aria-label={name} aria-pressed={multiplier > 1} onClick={() => onToggleStyle(style)} className={cn(button, multiplier > 1 && "bg-on-ink/15")}>
+        <button key={style} type="button" aria-label={multiplier > 2 ? `${name} (now ${multiplier}x)` : name} aria-pressed={multiplier > 1} onClick={() => onToggleStyle(style)} className={cn(button, multiplier > 1 && "bg-on-ink/15")}>
           {Math.max(2, multiplier)}
           {unit}
         </button>

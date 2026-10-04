@@ -28,12 +28,13 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, DecodeQueue, CodePages
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
 │   │   ├── Options/            # BarcodeOptions, QRCodeOptions, ImageOptions
 │   │   ├── PrintContent.cs     # Its [Description] texts are the MCP schema
+│   │   ├── TextSize.cs         # The size field of a Text or Separator block, and its range
 │   │   ├── PrintRequest.cs
 │   │   └── PrintResponse.cs
 │   ├── ThermalPrinterWeb.Tests/ # xunit tests; excluded from the API project's globs
@@ -205,7 +206,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Text size**: `"size": { "width": 3, "height": 3 }` on a Text or Separator block. Each axis is a whole number from 1 to 8; an axis that is left out is 1.
 - A block with `size` ignores `DoubleWidth` and `DoubleHeight`: the size wins. `FontB` and the other styles still apply.
-- A block without `size` prints with the same bytes as before the field (`ESC ! n` only).
+- A block without `size` sends `ESC ! n` only, no `GS !`. Golden tests in `TextSizeTests` pin these bytes: do not change them.
 - Bytes of a block with `size`: `ESC ! n` (styles without the two double bits), `GS ! n`, the text, `GS ! 0`, `ESC ! 0`. So the next block starts at 1 x 1.
 - The paper estimate counts the columns and the line height of the size (`PaperLength`, `TextScale`).
 - The editor stores a size up to 2 x 2 as the two styles and a larger one as `size` (`textSizePatch` in `editor/document.ts`).
@@ -307,7 +308,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 
 **To add or change a limit**, change all of these:
 1. The backend constant.
-2. The MCP texts: the `[Description]` attributes in `backend/Models/` (`PrintContent.cs`, `PrintOptions.cs`, `Options/*.cs`) and the tool descriptions in `backend/Mcp/PrinterTools.cs`. `McpToolTests` pins most of these numbers to the constants.
+2. The MCP texts: the `[Description]` attributes in `backend/Models/` (`PrintContent.cs`, `PrintOptions.cs`, `TextSize.cs`, `Options/*.cs`) and the tool descriptions in `backend/Mcp/PrinterTools.cs`. `McpToolTests` pins most of these numbers to the constants.
 3. `frontend/src/lib/printer-limits.ts`.
 4. The table above.
 
