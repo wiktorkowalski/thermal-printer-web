@@ -255,6 +255,31 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 - 415: the `Content-Type` is not `application/json`. The body is a `PrintResponse` with type `validation` and the error `Content-Type must be application/json` (`PrintResponseClientErrorFactory`).
 - 413: the body is over the request body limit. Kestrel rejects it; the controller does not run and no test covers the body.
 - `GET /api/printer/status` answers a `PrinterStatus` body: with 200, or with 503 when the printer is unreachable.
+
+### Printer status
+
+`PrinterService.GetStatusAsync` reads it for the status endpoint, for MCP `get_status` and before every print. One connection, four `DLE EOT n` queries in the order 1, 2, 4, 3, one byte each, 2 s read timeout per query.
+
+| Field | From | Meaning |
+|-------|------|---------|
+| `reachable` | the connection | False: no connection to the printer. |
+| `online` | n1 bit 3 | |
+| `coverOpen` | n2 bit 2 | |
+| `paperOut` | n4 bits 5 and 6 | |
+| `paperLow` | n4 bits 2 and 3 | Always false: the printer has no near-end sensor. |
+| `cutterError` | n3 bit 3 | Auto-cutter error. |
+| `unrecoverableError` | n3 bit 5 | Needs a power cycle. |
+| `autoRecoverableError` | n3 bit 6 | Clears by itself, for example a hot print head. |
+| `recoverableError` | n3 bit 2 | Clears when its cause is removed. |
+| `raw` | | The bytes in hex: `n1=16 n2=12 n4=12 n3=12` is the idle printer. `no printer` in Development. |
+| `ready` | | Reachable, online, cover closed, paper present, no error flag. |
+| `notReadyReason` | | One cause, the first that applies: `printer unreachable`, `cover open`, `paper out`, `cutter error`, `unrecoverable error`, `auto-recoverable error`, `recoverable error`, `printer offline`. Null when ready. |
+
+- The four error flags are not verified on hardware: the idle value (n3 = `12`) is the only confirmed one. Bits 3, 5 and 6 are from the Epson TM-T20II ESC/POS Quick Reference; bit 2 has a weaker origin (see `PrinterService`).
+- Not ready blocks a print: 503 `printer`, `Printer not ready: <notReadyReason>`, one Warning. The journal row holds the status JSON.
+- Query 3 with no answer (`n3=?` in `raw`) or with a byte that is not a status frame (`n3=xx!`; a frame has bits 1 and 4 set, bits 0 and 7 clear): the error status is unknown, every error flag is false, the other queries decide `ready`. No log line. A silent query 3 adds 2 s to each status read and each print. Query 3 is not sent after a query with no answer (`n3=?`): a late answer would be read as the error status.
+- A status read logs at Debug only (the web UI polls it); an unreachable printer is one Warning. The controller logs nothing.
+- The web UI shows one cause (`printerFault` in `hooks/use-printer-status.ts`): header label, light label on the drawn printer (`lib/printer-light.ts`), steps above the paper (`PrinterAlert`).
 - `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
 
 ### Job endpoints (the journal over HTTP)

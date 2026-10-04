@@ -4,7 +4,7 @@ using System.Net.Sockets;
 
 namespace ThermalPrinterWeb.Tests.Support;
 
-// A printer on a loopback port: answers each status query as ready and keeps the bytes of each job.
+// A printer on a loopback port: answers each status query (as ready, unless a test sets the answer) and keeps the bytes of each job.
 internal sealed class WirePrinter : IAsyncDisposable
 {
     // Online, cover closed, paper present.
@@ -21,7 +21,8 @@ internal sealed class WirePrinter : IAsyncDisposable
     private static readonly TimeSpan JobTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan JobPollInterval = TimeSpan.FromMilliseconds(10);
 
-    private static readonly byte[] ReadyAnswer = [ReadyStatus];
+    // What the real printer answers to DLE EOT 1 when it is ready (2026-10-04).
+    public const byte ReadyPrinterStatus = 0x16;
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly CancellationTokenSource _stop = new();
@@ -36,6 +37,18 @@ internal sealed class WirePrinter : IAsyncDisposable
     }
 
     public int Port { get; }
+
+    // The answer to DLE EOT n. Null: the printer stays silent.
+    public byte? N1 { get; init; } = ReadyPrinterStatus;
+    public byte? N2 { get; init; } = ReadyStatus;
+    public byte? N3 { get; init; } = ReadyStatus;
+    public byte? N4 { get; init; } = ReadyStatus;
+
+    // The printer closes the connection when it gets DLE EOT 3.
+    public bool DropsAtErrorQuery { get; init; }
+
+    // The n of every DLE EOT query, in the order of arrival.
+    public ConcurrentQueue<int> Queries { get; } = [];
 
     // One entry per connection that sent something other than status queries.
     public ConcurrentQueue<byte[]> Jobs { get; } = [];
@@ -94,7 +107,16 @@ internal sealed class WirePrinter : IAsyncDisposable
                     if (job.Length == 0 && StatusQueries(buffer.AsSpan(0, read)) is var queries and > 0)
                     {
                         for (var i = 0; i < queries; i++)
-                            await stream.WriteAsync(ReadyAnswer, _stop.Token);
+                        {
+                            int n = buffer[i * StatusQueryLength + 2];
+                            Queries.Enqueue(n);
+                            if (n == 3 && DropsAtErrorQuery)
+                                return;
+
+                            var answer = n switch { 1 => N1, 2 => N2, 3 => N3, 4 => N4, _ => null };
+                            if (answer is { } value)
+                                await stream.WriteAsync(new[] { value }, _stop.Token);
+                        }
                     }
                     else
                     {

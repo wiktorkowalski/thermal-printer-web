@@ -187,6 +187,13 @@ export interface PrinterStatus {
   coverOpen: boolean;
   paperOut: boolean;
   paperLow: boolean;
+  /** The status bytes of the printer, for a person who looks for a fault. */
+  raw?: string | null;
+  /** The four error flags come from DLE EOT 3. No flag is verified on the printer. An older server sends none. */
+  cutterError?: boolean;
+  unrecoverableError?: boolean;
+  autoRecoverableError?: boolean;
+  recoverableError?: boolean;
   ready: boolean;
   notReadyReason: string | null;
 }
