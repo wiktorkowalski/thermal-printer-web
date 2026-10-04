@@ -87,6 +87,7 @@ internal sealed record PrintJobEntry
             PrinterStatus = Trace.Status is null ? null : JsonSerializer.Serialize(Trace.Status, ApiJson),
             RequestBytes = Request?.Length ?? 0,
             AppVersion = AppVersion,
+            ReprintOf = Trace.ReprintOf,
             Payload = new PrintJobPayload
             {
                 JobId = Trace.Id,

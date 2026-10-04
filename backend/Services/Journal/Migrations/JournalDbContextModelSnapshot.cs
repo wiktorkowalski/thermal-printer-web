@@ -54,6 +54,9 @@ namespace ThermalPrinterWeb.Services.Journal.Migrations
                     b.Property<string>("RemoteIp")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ReprintOf")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("RequestBytes")
                         .HasColumnType("INTEGER");
 
