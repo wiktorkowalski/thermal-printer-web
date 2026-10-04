@@ -212,11 +212,12 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 | Date `yyyy-MM-dd` | Font B, size 2x3 | Right | |
 | 3 empty lines, then the cut | | | |
 
-- The server wraps the title and the message (`SimpleNote.Wrap`): a break at a space, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. A character that prints as two (`→` as `->`) counts as two columns.
+- The server wraps the title and the message (`SimpleNote.Wrap`): a break at a space or a tab, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. Spaces at a break are not printed. A character that prints as two (`→` as `->`) counts as two columns.
 - Only simple mode wraps and only simple mode adds a date line. Template mode prints the blocks as sent.
 - The date is the date in `Europe/Warsaw` (UTC when the host has no such zone). A reprint prints the stored date.
 - The 3 lines before the cut keep the date line whole: with no feed the cutter goes through the last text line.
-- The limits are those of the built blocks, so an error names a block (`Block 2 (Text)` is the message). The message holds 10,000 characters after the wrap and 410 lines with a one-line title; more is a 400 (text length, text line count or paper).
+- The limits are those of the built blocks, so an error names a block (`Block 0 (Text)` is the title, `Block 2 (Text)` the message). The message holds 10,000 characters after the wrap and 410 lines with a one-line title; more is a 400 (text length, text line count or paper). The 500-line limit counts the lines after the wrap.
+- A title or message over 10,000 characters is not wrapped (`SimpleNote.Wrap` returns it as it is): the Text block rejects it for its length before any work on the text. So the wrap reads at most 10,000 characters, in one pass.
 - The journal `Title` is the first line of the title as wrapped: a title over 24 characters shows its first line in the tray.
 
 **Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage
@@ -403,7 +404,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
-- `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the numbers in its texts to the constants in `SimpleNote`.
+- `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, and that journal text is untrusted. Keep it in line with the tool descriptions.
 
 **Journal tools** (`JournalTools.cs`): the same `PrintJournalReader`, the same `PrintJobReprinter` and the same facts as the HTTP job endpoints. No tool deletes a row (issue #56), reads statistics or reads the ledger.

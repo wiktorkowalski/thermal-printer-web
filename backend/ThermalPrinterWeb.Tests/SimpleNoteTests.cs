@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using ThermalPrinterWeb.Mcp;
@@ -151,6 +153,14 @@ public sealed class SimpleNoteTests
     [InlineData("aaa bbb ccc ddd", 7, "aaa bbb\nccc ddd")]
     [InlineData("aaa   bbbbb", 7, "aaa\nbbbbb")]
     [InlineData("aaaa bbb      ", 8, "aaaa bbb")]
+    // A tab prints as a space: it is a break point too, and it stays in a line that fits.
+    [InlineData("a\tb", 10, "a\tb")]
+    [InlineData("aaa\tbbbbb", 7, "aaa\nbbbbb")]
+    // Spaces at the start of a line stay when the word fits after them, and go when it does not.
+    [InlineData("  abcd", 6, "  abcd")]
+    [InlineData("  abcde", 6, "abcde")]
+    [InlineData("       x", 6, "x")]
+    [InlineData("       ", 6, "")]
     // A word longer than the line breaks at the limit.
     [InlineData("abcdefghijkl", 5, "abcde\nfghij\nkl")]
     [InlineData("ab abcdefghijkl cd", 5, "ab\nabcde\nfghij\nkl cd")]
@@ -208,9 +218,9 @@ public sealed class SimpleNoteTests
     [InlineData("2026-12-31T23:00:00Z", "2027-01-01")]
     public void Today_AnyUtcTime_IsTheDateInPoland(string utc, string expected)
     {
-        var clock = new FixedClock(DateTimeOffset.Parse(utc, System.Globalization.CultureInfo.InvariantCulture));
+        var clock = new FixedClock(DateTimeOffset.Parse(utc, CultureInfo.InvariantCulture));
 
-        Assert.Equal(DateOnly.ParseExact(expected, "yyyy-MM-dd"), SimpleNote.Today(clock));
+        Assert.Equal(DateOnly.ParseExact(expected, "yyyy-MM-dd", CultureInfo.InvariantCulture), SimpleNote.Today(clock));
     }
 
     // One word that fills the Text block after the wrap: 303 lines, 3 m. Each hard break adds one character.
@@ -256,6 +266,64 @@ public sealed class SimpleNoteTests
         Assert.Equal(PrintResult.Invalid($"Block 2 (Text): text line count 555 is over the limit of {TextBlockHandler.MaxLines}"), manyLines);
         Assert.Equal(PrintFailure.Validation, manyCharacters.Failure);
         Assert.StartsWith("Block 2 (Text): text length ", manyCharacters.Error);
+    }
+
+    // The request body limit lets 30 MB of text in. A text over the limit of a Text block is not wrapped:
+    // the same string goes to the block, and the block is rejected for its length.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PrintAsync_ThirtyMegabytesOfText_IsRejectedWithNoWrap(bool inTitle)
+    {
+        // Two bytes per character in UTF-8, and the slowest character to measure.
+        var huge = new string('ż', 15_000_000);
+        var clock = Stopwatch.StartNew();
+
+        var note = inTitle ? SimpleNote.Build(huge, "M", Date) : SimpleNote.Build("T", huge, Date);
+        var result = await NewService().PrintAsync(note);
+
+        var block = inTitle ? 0 : 2;
+        Assert.Same(huge, note[block].Content);
+        Assert.Equal(PrintResult.Invalid($"Block {block} (Text): text length {huge.Length} is over the limit of {TextBlockHandler.MaxLength}"), result);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"Took {clock.Elapsed}.");
+    }
+
+    // The most work the wrap does: a text at the limit of a Text block. The output is at most twice the input.
+    [Theory]
+    // One word, only line breaks, only spaces, one character per word, only emoji.
+    [InlineData("x", 1)]
+    [InlineData("\n", 1)]
+    [InlineData(" ", 1)]
+    [InlineData("x ", 2)]
+    [InlineData("😀", 2)]
+    public void Wrap_TextAtTheLimit_IsOnePassWithABoundedResult(string unit, int unitLength)
+    {
+        var text = string.Concat(Enumerable.Repeat(unit, TextBlockHandler.MaxLength / unitLength));
+        var clock = Stopwatch.StartNew();
+
+        var wrapped = SimpleNote.Wrap(text, SimpleNote.BodyColumns);
+
+        Assert.Equal(TextBlockHandler.MaxLength, text.Length);
+        Assert.InRange(wrapped.Length, 0, 2 * text.Length);
+        Assert.All(wrapped.Split('\n'), line => Assert.InRange(line.Length, 0, 2 * SimpleNote.BodyColumns));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"Took {clock.Elapsed}.");
+    }
+
+    // The 500-line limit of a Text block counts the lines after the wrap.
+    [Fact]
+    public async Task PrintAsync_OnlyLineBreaksOrATitleOfTenThousandCharacters_IsAValidationFailure()
+    {
+        var lineBreaks = await NewService().PrintAsync(SimpleNote.Build("T", new string('\n', TextBlockHandler.MaxLength), Date));
+        var title = await NewService().PrintAsync(SimpleNote.Build(new string('x', TextBlockHandler.MaxLength), "M", Date));
+        var fewLineBreaks = await NewService().PrintAsync(SimpleNote.Build("T", new string('\n', 399), Date));
+
+        Assert.Equal(
+            PrintResult.Invalid($"Block 2 (Text): text line count {TextBlockHandler.MaxLength + 1} is over the limit of {TextBlockHandler.MaxLines}"),
+            lineBreaks);
+        // 417 title lines and 416 line breaks: over the length limit of the block after the wrap.
+        Assert.Equal(PrintFailure.Validation, title.Failure);
+        Assert.StartsWith("Block 0 (Text): text length ", title.Error);
+        Assert.Equal(PrintResult.Ok, fewLineBreaks);
     }
 
     // HTTP simple mode through the real pipeline: the bytes, the paper estimate and the journal row.
@@ -336,7 +404,7 @@ public sealed class SimpleNoteTests
 
         Assert.Contains($"The title holds {SimpleNote.HeaderColumns} characters per line, the message {SimpleNote.BodyColumns}.", description);
         Assert.Contains("The server breaks a longer line at a space", description);
-        Assert.Contains($"at most {TextBlockHandler.MaxLength} characters and about 400 printed lines ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m of paper)", description);
+        Assert.Contains($"at most {TextBlockHandler.MaxLength} characters, with the line breaks the server adds inside a long word, and about 400 printed lines ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m of paper)", description);
         Assert.Contains($"({size})", Argument("title"));
         Assert.Contains($"{SimpleNote.HeaderColumns} characters per line", Argument("title"));
         Assert.Contains($"(FontB at {size})", Argument("message"));

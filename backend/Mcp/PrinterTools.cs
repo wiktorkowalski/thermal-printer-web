@@ -56,7 +56,7 @@ public static class PrinterTools
         + "title and message are both needed. "
         + "The title holds 24 characters per line, the message 32. The server breaks a longer line at a space (a longer word breaks at the limit) "
         + "and keeps each \\n, so send prose as it is. "
-        + "The message holds at most 10000 characters and about 400 printed lines (4 m of paper). "
+        + "The message holds at most 10000 characters, with the line breaks the server adds inside a long word, and about 400 printed lines (4 m of paper). "
         + "Polish letters print; emoji print as '?'. "
         + "Example: " + PrintNoteExample)]
     public static async Task<string> PrintNoteAsync(

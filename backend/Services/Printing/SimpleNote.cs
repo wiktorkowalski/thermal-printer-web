@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using ThermalPrinterWeb.Models;
+using ThermalPrinterWeb.Services.Printing.Handlers;
 
 namespace ThermalPrinterWeb.Services.Printing;
 
@@ -23,7 +24,7 @@ internal static class SimpleNote
     internal static readonly int SeparatorLength = PaperLength.Columns(fontB: false, widthMultiplier: 1);
 
     // The cut command alone cuts through the last text line: it is about one line short (issue #31, row F1).
-    // Three lines: the one that is needed plus two of margin, the feed simple mode had before.
+    // Three lines: the one that is needed plus two of margin.
     internal const int FeedLines = 3;
 
     // The date on the strip is the date at the printer, not the UTC date of the container.
@@ -79,6 +80,11 @@ internal static class SimpleNote
     // The columns are those of the default code page: a job with another options.codePage can get a line over the limit.
     internal static string Wrap(string text, int columns)
     {
+        // The request body can hold 30 MB of text. A text over the limit of a Text block is not read here:
+        // the block is rejected for its length, before any work on the text.
+        if (text.Length > TextBlockHandler.MaxLength)
+            return text;
+
         var wrapped = new StringBuilder(text.Length + text.Length / columns);
         var first = true;
         // The same line breaks as the encoder: CR, CRLF, FF, NEL, LS and PS count as LF.
@@ -95,36 +101,38 @@ internal static class SimpleNote
 
     private static void AppendWrapped(StringBuilder wrapped, ReadOnlySpan<char> line, int columns)
     {
-        Span<char> characters = stackalloc char[2];
         var width = 0;
         var at = 0;
         while (at < line.Length)
         {
             var wordStart = at;
-            while (wordStart < line.Length && line[wordStart] == ' ')
+            while (wordStart < line.Length && IsSpace(line[wordStart]))
                 wordStart++;
             var wordEnd = wordStart;
-            while (wordEnd < line.Length && line[wordEnd] != ' ')
+            while (wordEnd < line.Length && !IsSpace(line[wordEnd]))
                 wordEnd++;
 
-            var gap = wordStart - at;
+            // One column each: a tab prints as a space.
+            var gap = line[at..wordStart];
             var word = line[wordStart..wordEnd];
             at = wordEnd;
 
-            // The spaces at a break are not printed.
-            var wordColumns = ColumnsOf(word);
-            if (width > 0 && width + gap + wordColumns > columns)
-            {
-                if (word.IsEmpty)
-                    return;
+            // Spaces at the end of a line that do not fit.
+            if (word.IsEmpty && width + gap.Length > columns)
+                return;
 
-                wrapped.Append('\n');
+            // The spaces at a break are not printed. Spaces at the start of a line go too when the word does not fit after them.
+            var wordColumns = ColumnsOf(word);
+            if (width + gap.Length + wordColumns > columns)
+            {
+                if (width > 0)
+                    wrapped.Append('\n');
                 width = 0;
-                gap = 0;
+                gap = [];
             }
 
-            wrapped.Append(' ', gap);
-            width += gap;
+            wrapped.Append(gap);
+            width += gap.Length;
             if (width + wordColumns <= columns)
             {
                 wrapped.Append(word);
@@ -132,7 +140,8 @@ internal static class SimpleNote
                 continue;
             }
 
-            // A word longer than the line.
+            // A word longer than the line. The characters are copied as they came: a lone surrogate stays.
+            var copied = 0;
             foreach (var rune in word.EnumerateRunes())
             {
                 var runeColumns = ColumnsOf(rune);
@@ -142,11 +151,14 @@ internal static class SimpleNote
                     width = 0;
                 }
 
-                wrapped.Append(characters[..rune.EncodeToUtf16(characters)]);
+                wrapped.Append(word.Slice(copied, rune.Utf16SequenceLength));
+                copied += rune.Utf16SequenceLength;
                 width += runeColumns;
             }
         }
     }
+
+    private static bool IsSpace(char character) => character is ' ' or '\t';
 
     private static int ColumnsOf(ReadOnlySpan<char> word)
     {
