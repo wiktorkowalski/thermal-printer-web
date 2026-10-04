@@ -21,7 +21,7 @@ public sealed class McpJournalDeleteTests
     private const string DeleteJob = "delete_job";
     private const string DeleteJobs = "delete_jobs";
     private const string ListJobs = "list_jobs";
-    private const string PrintUrl = "/api/printer";
+    private const string PrintUrl = TestHttp.PrintUrl;
     private const string JobsUrl = "/api/printer/jobs";
     private const string UnknownId = "01999999-0000-7000-8000-000000000000";
     private const string NotAvailable = "Not deleted: The print journal is not available";

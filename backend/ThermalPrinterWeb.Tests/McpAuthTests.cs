@@ -12,7 +12,7 @@ public sealed class McpAuthTests
 {
     private const string Key = TestApp.McpKey;
     private const string WrongKey = "WRONG-KEY-0c4d1f7a9e";
-    private const string PrintUrl = "/api/printer";
+    private const string PrintUrl = TestHttp.PrintUrl;
     private const string Initialize =
         """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}""";
     private const string PrintCall =
