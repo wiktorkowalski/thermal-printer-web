@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PrintRequest } from "@/types/printer";
 import { printerApi, type PrintError } from "@/lib/api";
-import { addToTray } from "@/lib/tray";
+import { trayChanged } from "@/lib/tray";
 import type { PrinterStatusState } from "./use-printer-status";
 
 export interface Notice {
@@ -35,16 +35,14 @@ export function usePrintJob(printer: PrinterStatusState) {
   }, [phase]);
 
   const { refresh } = printer;
-  // `locate` gets the index (from 0, in the sent content) of a block the server rejects.
-  // It can show the block and return its name on screen, such as "Block 3".
-  const print = useCallback(
-    async (request: PrintRequest, title: string, mode: string, locate?: (index: number) => string | undefined): Promise<boolean> => {
+  // One job to the server, a new one or a reprint. The server stores each job in its journal; the tray reads it from there.
+  const send = useCallback(
+    async (job: () => Promise<void>, locate?: (index: number) => string | undefined): Promise<boolean> => {
       setPhase("printing");
       try {
-        await printerApi.print(request);
-        addToTray(title, mode, request);
+        await job();
         setPhase("torn");
-        notify(`Printed · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`, "ok", "Copy kept in the tray.");
+        notify(`Printed · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
         return true;
       } catch (err) {
         const error = err as PrintError;
@@ -55,10 +53,22 @@ export function usePrintJob(printer: PrinterStatusState) {
         return false;
       } finally {
         refresh();
+        // Also after a failure: the job behind a failed reprint can be gone from the journal.
+        trayChanged();
       }
     },
     [notify, refresh],
   );
 
-  return { phase, printing: phase === "printing", notice, notify, dismiss, print };
+  // `locate` gets the index (from 0, in the sent content) of a block the server rejects.
+  // It can show the block and return its name on screen, such as "Block 3".
+  const print = useCallback(
+    (request: PrintRequest, locate?: (index: number) => string | undefined) => send(() => printerApi.print(request), locate),
+    [send],
+  );
+
+  /** Prints a job of the tray again, by its journal id. */
+  const reprint = useCallback((id: string) => send(() => printerApi.reprint(id)), [send]);
+
+  return { phase, printing: phase === "printing", notice, notify, dismiss, print, reprint };
 }

@@ -1,0 +1,122 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Vittore’s Printer
+        - generic [ref=e8]: 80 mm, one roll at a time
+      - navigation "Mode" [ref=e9]:
+        - link "Note" [ref=e10] [cursor=pointer]:
+          - /url: /
+        - link "Template" [ref=e11] [cursor=pointer]:
+          - /url: /template
+        - link "Receipt" [ref=e12] [cursor=pointer]:
+          - /url: /receipt
+      - generic [ref=e13]:
+        - status "Asking the printer" [ref=e14]:
+          - generic [ref=e16]: V330M
+          - generic [ref=e17]: Checking…
+          - generic [ref=e18]: · Asking the printer
+        - button "Open tray, 0 prints" [ref=e19]
+        - button "Beep the printer" [ref=e23]
+        - button "Switch to dark theme" [ref=e27]
+  - generic [ref=e30]:
+    - complementary [ref=e31]:
+      - generic [ref=e32]:
+        - generic [ref=e33]: Insert block
+        - generic [ref=e34]:
+          - button "Text T" [ref=e35]:
+            - generic [ref=e38]: Text
+            - generic [ref=e39]: T
+          - button "Image I" [ref=e40]:
+            - generic [ref=e45]: Image
+            - generic [ref=e46]: I
+          - button "QR code Q" [ref=e47]:
+            - generic [ref=e54]: QR code
+            - generic [ref=e55]: Q
+          - button "Barcode B" [ref=e56]:
+            - generic [ref=e58]: Barcode
+            - generic [ref=e59]: B
+          - button "Separator S" [ref=e60]:
+            - generic [ref=e62]: Separator
+            - generic [ref=e63]: S
+          - button "Line feed L" [ref=e64]:
+            - generic [ref=e68]: Line feed
+            - generic [ref=e69]: L
+          - button "Cut X" [ref=e70]:
+            - generic [ref=e77]: Cut
+            - generic [ref=e78]: X
+      - generic [ref=e79]:
+        - generic [ref=e80]: Job settings
+        - generic [ref=e81]:
+          - generic [ref=e82]: Code page
+          - combobox "Code page" [ref=e83]:
+            - option "PC852" [selected]
+            - option "PC437"
+            - option "PC850"
+            - option "PC858"
+            - option "WPC1250"
+            - option "WPC1252"
+            - option "ISO8859_2"
+            - option "KATAKANA"
+        - generic [ref=e84]:
+          - generic [ref=e85]: Feed before cut
+          - generic [ref=e86]:
+            - spinbutton "Feed before cut lines" [ref=e87]: "3"
+            - text: lines
+        - generic [ref=e88]:
+          - generic [ref=e89]: Auto-cut
+          - switch "Auto-cut" [checked] [ref=e90]
+    - main [ref=e92]:
+      - heading "Note editor" [level=1] [ref=e93]
+      - generic [ref=e94]:
+        - generic [ref=e95]: POWER
+        - generic [ref=e98]: VRETTI · V330M
+      - generic [ref=e101]:
+        - generic [ref=e102]:
+          - generic [aria-hidden] [ref=e108]:
+            - generic [ref=e109]: "0"
+            - generic [ref=e110]: "12"
+            - generic [ref=e111]: "24"
+            - generic [ref=e112]: "36"
+            - generic [ref=e113]: "48"
+          - generic [ref=e114]: 48 col
+        - generic [ref=e117]:
+          - generic [ref=e118]:
+            - generic [ref=e119]:
+              - generic [ref=e120]: Text
+              - generic [ref=e121]: B 2W 2H
+            - 'button "Select block 1: Text" [ref=e122]'
+          - textbox "Text block 1" [ref=e128]:
+            - /placeholder: Title
+          - generic [ref=e129]:
+            - generic [ref=e130]: 0/24
+            - generic [ref=e131]: 1 line
+        - generic [ref=e133]:
+          - generic [ref=e134]:
+            - generic [ref=e135]: Separator
+            - 'button "Select block 2: Separator" [ref=e137]'
+          - generic [ref=e139]: "------------------------------------------------"
+          - generic [ref=e143]: 48/48
+        - generic [ref=e146]:
+          - generic [ref=e147]:
+            - generic [ref=e148]: Text
+            - 'button "Select block 3: Text" [ref=e150]'
+          - textbox "Text block 3" [ref=e156]:
+            - /placeholder: Write something…
+          - generic [ref=e157]:
+            - generic [ref=e158]: 0/48
+            - generic [ref=e159]: 1 line
+        - generic [ref=e160]: feed × 3
+        - generic [ref=e166]:
+          - generic [ref=e167]: CUT
+          - generic [ref=e177]: ≈ 30 mm
+    - complementary [ref=e183]:
+      - generic [ref=e184]:
+        - generic [ref=e185]: No block selected
+        - paragraph [ref=e186]: Click a block on the paper to style it. Type directly on the paper to change text.
+        - paragraph [ref=e187]: T I Q B S L X insert · ⌘V pastes an image · Del removes · Esc deselects
+    - generic [ref=e188]:
+      - generic [ref=e189]:
+        - button "Save as template" [ref=e190]
+        - generic [ref=e191]: ≈ 30 mm · ⌘↵ to print · auto-cut
+      - button "Print" [ref=e192]

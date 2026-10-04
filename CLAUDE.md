@@ -8,7 +8,7 @@ This is a thermal printer web application with two main components:
 - **Backend**: ASP.NET Core 10.0 Web API (C#) that interfaces with thermal printers via network connection
 - **Frontend**: React + TypeScript + Vite application with TailwindCSS
 
-The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale and edited in place. Note and Template modes share one block editor (text, images, barcodes, QR codes, separators, feeds, cuts); Receipt mode builds Polish fiscal receipts on the same paper. Every print lands in a browser-side tray for reprinting.
+The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale and edited in place. Note and Template modes share one block editor (text, images, barcodes, QR codes, separators, feeds, cuts); Receipt mode builds Polish fiscal receipts on the same paper. The tray lists the print journal of the server: a print from any device can be printed again.
 
 ## Project Structure
 
@@ -17,6 +17,8 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 ├── backend/                    # ASP.NET Core Web API (ThermalPrinterWeb.Api.csproj)
 │   ├── Controllers/
 │   │   ├── PrinterController.cs
+│   │   ├── PrintJobsController.cs  # Journal over HTTP: list, one job, reprint
+│   │   ├── PrintResultResponse.cs  # PrintResult to HTTP answer, for print and reprint
 │   │   └── PrintResponseClientErrorFactory.cs  # 415 and other bodiless client errors as PrintResponse
 │   ├── Mcp/                    # PrinterTools, ArgumentShapeFilter, ToolArgumentException
 │   ├── Services/
@@ -66,6 +68,10 @@ Located in `backend/` directory.
   - `POST /api/printer` - Handles both simple printing (name + message) and template printing (content array)
   - `GET /api/printer/status` - Printer readiness
   - `POST /api/printer/beep` - Sounds the buzzer
+- `backend/Controllers/PrintJobsController.cs` - the print journal over HTTP (see Journal):
+  - `GET /api/printer/jobs` - Job list, newest first, in pages
+  - `GET /api/printer/jobs/{id}` - One job with its blocks
+  - `POST /api/printer/jobs/{id}/reprint` - Prints a stored job again
 - `backend/Mcp/PrinterTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`)
 - `backend/Services/PrinterService.cs` - Service implementing `IPrinterService`, handles all printer communication. ESCPOS_NET builds and sends the print job; status and beep use a raw `TcpClient`.
 - `backend/Services/Printing/Handlers/` - One `IBlockHandler` per content type. To add a block type, add a handler and register it in `BlockHandlerServiceCollectionExtensions.cs`.
@@ -101,7 +107,9 @@ Located in `frontend/` directory.
 - `frontend/src/types/printer.ts` - TypeScript types matching backend models
 - TailwindCSS v4 with theme tokens in `src/index.css` (light + dark); fonts Instrument Serif / Instrument Sans / DM Mono
 - `frontend/src/components/paper/` - `PaperDocument` renders any `PrintContent[]` read-only (receipts, tray thumbnails)
-- localStorage keys: `thermal-printer-templates` (saved templates), `thermal-printer-draft-<note|template|receipt>` (drafts), `thermal-printer-tray` (last 20 prints), `thermal-printer-theme`
+- localStorage keys: `thermal-printer-templates` (saved templates), `thermal-printer-draft-<note|template|receipt>` (drafts), `thermal-printer-theme`. The old key `thermal-printer-tray` is removed at startup.
+- Tray (`hooks/use-tray.ts`, `components/tray-drawer.tsx`, `lib/tray.ts`): reads `GET /api/printer/jobs?printed=true` at startup, when the tray opens and after each print. It keeps nothing in the browser. A thumbnail reads the blocks of its job once (`GET /api/printer/jobs/{id}`); an image shows as `[image]`. Reprint calls the reprint endpoint with source `web/tray`. The tray has no delete. Journal off (503 `journal`), read fault and empty list each have their own text.
+- Journal text (`title`, `source`, block content) is caller text: render it as React text only. No `dangerouslySetInnerHTML`, no URL or CSS made from it.
 - Status polls every 30 s only while the tab is visible; the Print button is disabled while the last status read says not ready (a failed status request does not disable it)
 
 **Print errors** (`lib/api.ts`, `hooks/use-print-job.ts`):
@@ -110,6 +118,8 @@ Located in `frontend/` directory.
 - 503 `busy`: waits the `Retry-After` time, then sends again, up to 2 more times.
 - 503 `printer`, network fault, timeout: sends again up to 2 more times with a short delay.
 - 413: shown as "Print too large", no retry.
+- 503 `journal` (job endpoints): shown as "No print history", no retry.
+- A reprint uses the same handling; a 404 (the job is gone) is shown like a 400.
 
 **Routing**: React Router: `/` (Note), `/template` (Template), `/receipt` (Receipt). Old paths `/builder` and `/receipts` redirect.
 
@@ -215,6 +225,28 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 - `GET /api/printer/status` answers a `PrinterStatus` body: with 200, or with 503 when the printer is unreachable.
 - `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
 
+### Job endpoints (the journal over HTTP)
+
+No auth (owner decision, issue #51): anyone who reaches the host reads every stored strip. No HTTP endpoint deletes a row (delete is for MCP, issue #56).
+
+| Endpoint | Answer |
+|----------|--------|
+| `GET /api/printer/jobs?before=&limit=&printed=` | `{ jobs: [...], next }`, newest first. `limit` default 20, clamped to 1-50 (`PrintJournalReader.DefaultPageSize`, `MaxPageSize`). `before` is the `next` of the page before (keyset on the GUID v7 id); `next` is null on the last page. `printed=true` leaves out every job that did not print. |
+| `GET /api/printer/jobs/{id}` | `{ job, blocks, options }`. `blocks` and `options` are the stored API JSON. An image block holds its hash, never the picture. |
+| `POST /api/printer/jobs/{id}/reprint?source=` | A `PrintResponse`, with the statuses of `POST /api/printer`. |
+
+- A job has only these fields: `id`, `createdAt` (UTC), `transport`, `source`, `result` (name of `JobResult`), `error`, `title`, `blockCount`, `paperDots`, `reprintOf`, `canReprint`. The records in `Models/PrintJobDtos.cs` are the allow-list; `JournalReadTests` fails when a field is added without a change to its list.
+- Never served: `RemoteIp`, `UserAgent`, `Headers`, `Exception`, `Log`, `Request`, `Bytes`, `PlainText`, `PrinterStatus`, `AppVersion`. No picture is served.
+- Errors are a `PrintResponse` with a fixed text: 400 `validation` (the id or `before` is not a GUID in the form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`), 404 `validation` (`Job not found`), 503 `journal` (the journal is off, not open yet, or the read failed; one Warning with the job id).
+- Every answer has `X-Robots-Tag: noindex`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+- Reads use `PrintJournalReader`: a new context per read, `AsNoTracking`, a 5 s limit. A list reads `PrintJobs` only. A read selects the columns it serves; do not load a `PrintJobPayload` entity (its blobs are up to 30 MB).
+
+**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes` (that needs the reset prelude of issue #45).
+- Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
+- One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
+- No blocks stored (the job was refused before the print path), or a picture that is not stored: 400 with a fixed reason.
+- The reprint is a new journal row: transport `http:reprint`, `ReprintOf` = the id of the first job (also for a reprint of a reprint), no `Request`. It writes the one `Print job:` line. An unknown id, a bad id and a busy answer store no row and write no line.
+
 ### Content rules
 
 - **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Every line ending becomes LF, the only control byte that passes. A character the code page lacks prints as `?` or as a best-fit letter.
@@ -253,14 +285,14 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 ### Logging
 
 `PrintJobLog` writes one Information line per print job, for HTTP and MCP:
-`Print job: transport=<http|mcp:tool> source="..." userAgent="..." result=<Printed|Validation|Printer|Busy>`.
+`Print job: transport=<http|http:reprint|mcp:tool> source="..." userAgent="..." result=<Printed|Validation|Printer|Busy>`.
 - `source` and `userAgent` are caller text: `LogSafeText.Clean` cuts and cleans them. Use it for any caller text in a log.
 - The reason of a failure is logged once, where it happens. Do not log block content: the endpoint is public.
 - The web editor sends `source` `web/note`, `web/template` or `web/receipt`.
 
 ### Journal
 
-The print journal stores every print job in SQLite (`backend/Services/Journal/`, EF Core). It only writes: no HTTP endpoint and no MCP tool reads it (issues #51, #52). Read it with `sqlite3` on the host.
+The print journal stores every print job in SQLite (`backend/Services/Journal/`, EF Core). HTTP reads it through the job endpoints (see Print API); no MCP tool reads it (issue #52).
 
 **Settings** (`JournalOptions`):
 
@@ -284,10 +316,11 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 **What is journaled**:
 - Every `POST /api/printer`, whatever the result: also a body that does not bind (400), a 415 and a 413 (no body stored for a 413).
 - Every MCP `print` and `print_note` call. A call with wrong or missing arguments is a rejected job with no blocks (`ArgumentShapeFilter`); it has no `Print job:` log line.
-- Not journaled: beep, status, other MCP calls.
+- Every reprint that finds its job (`[Journaled(JobsOnly = true, NoBody = true)]`: no row without a `PrintJobLog.Write` call, no request body stored).
+- Not journaled: beep, status, journal reads, other MCP calls.
 
 **Schema** (migrations in `Services/Journal/Migrations`; table `__EFMigrationsHistory` is the schema version):
-- `PrintJobs`: the small facts. `Id` (GUID v7), `CreatedAt` (UTC), `DurationMs`, `Transport`, `Source`, `UserAgent`, `RemoteIp`, `Result`, `Error`, `HttpStatus`, `Title`, `BlockCount`, `ByteCount`, `PaperDots`, `PrinterStatus` (JSON), `RequestBytes`, `AppVersion`.
+- `PrintJobs`: the small facts. `Id` (GUID v7), `CreatedAt` (UTC), `DurationMs`, `Transport`, `Source`, `UserAgent`, `RemoteIp`, `Result`, `Error`, `HttpStatus`, `Title`, `BlockCount`, `ByteCount`, `PaperDots`, `PrinterStatus` (JSON), `RequestBytes`, `AppVersion`, `ReprintOf` (the first job of a reprint, else null).
 - `PrintJobPayloads`: the large values, one row per job. `Request` (the body as it came), `Bytes` (the ESC/POS job), `Blocks` and `Options` (API JSON), `PlainText`, `Headers` (JSON), `Exception`, `Log` (the log lines of the request).
 - `Result` is the number of `JobResult`: 0 Printed, 1 Validation, 2 Printer, 3 Busy, 4 Fault. Keep the numbers; add new ones at the end.
 - `Blocks` and `Options` are the API JSON, so an enum is its API name (`"type":"Text"`). The API name is the contract: a rename breaks callers and old rows alike. `Options` is what the caller sent; no defaults are filled in.
@@ -299,7 +332,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 - `Title` is the first Text line, cut at 100 characters. `Log` holds at most 200 lines of 4000 characters (`PrintJobTrace.MaxLogLines`, `MaxLogLineLength`).
 - `AppVersion` ends with `+<commit>` in an image that CI built (`GIT_SHA` build argument).
 
-**To add a fact to the journal**: set it on `PrintJobTrace.Current` where the code knows it, map it in `PrintJobEntry.ToRow`, add the column with a new migration (the command is in `JournalDbContext.cs`).
+**To add a fact to the journal**: set it on `PrintJobTrace.Current` where the code knows it, map it in `PrintJobEntry.ToRow`, add the column with a new migration (the command is in `JournalDbContext.cs`). A new column is not served: to serve it, add it to a record in `Models/PrintJobDtos.cs` and to the list in `JournalReadTests`.
 
 **Tests**: every test host gets its own journal directory under the temp directory (`TestApp.JournalDirectory`) and deletes it. `app.JournalRowsAsync()` waits for the writer and reads the rows.
 

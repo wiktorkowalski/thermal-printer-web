@@ -128,12 +128,48 @@ export interface PrintOptions {
 /**
  * Body of every answer from POST /api/printer. On failure `type` says whose fault it is:
  * "validation" (400, the payload), "printer" (503) or "busy" (503 with Retry-After).
+ * The job endpoints also answer "journal" (503): the print journal is off or cannot be read.
  */
 export interface PrintResponse {
   success: boolean;
   error?: string | null;
-  type?: "validation" | "printer" | "busy" | null;
+  type?: "validation" | "printer" | "busy" | "journal" | null;
 }
+
+/**
+ * One job of the print journal (GET /api/printer/jobs), matching backend/Models/PrintJobDtos.cs.
+ * Every text here is caller text: render it as text only.
+ */
+export interface PrintJobSummary {
+  id: string;
+  /** UTC, ISO 8601. */
+  createdAt: string;
+  transport: string;
+  source: string | null;
+  result: string;
+  error: string | null;
+  title: string | null;
+  blockCount: number | null;
+  paperDots: number | null;
+  reprintOf: string | null;
+  canReprint: boolean;
+}
+
+export interface PrintJobList {
+  jobs: PrintJobSummary[];
+  /** The `before` value of the next page; null on the last page. */
+  next: string | null;
+}
+
+/** GET /api/printer/jobs/{id}. An image block holds a hash (IMAGE_HASH_PREFIX), not the picture. */
+export interface PrintJobDetail {
+  job: PrintJobSummary;
+  blocks: (PrintContent | null)[] | null;
+  options: PrintOptions | null;
+}
+
+// backend/Services/Journal/PrintJobEntry.cs: ImageHashPrefix
+export const IMAGE_HASH_PREFIX = "sha256:";
 
 export interface PrintRequest {
   name?: string;

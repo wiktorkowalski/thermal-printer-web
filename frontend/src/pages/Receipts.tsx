@@ -186,7 +186,7 @@ export default function Receipts({ printer }: { printer: PrinterStatusState }) {
       return;
     }
     const request = { content: layout.content, options: PRINT_OPTIONS, source: "web/receipt" };
-    const ok = await job.print(request, `${store.name || "Receipt"} · ${formatCurrency(subtotal)} zł`, "receipt", locate);
+    const ok = await job.print(request, locate);
     // A new receipt gets new fiscal numbers.
     if (ok) setSerials(newSerials());
   };
