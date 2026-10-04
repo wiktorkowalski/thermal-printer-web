@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -81,8 +82,135 @@ public sealed class PayloadErrorTests
         // The same rule for both code types.
         { new PrintContent { Type = ContentType.Barcode, Content = "AB\u001b@" }, "Block 1 (Barcode): a CODE128 barcode holds printable ASCII only" },
         // JSON "type": 99 binds to a value with no name.
-        { new PrintContent { Type = (ContentType)(-1), Content = Secret }, "Block 1 (-1): type is not supported" }
+        { new PrintContent { Type = (ContentType)(-1), Content = Secret }, "Block 1 (-1): type is not supported" },
+        // The same for every other enum: a number with no name binds.
+        { new PrintContent { Type = ContentType.Text, Content = Secret, Alignment = (Alignment)99 }, NotAValidValue(1, "Text", "alignment", "99", AlignmentNames) },
+        { new PrintContent { Type = ContentType.Separator, Alignment = (Alignment)(-1) }, NotAValidValue(1, "Separator", "alignment", "-1", AlignmentNames) },
+        { new PrintContent { Type = ContentType.Text, Content = Secret, Style = [PrintStyle.Bold, PrintStyle.FontB, (PrintStyle)9] }, NotAValidValue(1, "Text", "style[2]", "9", PrintStyleNames) },
+        { new PrintContent { Type = ContentType.Separator, Style = [(PrintStyle)int.MinValue] }, NotAValidValue(1, "Separator", "style[0]", "-2147483648", PrintStyleNames) },
+        { new PrintContent { Type = ContentType.Barcode, Content = Secret, BarcodeOptions = new BarcodeOptions { Type = (BarcodeType)10 } }, NotAValidValue(1, "Barcode", "barcodeOptions.type", "10", BarcodeTypeNames) },
+        { new PrintContent { Type = ContentType.Barcode, Content = Secret, BarcodeOptions = new BarcodeOptions { Width = (BarWidth)3 } }, NotAValidValue(1, "Barcode", "barcodeOptions.width", "3", BarWidthNames) },
+        { new PrintContent { Type = ContentType.Barcode, Content = Secret, BarcodeOptions = new BarcodeOptions { LabelPosition = (BarLabelPosition)4 } }, NotAValidValue(1, "Barcode", "barcodeOptions.labelPosition", "4", BarLabelPositionNames) },
+        { new PrintContent { Type = ContentType.QRCode, Content = Secret, QRCodeOptions = new QRCodeOptions { Model = (QRCodeModel)3 } }, NotAValidValue(1, "QRCode", "qrCodeOptions.model", "3", QRCodeModelNames) },
+        { new PrintContent { Type = ContentType.QRCode, Content = Secret, QRCodeOptions = new QRCodeOptions { Size = (QRCodeSize)3 } }, NotAValidValue(1, "QRCode", "qrCodeOptions.size", "3", QRCodeSizeNames) },
+        { new PrintContent { Type = ContentType.QRCode, Content = Secret, QRCodeOptions = new QRCodeOptions { CorrectionLevel = (QRCodeCorrectionLevel)4 } }, NotAValidValue(1, "QRCode", "qrCodeOptions.correctionLevel", "4", QRCodeCorrectionLevelNames) },
+        // A block with no content prints nothing; its enum values are still checked.
+        { new PrintContent { Type = ContentType.QRCode, QRCodeOptions = new QRCodeOptions { Size = (QRCodeSize)(-1) } }, NotAValidValue(1, "QRCode", "qrCodeOptions.size", "-1", QRCodeSizeNames) },
+        // Also in an options object that the block type does not read.
+        { new PrintContent { Type = ContentType.Text, Content = Secret, BarcodeOptions = new BarcodeOptions { Width = (BarWidth)99 } }, NotAValidValue(1, "Text", "barcodeOptions.width", "99", BarWidthNames) },
+        // The first field at fault is named.
+        { new PrintContent { Type = ContentType.Text, Alignment = (Alignment)3, Style = [(PrintStyle)99] }, NotAValidValue(1, "Text", "alignment", "3", AlignmentNames) }
     };
+
+    // Written out, not read from the enums: a renamed or reordered member must fail a test.
+    internal const string AlignmentNames = "Left, Center or Right";
+    internal const string PrintStyleNames = "Normal, Bold, Italic, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode or UpsideDownMode";
+    internal const string BarcodeTypeNames = "UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF, CODABAR, GS1_128 or GS1_DATABAR_OMNIDIRECTIONAL";
+    internal const string BarWidthNames = "Thin, Default or Thick";
+    internal const string BarLabelPositionNames = "None, Above, Below or Both";
+    internal const string QRCodeModelNames = "Model1, Model2 or Micro";
+    internal const string QRCodeSizeNames = "Normal, Large or ExtraLarge";
+    internal const string QRCodeCorrectionLevelNames = "Percent7, Percent15, Percent25 or Percent30";
+
+    internal static string NotAValidValue(int block, string blockType, string field, string number, string validNames)
+        => $"Block {block} ({blockType}): {field} {number} is not a valid value; use {validNames}";
+
+    // JSON "alignment": 99 printed centered and answered 200.
+    [Fact]
+    public async Task PrintAsync_EnumNumberWithNoName_IsLoggedOnceAsAWarning()
+    {
+        var logger = new RecordingLogger<PrinterService>();
+        List<PrintContent> content = [Text(), new PrintContent { Type = ContentType.Text, Content = Secret, Alignment = (Alignment)99 }];
+
+        var result = await NewService(logger).PrintAsync(content);
+
+        Assert.Equal(PrintResult.Invalid("Block 1 (Text): alignment 99 is not a valid value; use Left, Center or Right"), result);
+        var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
+        Assert.Equal(
+            (LogLevel.Warning, "Rejected print: block 1 (Text) failed with PrintContentException: alignment 99 is not a valid value; use Left, Center or Right"),
+            entry);
+        Assert.All(logger.Entries, e => Assert.DoesNotContain(Secret, e.Message));
+    }
+
+    public static TheoryData<PrintContent> BlocksWithEveryEnumMember()
+    {
+        var data = new TheoryData<PrintContent>();
+        foreach (var alignment in Enum.GetValues<Alignment>())
+            data.Add(new PrintContent { Type = ContentType.Text, Content = "x", Alignment = alignment });
+        data.Add(new PrintContent { Type = ContentType.Text, Content = "x", Style = [.. Enum.GetValues<PrintStyle>()] });
+        foreach (var width in Enum.GetValues<BarWidth>())
+            data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-0007", BarcodeOptions = new BarcodeOptions { Width = width } });
+        foreach (var position in Enum.GetValues<BarLabelPosition>())
+            data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-0007", BarcodeOptions = new BarcodeOptions { LabelPosition = position } });
+        foreach (var model in Enum.GetValues<QRCodeModel>())
+            data.Add(new PrintContent { Type = ContentType.QRCode, Content = "x", QRCodeOptions = new QRCodeOptions { Model = model } });
+        foreach (var size in Enum.GetValues<QRCodeSize>())
+            data.Add(new PrintContent { Type = ContentType.QRCode, Content = "x", QRCodeOptions = new QRCodeOptions { Size = size } });
+        foreach (var level in Enum.GetValues<QRCodeCorrectionLevel>())
+            data.Add(new PrintContent { Type = ContentType.QRCode, Content = "x", QRCodeOptions = new QRCodeOptions { CorrectionLevel = level } });
+        // No content: the symbology rules for the data are not the subject here.
+        foreach (var type in Enum.GetValues<BarcodeType>())
+            data.Add(new PrintContent { Type = ContentType.Barcode, BarcodeOptions = new BarcodeOptions { Type = type } });
+        // Fields the JSON left out or set to null.
+        data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-0007", BarcodeOptions = new BarcodeOptions { Width = null, LabelPosition = null } });
+        data.Add(new PrintContent { Type = ContentType.Text, Content = "x", Style = [] });
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(BlocksWithEveryEnumMember))]
+    public async Task BuildDocumentAsync_DefinedEnumValue_IsAccepted(PrintContent block)
+    {
+        Assert.NotEmpty(await NewService().BuildDocumentAsync([block], null));
+    }
+
+    // The list in BlockEnums is written by hand: an enum property added to a model with no check there fails here.
+    [Fact]
+    public async Task BuildDocumentAsync_EveryEnumPropertyOfABlock_RejectsANumberWithNoName()
+    {
+        var checkedProperties = 0;
+        foreach (var owner in new[] { typeof(PrintContent), typeof(BarcodeOptions), typeof(QRCodeOptions), typeof(ImageOptions) })
+        {
+            foreach (var property in owner.GetProperties())
+            {
+                // The block type has its own check.
+                if (property == typeof(PrintContent).GetProperty(nameof(PrintContent.Type)) || UndefinedEnumValue(property.PropertyType) is not { } value)
+                    continue;
+
+                var block = new PrintContent { Type = ContentType.Text, Content = "x", BarcodeOptions = new BarcodeOptions(), QRCodeOptions = new QRCodeOptions(), ImageOptions = new ImageOptions() };
+                var target = owner == typeof(PrintContent)
+                    ? block
+                    : typeof(PrintContent).GetProperties().Single(options => options.PropertyType == owner).GetValue(block);
+                property.SetValue(target, value);
+
+                var exception = await Record.ExceptionAsync(() => NewService().BuildDocumentAsync([block], null));
+
+                Assert.True(
+                    exception is PrintContentException && exception.Message.Contains("99 is not a valid value", StringComparison.Ordinal),
+                    $"{owner.Name}.{property.Name} takes a number with no name");
+                checkedProperties++;
+            }
+        }
+
+        Assert.Equal(8, checkedProperties);
+        // The job options are not part of a block: an enum there needs its own check.
+        Assert.DoesNotContain(typeof(PrintOptions).GetProperties(), property => UndefinedEnumValue(property.PropertyType) is not null);
+    }
+
+    // Null: the property holds no enum. Else 99 as the enum, or a list with that one entry.
+    private static object? UndefinedEnumValue(Type propertyType)
+    {
+        var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (type.IsEnum)
+            return Enum.ToObject(type, 99);
+
+        if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(List<>) || !type.GetGenericArguments()[0].IsEnum)
+            return null;
+
+        var list = (IList)Activator.CreateInstance(type)!;
+        list.Add(Enum.ToObject(type.GetGenericArguments()[0], 99));
+        return list;
+    }
 
     [Fact]
     public async Task PrintAsync_UnknownBlockType_IsLoggedOnceAsAWarning()
@@ -459,6 +587,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     [InlineData("""{"content":[""", "$.content[0]")]
     [InlineData("""{"name":5,"message":"m"}""", "$.name")]
     [InlineData("[]", "$")]
+    [MemberData(nameof(UnknownEnumNames))]
     public async Task PostPrinter_ModelBindingError_ReturnsThePathWithOwnText(string json, string expectedPath)
     {
         var body = await PostBadRequestAsync(json);
@@ -486,19 +615,21 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     [InlineData("""{"content":[{"type":-1}]}""", "Block 0 (-1): type is not supported")]
     // The enum converter reads a number in a string as the number.
     [InlineData("""{"content":[{"type":"99"}]}""", "Block 0 (99): type is not supported")]
-    public async Task PostPrinter_UnknownNumericBlockType_Returns400(string json, string expectedError)
+    [MemberData(nameof(EnumNumbersWithNoName))]
+    public async Task PostPrinter_EnumNumberWithNoName_Returns400(string json, string expectedError)
     {
         var body = await PostBadRequestAsync(json);
 
         Assert.Equal(expectedError, body.Error);
     }
 
-    // A number that names a block type was valid before #67 and stays valid: the job reaches the printer step.
+    // A number that names an enum member and a name in any casing stay valid: the job reaches the printer step.
     [Theory]
     [InlineData("""{"content":[{"type":0,"content":"x"}]}""")]
     [InlineData("""{"content":[{"type":"text","content":"x"}]}""")]
     [InlineData("""{"content":[{"type":4},{"type":6},{"type":5}]}""")]
-    public async Task PostPrinter_BlockTypeAsNumberOrLowerCaseName_PassesValidation(string json)
+    [MemberData(nameof(ValidEnumForms))]
+    public async Task PostPrinter_DefinedEnumNumberOrNameInAnyCase_PassesValidation(string json)
     {
         var response = await _client.PostAsync("/api/printer", TestHttp.Json(json));
 
@@ -512,6 +643,94 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
         var (_, text) = await _client.CallToolAsync("print", """{"content":[{"type":99}]}""");
 
         Assert.Equal("Not printed: Block 0 (99): type is not supported", text);
+    }
+
+    private const string ValuePlaceholder = "VALUE";
+
+    // One row per enum field of a block: the block JSON, the field, a number that names a member, a member name, the names in the error.
+    private static readonly (string Block, string BlockType, string Field, string DefinedNumber, string Name, string ValidNames)[] EnumFields =
+    [
+        ("""{"type":"Text","content":"x","alignment":VALUE}""", "Text", "alignment", "2", "Right", PayloadErrorTests.AlignmentNames),
+        ("""{"type":"Text","content":"x","style":["Bold",VALUE]}""", "Text", "style[1]", "4", "DoubleHeight", PayloadErrorTests.PrintStyleNames),
+        ("""{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"type":VALUE}}""", "Barcode", "barcodeOptions.type", "5", "CODE128", PayloadErrorTests.BarcodeTypeNames),
+        ("""{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"width":VALUE}}""", "Barcode", "barcodeOptions.width", "0", "Thick", PayloadErrorTests.BarWidthNames),
+        ("""{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"labelPosition":VALUE}}""", "Barcode", "barcodeOptions.labelPosition", "3", "Above", PayloadErrorTests.BarLabelPositionNames),
+        ("""{"type":"QRCode","content":"x","qrCodeOptions":{"model":VALUE}}""", "QRCode", "qrCodeOptions.model", "0", "Micro", PayloadErrorTests.QRCodeModelNames),
+        ("""{"type":"QRCode","content":"x","qrCodeOptions":{"size":VALUE}}""", "QRCode", "qrCodeOptions.size", "2", "ExtraLarge", PayloadErrorTests.QRCodeSizeNames),
+        ("""{"type":"QRCode","content":"x","qrCodeOptions":{"correctionLevel":VALUE}}""", "QRCode", "qrCodeOptions.correctionLevel", "3", "Percent25", PayloadErrorTests.QRCodeCorrectionLevelNames)
+    ];
+
+    private static string JobWith(string block, string value)
+        => "{\"content\":[" + block.Replace(ValuePlaceholder, value, StringComparison.Ordinal) + "]}";
+
+    public static TheoryData<string, string> EnumNumbersWithNoName()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (block, blockType, field, _, _, validNames) in EnumFields)
+        {
+            data.Add(JobWith(block, "99"), PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
+            data.Add(JobWith(block, "-1"), PayloadErrorTests.NotAValidValue(0, blockType, field, "-1", validNames));
+            // The enum converter reads a number in a string as the number.
+            data.Add(JobWith(block, "\"99\""), PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
+        }
+
+        return data;
+    }
+
+    public static TheoryData<string> ValidEnumForms()
+    {
+        var data = new TheoryData<string>();
+        foreach (var (block, _, _, definedNumber, name, _) in EnumFields)
+        {
+            data.Add(JobWith(block, definedNumber));
+            data.Add(JobWith(block, $"\"{name}\""));
+            data.Add(JobWith(block, $"\"{name.ToLowerInvariant()}\""));
+            data.Add(JobWith(block, $"\"{name.ToUpperInvariant()}\""));
+        }
+
+        // Every enum field left out, with and without its options object.
+        data.Add("""{"content":[{"type":"Text","content":"x"},{"type":"Barcode","content":"BOX-0007"},{"type":"QRCode","content":"x"}]}""");
+        data.Add("""{"content":[{"type":"Barcode","content":"BOX-0007","barcodeOptions":{}},{"type":"QRCode","content":"x","qrCodeOptions":{}}]}""");
+        // The two fields that take null, and a style list with no entry.
+        data.Add("""{"content":[{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"width":null,"labelPosition":null}},{"type":"Text","content":"x","style":[]}]}""");
+        return data;
+    }
+
+    // A name that does not exist fails in model binding.
+    public static TheoryData<string, string> UnknownEnumNames()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (block, _, field, _, _, _) in EnumFields)
+            data.Add(JobWith(block, "\"Bogus\""), $"$.content[0].{field}");
+        return data;
+    }
+
+    public static TheoryData<string, string> McpEnumNumbersWithNoName()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (block, blockType, field, _, _, validNames) in EnumFields)
+            data.Add(JobWith(block, "99"), "Not printed: " + PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(McpEnumNumbersWithNoName))]
+    public async Task McpPrint_EnumNumberWithNoName_IsNotPrinted(string arguments, string expectedText)
+    {
+        var (isError, text) = await _client.CallToolAsync("print", arguments);
+
+        Assert.False(isError);
+        Assert.Equal(expectedText, text);
+    }
+
+    [Fact]
+    public async Task McpPrint_DefinedEnumNumbersAndLowerCaseNames_PassValidation()
+    {
+        var (_, text) = await _client.CallToolAsync(
+            "print",
+            """{"content":[{"type":"Text","content":"x","alignment":0,"style":["bold",4]},{"type":"QRCode","content":"x","qrCodeOptions":{"model":"model2","size":1,"correctionLevel":"percent15"}},{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"type":5,"width":"thin","labelPosition":3}}]}""");
+
+        Assert.Equal("Not printed: Printer not ready: printer unreachable", text);
     }
 
     public static TheoryData<string, string?> WrongContentTypes() => new()
