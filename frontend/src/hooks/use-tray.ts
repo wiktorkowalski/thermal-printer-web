@@ -5,7 +5,7 @@ import { TRAY_EVENT, dropLegacyTray } from "@/lib/tray";
 
 /**
  * loading: the first read runs. ready: `jobs` is the list (it can be empty).
- * off: the server keeps no journal. error: the read failed; `refresh` tries again.
+ * off: the server keeps no journal (503 `journal-off`). error: the read failed; `refresh` tries again.
  */
 export type TrayStatus = "loading" | "ready" | "off" | "error";
 
@@ -15,6 +15,8 @@ export interface TrayState {
   jobs: PrintJobSummary[];
   hasMore: boolean;
   loadingMore: boolean;
+  /** The last read of an older page failed; `loadMore` tries again. */
+  moreFailed: boolean;
   refresh: () => void;
   loadMore: () => void;
 }
@@ -31,18 +33,20 @@ const AFTER_PRINT_MS = 800;
 export function useTray(): TrayState {
   const [page, setPage] = useState<Page>({ status: "loading", jobs: [], next: null });
   const [loadingMore, setLoadingMore] = useState(false);
+  const [moreFailed, setMoreFailed] = useState(false);
   // Each read of the first page starts a new generation; an answer of an older one is dropped.
   const generation = useRef(0);
 
   const refresh = useCallback(() => {
     const mine = ++generation.current;
     setLoadingMore(false);
+    setMoreFailed(false);
     printerApi.listJobs().then(
       (list) => {
         if (mine === generation.current) setPage({ status: "ready", jobs: list.jobs, next: list.next });
       },
       (error: PrintError) => {
-        if (mine === generation.current) setPage({ status: error.type === "journal" ? "off" : "error", jobs: [], next: null });
+        if (mine === generation.current) setPage({ status: error.type === "journal-off" ? "off" : "error", jobs: [], next: null });
       },
     );
   }, []);
@@ -50,8 +54,10 @@ export function useTray(): TrayState {
   const { next } = page;
   const loadMore = useCallback(() => {
     if (!next || loadingMore) return;
-    const mine = generation.current;
+    // A new generation: the answer of a first-page read that still runs must not replace the list under this page.
+    const mine = ++generation.current;
     setLoadingMore(true);
+    setMoreFailed(false);
     printerApi.listJobs(next).then(
       (list) => {
         if (mine !== generation.current) return;
@@ -61,7 +67,9 @@ export function useTray(): TrayState {
       },
       () => {
         // The rows on screen stay; the button is there for another try.
-        if (mine === generation.current) setLoadingMore(false);
+        if (mine !== generation.current) return;
+        setLoadingMore(false);
+        setMoreFailed(true);
       },
     );
   }, [next, loadingMore]);
@@ -81,5 +89,5 @@ export function useTray(): TrayState {
     };
   }, [refresh]);
 
-  return { status: page.status, jobs: page.jobs, hasMore: page.next !== null, loadingMore, refresh, loadMore };
+  return { status: page.status, jobs: page.jobs, hasMore: page.next !== null, loadingMore, moreFailed, refresh, loadMore };
 }

@@ -128,12 +128,13 @@ export interface PrintOptions {
 /**
  * Body of every answer from POST /api/printer. On failure `type` says whose fault it is:
  * "validation" (400, the payload), "printer" (503) or "busy" (503 with Retry-After).
- * The job endpoints also answer "journal" (503): the print journal is off or cannot be read.
+ * The job endpoints also answer "journal-off" (503, the print journal is off) and
+ * "journal" (503, the journal cannot be read at the moment).
  */
 export interface PrintResponse {
   success: boolean;
   error?: string | null;
-  type?: "validation" | "printer" | "busy" | "journal" | null;
+  type?: "validation" | "printer" | "busy" | "journal" | "journal-off" | null;
 }
 
 /**

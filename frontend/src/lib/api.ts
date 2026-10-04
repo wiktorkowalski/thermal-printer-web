@@ -14,7 +14,7 @@ const api = axios.create({
 
 export interface PrintError {
   message: string;
-  type: "network" | "printer" | "validation" | "busy" | "journal" | "timeout" | "unknown";
+  type: "network" | "printer" | "validation" | "busy" | "journal" | "journal-off" | "timeout" | "unknown";
   canRetry: boolean;
   details?: string;
   /** Set when the backend names the block: its index in the sent content (from 0) and the reason alone. */
@@ -82,13 +82,13 @@ function parseError(error: unknown): PrintError {
       };
     }
 
-    // The print journal is off or cannot be read: the tray and the reprint do not work. Not a printer fault.
-    if (data?.type === "journal") {
+    // The print journal is off, or cannot be read at the moment: the tray and the reprint do not work. Not a printer fault.
+    if (data?.type === "journal-off" || data?.type === "journal") {
       return {
         message: "[ERROR] No print history",
-        type: "journal",
+        type: data.type,
         canRetry: false,
-        details: "The server keeps no print history at the moment.",
+        details: data.type === "journal-off" ? "The server keeps no print history." : "The server cannot read its print history at the moment. Try again in a moment.",
       };
     }
 

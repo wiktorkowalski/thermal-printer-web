@@ -10,7 +10,7 @@ namespace ThermalPrinterWeb.Controllers;
 // (PrintJobDtos.cs). No endpoint here deletes a row.
 [ApiController]
 [Route("api/printer/jobs")]
-[NoIndex]
+[JournalAnswerHeaders]
 public sealed class PrintJobsController(
     IPrinterService printerService,
     PrintJobLog jobLog,
@@ -89,6 +89,9 @@ public sealed class PrintJobsController(
                 return JobNotFound();
 
             PrintJobTrace.Current?.ReprintOf = stored.OriginalId;
+            // The reason is one of the fixed texts of the reader: no row content.
+            if (stored.Content is null)
+                logger.LogWarning("Rejected reprint: job {JobId} has no full copy in the journal ({Reason})", jobId, stored.NoCopyReason);
 
             // The journal holds no full copy: a refused job, with the reason.
             var result = stored.Content is null
@@ -108,7 +111,7 @@ public sealed class PrintJobsController(
     private async Task<(T? Value, IActionResult? Fault)> ReadAsync<T>(Guid? jobId, Func<CancellationToken, Task<T>> read)
     {
         if (!journal.IsOn)
-            return (default, JournalFault(JournalOffError));
+            return (default, JournalFault(JournalOffError, PrintResponse.JournalOffType));
 
         try
         {
@@ -120,7 +123,7 @@ public sealed class PrintJobsController(
                 logger.LogWarning(ex, "Journal read failed: the job list");
             else
                 logger.LogWarning(ex, "Journal read failed: job {JobId}", jobId);
-            return (default, JournalFault(JournalUnavailableError));
+            return (default, JournalFault(JournalUnavailableError, PrintResponse.JournalType));
         }
     }
 
@@ -129,20 +132,25 @@ public sealed class PrintJobsController(
 
     private NotFoundObjectResult JobNotFound() => NotFound(new PrintResponse(false, NotFoundError, PrintResponse.ValidationType));
 
-    private ObjectResult JournalFault(string error)
-        => StatusCode(StatusCodes.Status503ServiceUnavailable, new PrintResponse(false, error, PrintResponse.JournalType));
+    private ObjectResult JournalFault(string error, string type)
+        => StatusCode(StatusCodes.Status503ServiceUnavailable, new PrintResponse(false, error, type));
 }
 
 // The journal holds what was printed: no search engine indexes it and no cache keeps it.
 // Row text is caller text, so no browser may guess a content type other than JSON for it.
+// "Always run": also on an answer that a filter gives before the action, such as the 400 for a query value that does not bind.
 [AttributeUsage(AttributeTargets.Class)]
-internal sealed class NoIndexAttribute : ActionFilterAttribute
+internal sealed class JournalAnswerHeadersAttribute : Attribute, IAlwaysRunResultFilter
 {
-    public override void OnActionExecuting(ActionExecutingContext context)
+    public void OnResultExecuting(ResultExecutingContext context)
     {
         var headers = context.HttpContext.Response.Headers;
         headers["X-Robots-Tag"] = "noindex";
         headers.CacheControl = "no-store";
         headers.XContentTypeOptions = "nosniff";
+    }
+
+    public void OnResultExecuted(ResultExecutedContext context)
+    {
     }
 }

@@ -108,7 +108,7 @@ Located in `frontend/` directory.
 - TailwindCSS v4 with theme tokens in `src/index.css` (light + dark); fonts Instrument Serif / Instrument Sans / DM Mono
 - `frontend/src/components/paper/` - `PaperDocument` renders any `PrintContent[]` read-only (receipts, tray thumbnails)
 - localStorage keys: `thermal-printer-templates` (saved templates), `thermal-printer-draft-<note|template|receipt>` (drafts), `thermal-printer-theme`. The old key `thermal-printer-tray` is removed at startup.
-- Tray (`hooks/use-tray.ts`, `components/tray-drawer.tsx`, `lib/tray.ts`): reads `GET /api/printer/jobs?printed=true` at startup, when the tray opens and after each print. It keeps nothing in the browser. A thumbnail reads the blocks of its job once (`GET /api/printer/jobs/{id}`); an image shows as `[image]`. Reprint calls the reprint endpoint with source `web/tray`. The tray has no delete. Journal off (503 `journal`), read fault and empty list each have their own text.
+- Tray (`hooks/use-tray.ts`, `components/tray-drawer.tsx`, `lib/tray.ts`): reads `GET /api/printer/jobs?printed=true` at startup, when the tray opens and after each print. It keeps nothing in the browser. A thumbnail reads the blocks of its job once (`GET /api/printer/jobs/{id}`); an image shows as `[image]`. Reprint calls the reprint endpoint with source `web/tray`. The tray has no delete. Journal off (503 `journal-off`), read fault (with a "Try again" button) and empty list each have their own text.
 - Journal text (`title`, `source`, block content) is caller text: render it as React text only. No `dangerouslySetInnerHTML`, no URL or CSS made from it.
 - Status polls every 30 s only while the tab is visible; the Print button is disabled while the last status read says not ready (a failed status request does not disable it)
 
@@ -118,7 +118,7 @@ Located in `frontend/` directory.
 - 503 `busy`: waits the `Retry-After` time, then sends again, up to 2 more times.
 - 503 `printer`, network fault, timeout: sends again up to 2 more times with a short delay.
 - 413: shown as "Print too large", no retry.
-- 503 `journal` (job endpoints): shown as "No print history", no retry.
+- 503 `journal-off` or `journal` (job endpoints): shown as "No print history", no retry.
 - A reprint uses the same handling; a 404 (the job is gone) is shown like a 400.
 
 **Routing**: React Router: `/` (Note), `/template` (Template), `/receipt` (Receipt). Old paths `/builder` and `/receipts` redirect.
@@ -237,14 +237,15 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 - A job has only these fields: `id`, `createdAt` (UTC), `transport`, `source`, `result` (name of `JobResult`), `error`, `title`, `blockCount`, `paperDots`, `reprintOf`, `canReprint`. The records in `Models/PrintJobDtos.cs` are the allow-list; `JournalReadTests` fails when a field is added without a change to its list.
 - Never served: `RemoteIp`, `UserAgent`, `Headers`, `Exception`, `Log`, `Request`, `Bytes`, `PlainText`, `PrinterStatus`, `AppVersion`. No picture is served.
-- Errors are a `PrintResponse` with a fixed text: 400 `validation` (the id or `before` is not a GUID in the form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`), 404 `validation` (`Job not found`), 503 `journal` (the journal is off, not open yet, or the read failed; one Warning with the job id).
-- Every answer has `X-Robots-Tag: noindex`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+- Errors are a `PrintResponse` with a fixed text: 400 `validation` (the id or `before` is not a GUID in the form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`), 404 `validation` (`Job not found`), 503 `journal-off` (the journal is off), 503 `journal` (the journal is not open yet, or the read failed; a later call can pass). A failed read logs one Warning, with the job id when the read is for one job; a journal that is off logs nothing.
+- Every answer of the controller has `X-Robots-Tag: noindex`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 - Reads use `PrintJournalReader`: a new context per read, `AsNoTracking`, a 5 s limit. A list reads `PrintJobs` only. A read selects the columns it serves; do not load a `PrintJobPayload` entity (its blobs are up to 30 MB).
 
 **Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes` (that needs the reset prelude of issue #45).
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
-- No blocks stored (the job was refused before the print path), or a picture that is not stored: 400 with a fixed reason.
+- No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
+- The call takes no body. A body over 1024 bytes is refused (`PrintJobsController.MaxReprintBodyBytes`); no body is stored.
 - The reprint is a new journal row: transport `http:reprint`, `ReprintOf` = the id of the first job (also for a reprint of a reprint). The row is a reference plus the small facts: no `Request`, `Bytes`, `Blocks`, `Options` or `PlainText` (`PrintJobEntry.ToRow`). So a repeated reprint of a large job adds about 1 KB per call. The content of a reprint row is read from its first job, for `GET /jobs/{id}` and for the next reprint. It writes the one `Print job:` line. An unknown id, a bad id and a busy answer store no row and write no line.
 
 ### Content rules
@@ -288,7 +289,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 `Print job: transport=<http|http:reprint|mcp:tool> source="..." userAgent="..." result=<Printed|Validation|Printer|Busy>`.
 - `source` and `userAgent` are caller text: `LogSafeText.Clean` cuts and cleans them. Use it for any caller text in a log.
 - The reason of a failure is logged once, where it happens. Do not log block content: the endpoint is public.
-- The web editor sends `source` `web/note`, `web/template` or `web/receipt`.
+- The web editor sends `source` `web/note`, `web/template` or `web/receipt`; the tray sends `web/tray` with a reprint.
 
 ### Journal
 

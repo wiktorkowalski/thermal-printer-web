@@ -328,7 +328,7 @@ public sealed class JournalReadTests
         var (status, body) = await client.SendJsonAsync(new HttpMethod(method), url);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
-        AssertResponse(body, PrintResponse.JournalType, PrintJobsController.JournalOffError);
+        AssertResponse(body, PrintResponse.JournalOffType, PrintJobsController.JournalOffError);
         Assert.Empty(app.Printer.Jobs);
     }
 
@@ -371,6 +371,25 @@ public sealed class JournalReadTests
         Assert.Equal(HttpStatusCode.BadRequest, status);
         AssertResponse(body, PrintResponse.ValidationType, error);
         Assert.Empty(app.Printer.Jobs);
+    }
+
+    // The answer comes from a filter, before the action: it has the print error shape and the same headers.
+    [Theory]
+    [InlineData("?limit=abc")]
+    [InlineData("?printed=maybe")]
+    public async Task List_QueryValueThatDoesNotBind_Answers400WithTheHeaders(string query)
+    {
+        await using var app = new App();
+        var client = app.CreateClient();
+        await app.JournalIdleAsync();
+
+        using var response = await client.GetAsync(JobsUrl + query);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(PrintResponse.ValidationType, body.GetProperty("type").GetString());
+        Assert.Equal("noindex", Assert.Single(response.Headers.GetValues("X-Robots-Tag")));
+        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
     }
 
     [Theory]

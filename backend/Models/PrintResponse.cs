@@ -5,6 +5,9 @@ public record PrintResponse(bool Success, string? Error = null, string? Type = n
     public const string ValidationType = "validation";
     public const string PrinterType = "printer";
     public const string BusyType = "busy";
-    // The print journal is off or cannot be read. Only the job endpoints answer with it.
+    // Only the job endpoints answer with these two.
+    // The print journal cannot be read at the moment (not open yet, or a read fault): a later call can pass.
     public const string JournalType = "journal";
+    // The print journal is off: no later call passes until the settings change.
+    public const string JournalOffType = "journal-off";
 }

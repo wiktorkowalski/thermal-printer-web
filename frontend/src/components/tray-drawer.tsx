@@ -121,10 +121,10 @@ export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; on
 
         <ol className="flex grow flex-col gap-6 overflow-y-auto px-6 py-6" aria-busy={status === "loading"}>
           {status === "loading" && <li className={noteClass}>Reading the tray…</li>}
-          {status === "off" && <li className={noteClass}>The server keeps no print history at the moment. Prints still go out; the tray stays empty.</li>}
+          {status === "off" && <li className={noteClass}>The server keeps no print history. Prints still go out; the tray stays empty.</li>}
           {status === "error" && (
             <li className={cn(noteClass, "flex flex-col items-start gap-3")} role="alert">
-              The tray did not load. Check the connection to the server.
+              The tray did not load. The server did not answer, or it cannot read its print history at the moment.
               <button type="button" onClick={refresh} className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] text-ink hover:bg-well">
                 <RefreshCw className="size-3.5" aria-hidden="true" />
                 Try again
@@ -166,7 +166,7 @@ export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; on
         {tray.hasMore && (
           <footer className="border-t border-line px-6 py-4">
             <button type="button" onClick={tray.loadMore} disabled={tray.loadingMore} className="h-11 text-sm text-ink-2 hover:underline disabled:opacity-40">
-              {tray.loadingMore ? "Reading…" : "Show older prints"}
+              {tray.loadingMore ? "Reading…" : tray.moreFailed ? "The older prints did not load. Try again" : "Show older prints"}
             </button>
           </footer>
         )}
