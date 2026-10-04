@@ -8,7 +8,7 @@ using ThermalPrinterWeb.Services.Journal;
 
 namespace ThermalPrinterWeb.Tests;
 
-// The journal tools over real JSON-RPC. /mcp has no auth, and an answer goes to a language model:
+// The journal tools over real JSON-RPC. The HTTP print API has no auth, and an answer goes to a language model:
 // these tests pin what an answer holds and how row text is marked.
 public sealed class McpJournalToolTests
 {

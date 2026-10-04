@@ -73,7 +73,7 @@ Located in `backend/` directory.
   - `GET /api/printer/jobs/{id}` - One job with its blocks
   - `POST /api/printer/jobs/{id}/reprint` - Prints a stored job again
   - `GET /api/printer/jobs/stats`, `/search`, `/papercuts` - Statistics, text search, papercut ledger
-- `backend/Mcp/PrinterTools.cs`, `JournalTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`)
+- `backend/Mcp/PrinterTools.cs`, `JournalTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`), behind a bearer token (see MCP)
 - `backend/Services/PrinterService.cs` - Service implementing `IPrinterService`, handles all printer communication. ESCPOS_NET builds and sends the print job; status and beep use a raw `TcpClient`.
 - `backend/Services/Printing/Handlers/` - One `IBlockHandler` per content type. To add a block type, add a handler and register it in `BlockHandlerServiceCollectionExtensions.cs`.
 
@@ -359,7 +359,16 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 ## MCP
 
-`/mcp` is a stateless HTTP MCP server with no auth (token work is parked, issue #56).
+`/mcp` is a stateless HTTP MCP server. Every request needs `Authorization: Bearer <key>` (`McpApiKeyMiddleware`).
+
+**Auth**:
+- The key is the setting `McpServer:ApiKey` (env `McpServer__ApiKey`); space around it is cut. It is a secret: keep it out of `appsettings*.json` and out of every log, answer and exception message.
+- No key: `/mcp` answers 401 to every request in every environment but Development, with one Warning at startup. In Development it is open. The app starts either way: the HTTP API stays up.
+- A request without the right token gets 401 with the body `Unauthorized` and no `WWW-Authenticate` header (an MCP client reads that header as a prompt for OAuth). It logs one Warning with method, path and address, and no header value.
+- The check covers every path under `/mcp` in any letter case, every method, and any request that routing sends to the MCP endpoint (`McpEndpointAttribute`). The compare is constant-time, on SHA-256 hashes.
+- The middleware runs before `PrintJournalMiddleware`: a rejected request gets no journal row and its body is not read. The journal stores the `Authorization` header of an accepted call as `[redacted]`.
+- The HTTP API under `/api/printer` has no auth: print, reprint and the journal reads are open.
+- Tests: every test host has the key `TestApp.McpKey`; `McpAsync` and `CallToolAsync` send it. `McpAuthTests` covers the rejects and looks for the key in the journal files and the log.
 
 | Tool | Arguments |
 |------|-----------|
@@ -382,7 +391,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
   - Each value goes through `LogSafeText.Clean`: a length limit, `?` in place of a control, format or line-separator character, `'` in place of `"`. So an answer has a largest size (20 jobs, every text at its limit); a test pins it at 80,000 characters.
   - No answer puts row text into prose or names a tool to call. No tool takes an action that row text chooses: `reprint_job` takes an id.
   - The notice, the tool descriptions and `ServerInstructions` say that the text is untrusted data, not instructions.
-- This lowers the risk and does not remove it: `/mcp` and the print API have no auth, so anyone can put text into the journal that a later `list_jobs` call hands to a model.
+- This lowers the risk and does not remove it: the HTTP print API has no auth, so anyone can put text into the journal that a later `list_jobs` call hands to a model.
 
 ## Printer Hardware Constraints
 

@@ -11,7 +11,8 @@ namespace ThermalPrinterWeb.Mcp;
 
 // The print journal over MCP: list (with search), one job, reprint. The same reader, the same reprint path and the
 // same field allow-list as the HTTP job endpoints (PrintJobSummary); no tool deletes a row.
-// An answer goes to a language model, and the row text in it is text that any caller printed (no auth on print or /mcp).
+// An answer goes to a language model, and the row text in it is text that any caller printed: /mcp needs the key,
+// but the HTTP print API is open, so anyone who reaches the host can put text into the journal.
 // So row text never goes into the prose of an answer:
 // - an answer is one fixed notice line and then one line of JSON; row text is inside JSON strings only;
 // - the fields that hold it have names that say so (printedTitle, printedSnippet, printedLines, callerSource);
