@@ -1,12 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
-using ESCPOS_NET.Emitters;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
@@ -148,40 +145,18 @@ public sealed class DecodeQueueTests
 
 // The busy path from the handler to the response. No test here reaches the network:
 // a busy job stops while the document is built.
-public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app) : IClassFixture<PayloadErrorHttpTests.ProductionApp>
+public sealed class DecodeQueueBusyTests(ClosedPortApp app) : IClassFixture<ClosedPortApp>
 {
-    private sealed class RecordingLogger<T> : ILogger<T>
-    {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => Entries.Add((logLevel, formatter(state, exception) + exception));
-    }
-
-    private static string PngBase64(Action<Image<Rgba32>>? draw = null)
-    {
-        using var image = new Image<Rgba32>(64, 64);
-        draw?.Invoke(image);
-        using var ms = new MemoryStream();
-        image.SaveAsPng(ms);
-        return Convert.ToBase64String(ms.ToArray());
-    }
-
-    private static PrintContent ImageBlock(string content) => new() { Type = ContentType.Image, Content = content };
-
-    private static BlockContext NewContext() => new(new EPSON(), null);
+    private static string PngBase64() => TestImages.PngBase64(64, 64);
 
     [Fact]
     public async Task Handler_NoPlaceInTheQueue_ThrowsBusyAndAddsNoOutput()
     {
         var queue = new DecodeQueue(maxWaiters: 0, DecodeQueueTests.NoTimeout);
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
 
         await using (new HeldSlot(queue))
-            await Assert.ThrowsAsync<PrintBusyException>(() => new ImageBlockHandler(queue).HandleAsync(ImageBlock(PngBase64()), ctx));
+            await Assert.ThrowsAsync<PrintBusyException>(() => new ImageBlockHandler(queue).HandleAsync(TestBlocks.ImageBlock(PngBase64()), ctx));
 
         Assert.Empty(ctx.Output);
     }
@@ -193,7 +168,7 @@ public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app
         var queue = new DecodeQueue(maxWaiters: 0, DecodeQueueTests.NoTimeout);
 
         await using (new HeldSlot(queue))
-            await Assert.ThrowsAsync<PrintContentException>(() => new ImageBlockHandler(queue).HandleAsync(ImageBlock("not base64 !!"), NewContext()));
+            await Assert.ThrowsAsync<PrintContentException>(() => new ImageBlockHandler(queue).HandleAsync(TestBlocks.ImageBlock("not base64 !!"), TestBlocks.NewContext()));
     }
 
     // No waiter is allowed, so the second image prints only when the failed decode gave the slot back.
@@ -201,21 +176,15 @@ public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app
     public async Task Handler_AfterADamagedImage_PrintsTheNextOne()
     {
         var handler = new ImageBlockHandler(new DecodeQueue(maxWaiters: 0, DecodeQueueTests.NoTimeout));
-        // Noise does not compress, so the cut lands inside the pixel data: the header check passes, the decode fails.
-        var random = new Random(75);
-        var noise = Convert.FromBase64String(PngBase64(image => image.ProcessPixelRows(rows =>
-        {
-            for (var y = 0; y < rows.Height; y++)
-                foreach (ref var pixel in rows.GetRowSpan(y))
-                    pixel = new Rgba32((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256));
-        })));
+        // The cut lands inside the pixel data: the header check passes, the decode fails.
+        var noise = TestImages.NoisePng(seed: 75);
 
         var ex = await Assert.ThrowsAsync<PrintContentException>(
-            () => handler.HandleAsync(ImageBlock(Convert.ToBase64String(noise[..(noise.Length / 2)])), NewContext()));
+            () => handler.HandleAsync(TestBlocks.ImageBlock(Convert.ToBase64String(noise[..(noise.Length / 2)])), TestBlocks.NewContext()));
         Assert.Contains("file is damaged", ex.Message);
 
-        var ctx = NewContext();
-        await handler.HandleAsync(ImageBlock(PngBase64()), ctx);
+        var ctx = TestBlocks.NewContext();
+        await handler.HandleAsync(TestBlocks.ImageBlock(PngBase64()), ctx);
         Assert.NotEmpty(ctx.Output);
     }
 
@@ -228,7 +197,7 @@ public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app
 
         PrintResult result;
         await using (new HeldSlot(queue))
-            result = await service.PrintAsync([ImageBlock(PngBase64())]);
+            result = await service.PrintAsync([TestBlocks.ImageBlock(PngBase64())]);
 
         Assert.Same(PrintResult.Busy, result);
         var entry = Assert.Single(logger.Entries, e => e.Level >= LogLevel.Information);
@@ -239,12 +208,12 @@ public sealed class DecodeQueueBusyTests(PayloadErrorHttpTests.ProductionApp app
     [Fact]
     public async Task Print_BusyFailure_Returns503WithRetryAfter()
     {
-        var controller = new PrinterController(new McpToolTests.RecordingPrinter { Result = PrintResult.Busy }, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()))
+        var controller = new PrinterController(new RecordingPrinter { Result = PrintResult.Busy }, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
 
-        var response = Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [ImageBlock(PngBase64())] }));
+        var response = Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [TestBlocks.ImageBlock(PngBase64())] }));
 
         Assert.Equal(503, response.StatusCode);
         Assert.Equal(new PrintResponse(false, PrintResult.Busy.Error, "busy"), response.Value);

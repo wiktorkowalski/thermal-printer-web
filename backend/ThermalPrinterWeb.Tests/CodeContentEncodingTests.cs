@@ -1,6 +1,5 @@
 using System.Text;
 using ESCPOS_NET.Emitters;
-using ESCPOS_NET.Utilities;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services.Printing;
 using ThermalPrinterWeb.Services.Printing.Handlers;
@@ -17,16 +16,13 @@ public sealed class CodeContentEncodingTests
     private static readonly byte[] StoreFunction = [0x31, 0x50, 0x30];
     private static readonly byte[] PrintCommand = [0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30];
 
-    // PC852 is active: QR data must not follow the code page.
-    private static BlockContext NewContext()
-        => new(new EPSON(), null) { Encoding = CodePages.GetEncoding("PC852") };
-
     private static async Task<(byte[] Bytes, BlockContext Ctx)> RunQRAsync(string content, QRCodeOptions? options = null)
     {
-        var ctx = NewContext();
+        // PC852 is active: QR data must not follow the code page.
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         await new QRCodeBlockHandler().HandleAsync(
             new PrintContent { Type = ContentType.QRCode, Content = content, QRCodeOptions = options }, ctx);
-        return (ByteSplicer.Combine([.. ctx.Output]), ctx);
+        return (TestBlocks.OutputBytes(ctx), ctx);
     }
 
     private static PrintContent Barcode(string content, BarcodeType type)
@@ -129,7 +125,7 @@ public sealed class CodeContentEncodingTests
     [MemberData(nameof(ControlCodePoints))]
     public async Task QRCode_ControlCharacter_IsRejectedBeforeAnyByte(int codePoint)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         var block = new PrintContent { Type = ContentType.QRCode, Content = "ab" + (char)codePoint + "cd" };
 
         var ex = await Assert.ThrowsAsync<PrintContentException>(() => new QRCodeBlockHandler().HandleAsync(block, ctx));
@@ -210,7 +206,7 @@ public sealed class CodeContentEncodingTests
     [InlineData(BarcodeType.CODE128, "AB\u0080")]
     public async Task Barcode_ContentOutsidePrintableAscii_IsRejectedBeforeAnyByte(BarcodeType type, string content)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         var block = Barcode(content, type);
         block.BarcodeOptions!.HeightInDots = 80;
 
@@ -223,7 +219,7 @@ public sealed class CodeContentEncodingTests
     [Fact]
     public async Task Barcode_Code128PrintableAscii_IsSentInCodeSetB()
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
 
         await new BarcodeBlockHandler().HandleAsync(Barcode("Abc-123 ~", BarcodeType.CODE128), ctx);
 
@@ -235,7 +231,7 @@ public sealed class CodeContentEncodingTests
     [Fact]
     public async Task Barcode_Code128Brace_FillsTheLengthByteExactly()
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
 
         // 2 prefix bytes + 252 characters + 1 doubled brace = 255.
         await new BarcodeBlockHandler().HandleAsync(Barcode("{" + new string('A', 251), BarcodeType.CODE128), ctx);
@@ -251,7 +247,7 @@ public sealed class CodeContentEncodingTests
     [InlineData(253, 0)]   // 508 bytes
     public async Task Barcode_Code128BracesPastTheLengthByte_AreRejected(int braces, int letters)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         var block = Barcode(new string('{', braces) + new string('A', letters), BarcodeType.CODE128);
 
         var ex = await Assert.ThrowsAsync<PrintContentException>(() => new BarcodeBlockHandler().HandleAsync(block, ctx));

@@ -2,10 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,18 +19,7 @@ namespace ThermalPrinterWeb.Tests;
 // No test here reaches the network: the document is built before the first printer call.
 public sealed class PayloadErrorTests
 {
-    private const string Secret = "SECRET-CALLER-CONTENT";
-
-    private sealed class RecordingLogger<T> : ILogger<T>
-    {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => Entries.Add((logLevel, formatter(state, exception) + exception));
-    }
+    private const string Secret = TestBlocks.Secret;
 
     // The production handler registration, so a new block type is covered here too.
     private static PrinterService NewService(ILogger<PrinterService>? logger = null) => new(
@@ -399,16 +386,9 @@ public sealed class PayloadErrorTests
         Assert.True(entry.Message.Length < 100, entry.Message);
     }
 
-    private sealed class FakePrinterService(PrintResult result) : IPrinterService
-    {
-        public Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null) => Task.FromResult(result);
-        public Task<PrinterStatus> GetStatusAsync() => throw new NotSupportedException();
-        public Task<bool> BeepAsync(int count, int duration) => throw new NotSupportedException();
-    }
-
     private static async Task<ObjectResult> PrintViaControllerAsync(PrintResult result)
     {
-        var controller = new PrinterController(new FakePrinterService(result), new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()));
+        var controller = new PrinterController(new RecordingPrinter { Result = result }, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()));
         return Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [Text()] }));
     }
 
@@ -441,21 +421,13 @@ public sealed class PayloadErrorTests
 }
 
 // Real PrinterService behind the HTTP pipeline: every request fails before the first printer call.
-public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp app) : IClassFixture<PayloadErrorHttpTests.ProductionApp>
+public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<ClosedPortApp>
 {
-    public sealed class ProductionApp : WebApplicationFactory<Program>
-    {
-        // Production defaults to the real printer: a request that passes validation by mistake must reach a closed loopback port only.
-        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder
-            .UseEnvironment("Production")
-            .ConfigureServices(services => services.Configure<PrinterOptions>(options => options.Address = "127.0.0.1:9"));
-    }
-
     private readonly HttpClient _client = app.CreateClient();
 
     private async Task<PrintResponse> PostBadRequestAsync(string json)
     {
-        var response = await _client.PostAsync("/api/printer", new StringContent(json, Encoding.UTF8, "application/json"));
+        var response = await _client.PostAsync("/api/printer", TestHttp.Json(json));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<PrintResponse>();
@@ -528,7 +500,7 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
     [InlineData("""{"content":[{"type":4},{"type":6},{"type":5}]}""")]
     public async Task PostPrinter_BlockTypeAsNumberOrLowerCaseName_PassesValidation(string json)
     {
-        var response = await _client.PostAsync("/api/printer", new StringContent(json, Encoding.UTF8, "application/json"));
+        var response = await _client.PostAsync("/api/printer", TestHttp.Json(json));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(new PrintResponse(false, "Printer not ready: printer unreachable", "printer"), await response.Content.ReadFromJsonAsync<PrintResponse>());
@@ -537,7 +509,7 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
     [Fact]
     public async Task McpPrint_UnknownNumericBlockType_IsNotPrinted()
     {
-        var text = await PrinterFaultTests.CallToolAsync(_client, "print", """{"content":[{"type":99}]}""");
+        var (_, text) = await _client.CallToolAsync("print", """{"content":[{"type":99}]}""");
 
         Assert.Equal("Not printed: Block 0 (99): type is not supported", text);
     }
@@ -682,7 +654,7 @@ public sealed class PayloadErrorHttpTests(PayloadErrorHttpTests.ProductionApp ap
     [Fact]
     public async Task McpPrint_ControlCharacterInQRCode_GivesTheSameReason()
     {
-        var text = await PrinterFaultTests.CallToolAsync(_client, "print", """{"content":[{"type":"QRCode","content":"SECRET\u001b@"}]}""");
+        var (_, text) = await _client.CallToolAsync("print", """{"content":[{"type":"QRCode","content":"SECRET\u001b@"}]}""");
 
         Assert.Equal($"Not printed: Block 0 (QRCode): {PayloadErrorTests.QRCodeControl(0x1B, 6)}", text);
     }

@@ -1,14 +1,10 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
-using ESCPOS_NET.Emitters;
-using ESCPOS_NET.Utilities;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Bmp;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Tiff;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -23,27 +19,15 @@ public sealed class ImageBlockHandlerTests
     // GS v 0: the raster command ESCPOS_NET emits in legacy mode.
     private static readonly byte[] RasterCommand = [0x1D, 0x76, 0x30];
 
-    private static byte[] Encode(IImageEncoder encoder, int width = 8, int height = 8)
-    {
-        using var image = new Image<Rgba32>(width, height);
-        using var ms = new MemoryStream();
-        image.Save(ms, encoder);
-        return ms.ToArray();
-    }
-
-    private static byte[] Png(int width = 8, int height = 8) => Encode(new PngEncoder(), width, height);
-    private static byte[] Jpeg() => Encode(new JpegEncoder());
-    private static byte[] Gif() => Encode(new GifEncoder());
-
-    private static BlockContext NewContext() => new(new EPSON(), null);
+    private static byte[] Jpeg() => TestImages.Encode(new JpegEncoder());
+    private static byte[] Gif() => TestImages.Encode(new GifEncoder());
 
     private static Task RunAsync(string content, BlockContext ctx, ImageOptions? options = null)
-        => new ImageBlockHandler()
-            .HandleAsync(new PrintContent { Type = ContentType.Image, Content = content, ImageOptions = options }, ctx);
+        => new ImageBlockHandler().HandleAsync(TestBlocks.ImageBlock(content, options), ctx);
 
     private static async Task<BlockContext> RunAsync(string content, ImageOptions? options = null)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
         await RunAsync(content, ctx, options);
         return ctx;
     }
@@ -51,7 +35,7 @@ public sealed class ImageBlockHandlerTests
     // GS v 0 m xL xH yL yH: width in bytes (8 dots each), height in dots.
     private static (int WidthBytes, int Height) RasterSize(BlockContext ctx)
     {
-        var bytes = ByteSplicer.Combine([.. ctx.Output]);
+        var bytes = TestBlocks.OutputBytes(ctx);
         var at = bytes.AsSpan().IndexOf(RasterCommand);
         Assert.True(at >= 0);
         return (BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at + 4)), BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at + 6)));
@@ -104,7 +88,7 @@ public sealed class ImageBlockHandlerTests
     {
         // Oversize too, so the handler throws before its first await and the count is for this thread.
         var bomb = Convert.ToBase64String(PngDeclaring(30000, 30000, extraChunk: (type, data)));
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(bomb, ctx));
@@ -121,9 +105,9 @@ public sealed class ImageBlockHandlerTests
     [InlineData(576, int.MinValue, "maxHeight -2147483648")]
     public async Task MaxSize_BelowOne_IsRejected(int maxWidth, int maxHeight, string expected)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
         var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(
-            Convert.ToBase64String(Png()), ctx, new ImageOptions { MaxWidth = maxWidth, MaxHeight = maxHeight }));
+            Convert.ToBase64String(TestImages.Png()), ctx, new ImageOptions { MaxWidth = maxWidth, MaxHeight = maxHeight }));
 
         Assert.Equal($"imageOptions.{expected} must be at least 1", ex.Message);
         Assert.Empty(ctx.Output);
@@ -136,7 +120,7 @@ public sealed class ImageBlockHandlerTests
     public async Task MaxWidth_AtTheHeadWidth_IsTheUpperLimit(int maxWidth, int expectedWidthBytes)
     {
         var ctx = await RunAsync(
-            Convert.ToBase64String(Png(width: 1200, height: 40)),
+            Convert.ToBase64String(TestImages.Png(width: 1200, height: 40)),
             new ImageOptions { MaxWidth = maxWidth });
 
         Assert.Equal(expectedWidthBytes, RasterSize(ctx).WidthBytes);
@@ -145,7 +129,7 @@ public sealed class ImageBlockHandlerTests
     [Fact]
     public async Task Jpeg_PhotoSized12Megapixels_IsResizedAndPrints()
     {
-        var ctx = await RunAsync(Convert.ToBase64String(Encode(new JpegEncoder(), 4032, 3024)));
+        var ctx = await RunAsync(Convert.ToBase64String(TestImages.Encode(new JpegEncoder(), 4032, 3024)));
 
         Assert.Equal((72, 432), RasterSize(ctx));
         // The paper limit counts the printed height.
@@ -157,7 +141,7 @@ public sealed class ImageBlockHandlerTests
     [InlineData(431, false)]
     public async Task Image_OverThePaperLimit_IsRejectedBeforeTheDecode(int dotsLeft, bool printed)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
         ctx.AddPaper(PaperLength.MaxDots - dotsLeft);
         // 4032 x 3024 prints 432 dots high.
         var run = RunAsync(Convert.ToBase64String(PngDeclaring(4032, 3024)), ctx);
@@ -199,19 +183,19 @@ public sealed class ImageBlockHandlerTests
     private static async Task AssertPrintsAsync(string content)
     {
         var ctx = await RunAsync(content);
-        Assert.Contains(RasterCommand.AsSpan(), ByteSplicer.Combine([.. ctx.Output]).AsSpan());
+        Assert.Contains(RasterCommand.AsSpan(), TestBlocks.OutputBytes(ctx).AsSpan());
     }
 
     private static async Task<PrintContentException> AssertRejectedAsync(string content)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
         var ex = await Assert.ThrowsAsync<PrintContentException>(() => RunAsync(content, ctx));
         Assert.Empty(ctx.Output);
         return ex;
     }
 
     [Fact]
-    public async Task Png_Prints() => await AssertPrintsAsync(Convert.ToBase64String(Png()));
+    public async Task Png_Prints() => await AssertPrintsAsync(Convert.ToBase64String(TestImages.Png()));
 
     [Fact]
     public async Task Jpeg_Prints() => await AssertPrintsAsync(Convert.ToBase64String(Jpeg()));
@@ -219,7 +203,7 @@ public sealed class ImageBlockHandlerTests
     [Fact]
     public async Task Png_WiderThanThePrintHead_IsResizedAndPrints()
     {
-        var ctx = await RunAsync(Convert.ToBase64String(Png(width: 1200, height: 40)));
+        var ctx = await RunAsync(Convert.ToBase64String(TestImages.Png(width: 1200, height: 40)));
 
         // 576 dots = 72 bytes per row.
         Assert.Equal(72, RasterSize(ctx).WidthBytes);
@@ -230,7 +214,7 @@ public sealed class ImageBlockHandlerTests
     {
         var bomb = Convert.ToBase64String(PngDeclaring(30000, 30000));
         Assert.True(bomb.Length < 200);
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext();
 
         // The handler throws before its first await, so the count is for this thread.
         var before = GC.GetAllocatedBytesForCurrentThread();
@@ -300,7 +284,7 @@ public sealed class ImageBlockHandlerTests
     public async Task MaxWidth_OverTheHeadWidth_IsClampedToTheHead()
     {
         var ctx = await RunAsync(
-            Convert.ToBase64String(Png(width: 1200, height: 40)),
+            Convert.ToBase64String(TestImages.Png(width: 1200, height: 40)),
             new ImageOptions { MaxWidth = 100_000, MaxHeight = 100_000 });
 
         Assert.Equal(72, RasterSize(ctx).WidthBytes);
@@ -310,7 +294,7 @@ public sealed class ImageBlockHandlerTests
     public async Task MaxHeight_OverThePrintLimit_IsClamped()
     {
         var ctx = await RunAsync(
-            Convert.ToBase64String(Png(width: 8, height: ImageBlockHandler.MaxPrintHeight + 904)),
+            Convert.ToBase64String(TestImages.Png(width: 8, height: ImageBlockHandler.MaxPrintHeight + 904)),
             new ImageOptions { MaxHeight = 100_000, PreserveAspectRatio = false });
 
         Assert.Equal(ImageBlockHandler.MaxPrintHeight, RasterSize(ctx).Height);
@@ -321,11 +305,11 @@ public sealed class ImageBlockHandlerTests
     [InlineData("data:image/jpeg;base64,")]
     [InlineData("base64,")]
     public async Task Png_WithPrefix_Prints(string prefix)
-        => await AssertPrintsAsync(prefix + Convert.ToBase64String(Png()));
+        => await AssertPrintsAsync(prefix + Convert.ToBase64String(TestImages.Png()));
 
     [Fact]
     public async Task Png_DeclaredAsGif_Prints()
-        => await AssertPrintsAsync("data:image/gif;base64," + Convert.ToBase64String(Png()));
+        => await AssertPrintsAsync("data:image/gif;base64," + Convert.ToBase64String(TestImages.Png()));
 
     [Fact]
     public async Task Gif_DeclaredAsPng_IsRejected()
@@ -337,9 +321,9 @@ public sealed class ImageBlockHandlerTests
     public static TheoryData<string, byte[]> OtherFormats => new()
     {
         { "GIF", Gif() },
-        { "BMP", Encode(new BmpEncoder()) },
-        { "Webp", Encode(new WebpEncoder()) },
-        { "TIFF", Encode(new TiffEncoder()) },
+        { "BMP", TestImages.Encode(new BmpEncoder()) },
+        { "Webp", TestImages.Encode(new WebpEncoder()) },
+        { "TIFF", TestImages.Encode(new TiffEncoder()) },
         { "unknown", Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"/>") },
         { "unknown", [0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60] },
         // BigTIFF header (version 43): the decoder named in the advisory.
@@ -378,18 +362,7 @@ public sealed class ImageBlockHandlerTests
     [Fact]
     public async Task Png_Truncated_IsRejected()
     {
-        // Noise does not compress, so the cut lands inside the pixel data.
-        using var image = new Image<Rgba32>(64, 64);
-        var random = new Random(34);
-        image.ProcessPixelRows(rows =>
-        {
-            for (var y = 0; y < rows.Height; y++)
-                foreach (ref var pixel in rows.GetRowSpan(y))
-                    pixel = new Rgba32((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256));
-        });
-        using var ms = new MemoryStream();
-        image.SaveAsPng(ms);
-        var png = ms.ToArray();
+        var png = TestImages.NoisePng(seed: 34);
 
         await AssertRejectedAsync(Convert.ToBase64String(png[..(png.Length / 2)]));
     }
@@ -398,7 +371,7 @@ public sealed class ImageBlockHandlerTests
     [InlineData(8)]  // signature only
     [InlineData(20)] // cut inside the header chunk
     public async Task Png_HeaderOnly_IsRejected(int length)
-        => await AssertRejectedAsync(Convert.ToBase64String(Png()[..length]));
+        => await AssertRejectedAsync(Convert.ToBase64String(TestImages.Png()[..length]));
 
     [Fact]
     public async Task Jpeg_ArithmeticCoded_IsRejected()
