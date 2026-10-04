@@ -1,6 +1,6 @@
-import type { PrintContent, PrintStyle } from "@/types/printer";
-import { getMaxChars, CHARS_PER_LINE } from "@/lib/printer-constants";
-import { QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE } from "@/lib/printer-limits";
+import type { PrintContent, PrintStyle, TextSize } from "@/types/printer";
+import { columnsPerLine, CHARS_PER_LINE } from "@/lib/printer-constants";
+import { QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
 import { qrDataBytes } from "@/lib/validation";
 
 // Vretti V330M geometry. The head is 576 dots wide (72 mm printable on 80 mm
@@ -12,9 +12,10 @@ export const PAPER_WIDTH_CH = (CHARS_PER_LINE.normal * 80) / 72;
 export const MARGIN_CH = (PAPER_WIDTH_CH - CHARS_PER_LINE.normal) / 2;
 
 // Line pitch measured on paper (2026-09-27): 11 lines = 40 mm, so 29 dots.
-// Double height adds a second 24-dot cell.
+// Each step of the height multiplier adds one more 24-dot cell.
 export const LINE_DOTS = 29;
-const DOUBLE_HEIGHT_LINE_DOTS = LINE_DOTS + 24;
+const GLYPH_DOTS = 24;
+const FONT_B_GLYPH_DOTS = 17;
 
 // ESCPOS_NET Size2DCode and BarWidth enum values = module width in dots.
 export const QR_MODULE_DOTS = { Normal: 4, Large: 5, ExtraLarge: 6 } as const;
@@ -32,23 +33,49 @@ export function dotsToCh(dots: number): string {
   return `${dots / DOTS_PER_CH}ch`;
 }
 
-export interface TextMetrics {
+export interface TextScale {
+  width: number;
+  height: number;
+}
+
+// A draft or an imported template can hold any value: the screen shows the nearest valid one,
+// and blockError in editor/document.ts reports the fault.
+function multiplier(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, Math.trunc(value))) : TEXT_SIZE_MIN;
+}
+
+/** The two styles that a `size` replaces: width 2 and height 2. */
+export const DOUBLE_STYLES: readonly PrintStyle[] = ["DoubleWidth", "DoubleHeight"];
+
+/**
+ * The width and height multipliers a text prints with. Same rule as the backend
+ * (TextScale.cs): a `size` wins over the DoubleWidth and DoubleHeight styles.
+ */
+export function textScale(style: PrintStyle[] = [], size?: TextSize | null): TextScale {
+  if (size != null && typeof size === "object") return { width: multiplier(size.width), height: multiplier(size.height) };
+  return { width: style.includes("DoubleWidth") ? 2 : 1, height: style.includes("DoubleHeight") ? 2 : 1 };
+}
+
+export interface TextMetrics extends TextScale {
   maxChars: number;
   scaleX: number;
   scaleY: number;
   lineDots: number;
 }
 
-export function textMetrics(style: PrintStyle[] = []): TextMetrics {
-  const doubleHeight = style.includes("DoubleHeight");
+export function textMetrics(style: PrintStyle[] = [], size?: TextSize | null): TextMetrics {
   const fontB = style.includes("FontB");
-  const maxChars = getMaxChars(style);
+  const scale = textScale(style, size);
+  // The cell width: 12 dots in Font A, 9 in Font B (576 dots over 48 and 64 columns).
+  const cellDots = HEAD_DOTS / columnsPerLine(fontB, 1);
   return {
-    maxChars,
-    scaleX: CHARS_PER_LINE.normal / maxChars,
-    // Font B cells are 9x17 dots against Font A's 12x24.
-    scaleY: (fontB ? 17 / 24 : 1) * (doubleHeight ? 2 : 1),
-    lineDots: doubleHeight ? DOUBLE_HEIGHT_LINE_DOTS : LINE_DOTS,
+    ...scale,
+    maxChars: columnsPerLine(fontB, scale.width),
+    // A line of maxChars glyphs can be narrower than the head: 9 glyphs at 5x are 540 of 576 dots.
+    scaleX: (cellDots / DOTS_PER_CH) * scale.width,
+    // Font B cells are 17 dots high against Font A's 24.
+    scaleY: (fontB ? FONT_B_GLYPH_DOTS / GLYPH_DOTS : 1) * scale.height,
+    lineDots: LINE_DOTS + (scale.height - 1) * GLYPH_DOTS,
   };
 }
 
@@ -84,12 +111,12 @@ export function estimatePaperDots(content: PrintContent[], options: JobOptions, 
   content.forEach((block) => {
     switch (block.type) {
       case "Text": {
-        const m = textMetrics(block.style);
+        const m = textMetrics(block.style, block.size);
         dots += countPrintedLines(block.content ?? "", m.maxChars) * m.lineDots;
         break;
       }
       case "Separator": {
-        const m = textMetrics(block.style);
+        const m = textMetrics(block.style, block.size);
         dots += Math.max(1, Math.ceil((block.separatorLength ?? 32) / m.maxChars)) * m.lineDots;
         break;
       }

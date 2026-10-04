@@ -46,7 +46,7 @@ public sealed class PrinterErrorStatusTests
     [InlineData(0x7E, "cutter error")]
     public async Task GetStatus_ErrorStatusByte_SetsTheFlagsAndTheReason(int n3, string? reason)
     {
-        using var printer = new FakeStatusPrinter { N3 = (byte)n3 };
+        await using var printer = new WirePrinter { N3 = (byte)n3 };
         using var app = new LoopbackPrinterApp(printer.Port);
 
         var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, StatusUrl);
@@ -60,7 +60,7 @@ public sealed class PrinterErrorStatusTests
     [Fact]
     public async Task GetStatus_AnyRead_SendsTheFourQueriesInOneConnectionWithTheErrorQueryLast()
     {
-        using var printer = new FakeStatusPrinter();
+        await using var printer = new WirePrinter();
         using var app = new LoopbackPrinterApp(printer.Port);
 
         await app.CreateClient().SendJsonAsync(HttpMethod.Get, StatusUrl);
@@ -72,7 +72,7 @@ public sealed class PrinterErrorStatusTests
     [Fact]
     public async Task GetStatus_HealthyPrinterPolled_LogsNothingAboveDebug()
     {
-        using var printer = new FakeStatusPrinter();
+        await using var printer = new WirePrinter();
         using var app = new LoopbackPrinterApp(printer.Port);
         var client = app.CreateClient();
 
@@ -98,7 +98,7 @@ public sealed class PrinterErrorStatusTests
     [InlineData(0x9A)]
     public async Task GetStatus_ErrorQueryAnswersNoStatusFrame_KeepsReadyAndSetsNoFlag(int n3)
     {
-        using var printer = new FakeStatusPrinter { N3 = (byte)n3 };
+        await using var printer = new WirePrinter { N3 = (byte)n3 };
         using var app = new LoopbackPrinterApp(printer.Port);
 
         var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, StatusUrl);
@@ -111,7 +111,7 @@ public sealed class PrinterErrorStatusTests
     [Fact]
     public async Task GetStatus_ErrorQueryGetsNoAnswer_KeepsReadyAfterOneReadTimeout()
     {
-        using var printer = new FakeStatusPrinter { N3 = null };
+        await using var printer = new WirePrinter { N3 = null };
         using var app = new LoopbackPrinterApp(printer.Port);
         var client = app.CreateClient();
         var time = Stopwatch.StartNew();
@@ -128,7 +128,7 @@ public sealed class PrinterErrorStatusTests
     [Fact]
     public async Task GetStatus_PrinterClosesTheConnectionAtTheErrorQuery_KeepsReady()
     {
-        using var printer = new FakeStatusPrinter { DropsAtErrorQuery = true };
+        await using var printer = new WirePrinter { DropsAtErrorQuery = true };
         using var app = new LoopbackPrinterApp(printer.Port);
 
         var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, StatusUrl);
@@ -145,7 +145,7 @@ public sealed class PrinterErrorStatusTests
     [InlineData(0x1A, true)]
     public async Task GetStatus_CoverOpen_StaysTheReasonWhateverTheErrorQueryAnswers(int n3, bool cutterError)
     {
-        using var printer = new FakeStatusPrinter { N1 = 0x1E, N2 = 0x36, N3 = (byte)n3 };
+        await using var printer = new WirePrinter { N1 = 0x1E, N2 = 0x36, N3 = (byte)n3 };
         using var app = new LoopbackPrinterApp(printer.Port);
 
         var (_, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, StatusUrl);
@@ -162,7 +162,7 @@ public sealed class PrinterErrorStatusTests
     [InlineData(0x16, "recoverable error")]
     public async Task PostPrinter_ErrorBitSet_Returns503SendsNoJobAndStoresTheStatus(int n3, string reason)
     {
-        using var printer = new FakeStatusPrinter { N3 = (byte)n3 };
+        await using var printer = new WirePrinter { N3 = (byte)n3 };
         await using var app = new LoopbackPrinterApp(printer.Port);
 
         var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
@@ -187,14 +187,14 @@ public sealed class PrinterErrorStatusTests
     [Fact]
     public async Task PostPrinter_IdleErrorStatus_SendsTheJob()
     {
-        using var printer = new FakeStatusPrinter();
+        await using var printer = new WirePrinter();
         await using var app = new LoopbackPrinterApp(printer.Port);
 
         var (status, _) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
 
         Assert.Equal(HttpStatusCode.OK, status);
         var job = Assert.Single(await app.JournalRowsAsync());
-        Assert.Equal(job.Payload.Bytes, await printer.FirstJobAsync());
+        Assert.Equal(job.Payload.Bytes, await printer.NextJobAsync());
         Assert.Equal(StatusJson(IdleRaw), job.PrinterStatus);
     }
 
@@ -204,13 +204,13 @@ public sealed class PrinterErrorStatusTests
     [InlineData(0xFF, "n3=ff!")]
     public async Task PostPrinter_ErrorStatusUnknown_SendsTheJob(int? n3, string rawPart)
     {
-        using var printer = new FakeStatusPrinter { N3 = (byte?)n3 };
+        await using var printer = new WirePrinter { N3 = (byte?)n3 };
         await using var app = new LoopbackPrinterApp(printer.Port);
 
         var (status, _) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.NotEmpty(await printer.FirstJobAsync());
+        Assert.NotEmpty(await printer.NextJobAsync());
         var job = Assert.Single(await app.JournalRowsAsync());
         Assert.Equal(StatusJson($"n1=16 n2=12 n4=12 {rawPart}"), job.PrinterStatus);
     }
@@ -218,7 +218,7 @@ public sealed class PrinterErrorStatusTests
     [Fact]
     public async Task McpTools_CutterError_ShowTheFlagAndRefuseThePrint()
     {
-        using var printer = new FakeStatusPrinter { N3 = 0x1A };
+        await using var printer = new WirePrinter { N3 = 0x1A };
         using var app = new LoopbackPrinterApp(printer.Port);
         var client = app.CreateClient();
 

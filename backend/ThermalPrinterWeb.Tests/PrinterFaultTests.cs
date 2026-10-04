@@ -14,8 +14,7 @@ public sealed class PrinterFaultTests
         """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"cutterError":false,"unrecoverableError":false,"autoRecoverableError":false,"recoverableError":false,"ready":false,"notReadyReason":"printer unreachable"}""";
     private const string PrintJson = TestHttp.PrintJson;
 
-    // Online, cover closed, paper present, no error.
-    private static readonly byte[] ReadyStatus = [FakeStatusPrinter.Idle];
+    private static readonly byte[] ReadyStatus = [WirePrinter.ReadyStatus];
 
     // DLE EOT 1, 2, 4 and 3 in one status read.
     private const int StatusQueries = 4;

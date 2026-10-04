@@ -11,6 +11,8 @@ internal static class TestHttp
     // The smallest print job that passes validation.
     public const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
 
+    public const string PrintUrl = "/api/printer";
+
     private const string McpUrl = "/mcp";
     private const string SseData = "data: ";
 

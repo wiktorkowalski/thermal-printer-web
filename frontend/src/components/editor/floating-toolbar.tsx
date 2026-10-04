@@ -1,6 +1,7 @@
 import { AlignCenter, AlignLeft, AlignRight } from "lucide-react";
 import { Alignment, type PrintStyle } from "@/types/printer";
 import { cn } from "@/lib/utils";
+import { textScale } from "@/lib/paper";
 import type { Block } from "@/editor/document";
 
 interface FloatingToolbarProps {
@@ -12,8 +13,6 @@ interface FloatingToolbarProps {
 const STYLE_BUTTONS: { style: PrintStyle; label: string; name: string; className?: string }[] = [
   { style: "Bold", label: "B", name: "Bold", className: "font-bold" },
   { style: "Underline", label: "U", name: "Underline", className: "underline" },
-  { style: "DoubleWidth", label: "2W", name: "Double width" },
-  { style: "DoubleHeight", label: "2H", name: "Double height" },
 ];
 
 const ALIGN_BUTTONS = [
@@ -27,6 +26,12 @@ const button = "flex size-11 sm:size-10 shrink-0 items-center justify-center rou
 /** Quick text styling, pinned to the selected text block on the paper. */
 export function FloatingToolbar({ block, onToggleStyle, onAlign }: FloatingToolbarProps) {
   const has = (style: PrintStyle) => block.style?.includes(style) ?? false;
+  // The two size buttons show the size of the text, also when it comes from `size` (3x and more).
+  const scale = textScale(block.style, block.size);
+  const sizeButtons: { style: PrintStyle; name: string; multiplier: number; unit: string }[] = [
+    { style: "DoubleWidth", name: "Double width", multiplier: scale.width, unit: "W" },
+    { style: "DoubleHeight", name: "Double height", multiplier: scale.height, unit: "H" },
+  ];
   return (
     <div
       role="toolbar"
@@ -40,6 +45,12 @@ export function FloatingToolbar({ block, onToggleStyle, onAlign }: FloatingToolb
       {STYLE_BUTTONS.map(({ style, label, name, className }) => (
         <button key={style} type="button" aria-label={name} aria-pressed={has(style)} onClick={() => onToggleStyle(style)} className={cn(button, className, has(style) && "bg-on-ink/15")}>
           {label}
+        </button>
+      ))}
+      {sizeButtons.map(({ style, name, multiplier, unit }) => (
+        <button key={style} type="button" aria-label={multiplier > 2 ? `${name} (now ${multiplier}x)` : name} aria-pressed={multiplier > 1} onClick={() => onToggleStyle(style)} className={cn(button, multiplier > 1 && "bg-on-ink/15")}>
+          {Math.max(2, multiplier)}
+          {unit}
         </button>
       ))}
       <button type="button" aria-label="Reverse" aria-pressed={has("ReverseMode")} onClick={() => onToggleStyle("ReverseMode")} className={cn(button, has("ReverseMode") && "bg-on-ink/15")}>

@@ -33,7 +33,7 @@ public static class PrinterTools
 
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =
-        "80 mm thermal receipt printer: one line holds 48 characters (24 with DoubleWidth, 64 with FontB) "
+        "80 mm thermal receipt printer: one line holds 48 characters (24 with DoubleWidth, 64 with FontB, 48 / width with a size of 1 to 8) "
         + "and a longer line wraps in the middle of a word, so break lines yourself. "
         + $"For a quick note call {PrintNoteName} with {{\"title\":\"...\",\"message\":\"...\"}}; "
         + $"for styled text, barcodes, QR codes or images call {PrintName} with {{\"content\":[{{\"type\":\"Text\",\"content\":\"...\"}}]}}. "
@@ -102,7 +102,7 @@ public static class PrinterTools
         "Print a custom document: an ordered list of content blocks (Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage). "
         + "Use for full control over styling, barcodes, QR codes and images; for a plain note use " + PrintNoteName + ". "
         + "content is needed. Each block is an object with a type; a Text block is {\"type\":\"Text\",\"content\":\"...\"}. "
-        + "One line holds 48 characters (24 with DoubleWidth, 64 with FontB, 32 with both); longer lines wrap in the middle of a word, "
+        + "One line holds 48 characters (24 with DoubleWidth, 64 with FontB, 32 with both; with \"size\":{\"width\":3,\"height\":3} a headline holds 16); longer lines wrap in the middle of a word, "
         + "so keep each line within the limit (one Text block per line, or \\n inside content). "
         + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
         + "Polish letters print; emoji print as '?'. "

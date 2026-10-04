@@ -5,7 +5,6 @@ using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ThermalPrinterWeb.Controllers;
@@ -22,11 +21,7 @@ public sealed class PayloadErrorTests
 {
     private const string Secret = TestBlocks.Secret;
 
-    // The production handler registration, so a new block type is covered here too.
-    private static PrinterService NewService(ILogger<PrinterService>? logger = null) => new(
-        logger ?? NullLogger<PrinterService>.Instance,
-        new ServiceCollection().AddLogging().AddPrinterBlockHandlers().BuildServiceProvider().GetServices<IBlockHandler>(),
-        NoPrinter.Options);
+    private static PrinterService NewService(ILogger<PrinterService>? logger = null) => TestBlocks.NewService(logger);
 
     private static PrintContent Text(string content = "ok") => new() { Type = ContentType.Text, Content = content };
 
@@ -349,10 +344,10 @@ public sealed class PayloadErrorTests
 
         var bytes = await NewService().BuildDocumentAsync([Text()], options);
 
-        // ESC 3 n, then GS V 65 n and ESC 2 at the end: the spacing must not stay for the next job.
+        // ESC 3 n, then GS V 65 n at the end. No ESC 2 after it: the next job starts with ESC @.
         Assert.Contains(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x33, (byte)lineSpacing]));
-        Assert.Equal([0x1D, 0x56, 0x41, (byte)feed], bytes[^2]);
-        Assert.Equal([0x1B, 0x32], bytes[^1]);
+        Assert.Equal([0x1D, 0x56, 0x41, (byte)feed], bytes[^1]);
+        Assert.DoesNotContain(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x32]));
     }
 
     [Fact]

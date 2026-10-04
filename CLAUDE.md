@@ -28,12 +28,13 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, DecodeQueue, CodePages
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
 │   │   ├── Options/            # BarcodeOptions, QRCodeOptions, ImageOptions
 │   │   ├── PrintContent.cs     # Its [Description] texts are the MCP schema
+│   │   ├── TextSize.cs         # The size field of a Text or Separator block, and its range
 │   │   ├── PrintRequest.cs
 │   │   └── PrintResponse.cs
 │   ├── ThermalPrinterWeb.Tests/ # xunit tests; excluded from the API project's globs
@@ -78,6 +79,8 @@ Located in `backend/` directory.
 - `backend/Services/Printing/Handlers/` - One `IBlockHandler` per content type. To add a block type, add a handler and register it in `BlockHandlerServiceCollectionExtensions.cs`.
 
 **Print path**: `PrinterService.PrintAsync` builds the whole document first, then reads the printer status, then sends. So a payload fault is reported as such even while the printer is off. A handler rejects a block with `PrintContentException`; its message goes to the caller, so it must not repeat caller content.
+
+**Reset prelude**: every job starts with `ESC @` (`1B 40`), then the code page command `ESC t n` (`1B 74 12` for PC852), then `ESC 3 n` when `options.defaultLineSpacing` is set. `ESC @` resets size, underline, alignment, line spacing and the code page, so a job does not depend on the job before it. Without the code page command after it, Polish letters print wrong. A job sends no `ESC 2` at its end. An unknown code page name sends no code page command: the printer uses its own default page.
 
 **Printer Configuration** (`backend/Services/PrinterOptions.cs`):
 - `Printer:Address` (env `Printer__Address`) is `host` or `host:port`; the port defaults to 9100. `Printer:ConnectTimeout` is `hh:mm:ss`, default 3 s, at most 1 min.
@@ -201,6 +204,13 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Text styles**: Bold, Italic, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode, UpsideDownMode
 
+**Text size**: `"size": { "width": 3, "height": 3 }` on a Text or Separator block. Each axis is a whole number from 1 to 8; an axis that is left out is 1.
+- A block with `size` ignores `DoubleWidth` and `DoubleHeight`: the size wins. `FontB` and the other styles still apply.
+- A block without `size` sends `ESC ! n` only, no `GS !`. Golden tests in `TextSizeTests` pin these bytes: do not change them.
+- Bytes of a block with `size`: `ESC ! n` (styles without the two double bits), `GS ! n`, the text, `GS ! 0`, `ESC ! 0`. So the next block starts at 1 x 1.
+- The paper estimate counts the columns and the line height of the size (`PaperLength`, `TextScale`).
+- The editor stores a size up to 2 x 2 as the two styles and a larger one as `size` (`textSizePatch` in `editor/document.ts`).
+
 **Alignment**: Left, Center (default), Right
 
 **Barcode types** (JSON names): UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF, CODABAR, GS1_128, GS1_DATABAR_OMNIDIRECTIONAL
@@ -284,7 +294,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
 
-**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes` (that needs the reset prelude of issue #45).
+**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job.
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
 - No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
@@ -312,6 +322,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
 | `options.defaultLineSpacing`, `options.feedLinesAfterPrint` | 0-255 | `PrinterService.MaxLineSpacing`, `MaxFeedBeforeCut` |
 | Text block | 10,000 characters, 500 lines | `TextBlockHandler.MaxLength`, `MaxLines` |
+| Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
 | Barcode height | 1-255 dots | `BarcodeBlockHandler.MinHeightInDots`, `MaxHeightInDots` |
@@ -323,7 +334,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 
 **To add or change a limit**, change all of these:
 1. The backend constant.
-2. The MCP texts: the `[Description]` attributes in `backend/Models/` (`PrintContent.cs`, `PrintOptions.cs`, `Options/*.cs`) and the tool descriptions in `backend/Mcp/PrinterTools.cs`. `McpToolTests` pins most of these numbers to the constants.
+2. The MCP texts: the `[Description]` attributes in `backend/Models/` (`PrintContent.cs`, `PrintOptions.cs`, `TextSize.cs`, `Options/*.cs`) and the tool descriptions in `backend/Mcp/PrinterTools.cs`. `McpToolTests` pins most of these numbers to the constants.
 3. `frontend/src/lib/printer-limits.ts`.
 4. The table above.
 
@@ -414,16 +425,18 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 **Paper**: 80mm thermal paper roll
 
-**Characters per line by style:**
-| Style | Chars/Line | Notes |
-|-------|------------|-------|
-| Normal (Font A) | 48 | Default font (tested) |
-| FontB | 64 | Smaller font, more chars |
-| DoubleWidth | 24 | Half the normal chars |
-| DoubleWidth + DoubleHeight | 24 | Large text |
-| FontB + DoubleWidth | 32 | |
+**Characters per line** = 576 dots / (cell width x width multiplier), rounded down. The Font A cell is 12 dots wide, the Font B cell 9. The height multiplier does not change the columns.
 
-Source of truth: `frontend/src/lib/printer-constants.ts`. The backend repeats 48 and 64 in `PaperLength.cs` and in the MCP texts.
+| Width multiplier | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|------------------|---|---|---|---|---|---|---|---|
+| Font A | 48 | 24 | 16 | 12 | 9 | 8 | 6 | 6 |
+| FontB | 64 | 32 | 21 | 16 | 12 | 10 | 9 | 8 |
+
+- Read from paper: Font A at 1, 2, 3, 4 and 8; Font B at 1 and 2. The other values are the same division.
+- `DoubleWidth` is width 2, `DoubleHeight` is height 2. A `size` gives 1 to 8 for each axis (`GS ! n`); width and height are independent. Polish letters are correct at 3 x 3 (read from paper).
+- Line pitch: 29 dots at height 1, plus 24 dots for each step of the height.
+
+Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 
 A longer line wraps in the middle of a word. Break lines in the content.
 
