@@ -17,7 +17,7 @@ public sealed class BlockHandlerInjectionTests
         var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         foreach (var block in blocks)
             await handler.HandleAsync(block, ctx);
-        return (ctx.OutputBytes(), ctx);
+        return (TestBlocks.OutputBytes(ctx), ctx);
     }
 
     // Span overloads: a failure prints both byte sequences.

@@ -35,7 +35,7 @@ public sealed class ImageBlockHandlerTests
     // GS v 0 m xL xH yL yH: width in bytes (8 dots each), height in dots.
     private static (int WidthBytes, int Height) RasterSize(BlockContext ctx)
     {
-        var bytes = ctx.OutputBytes();
+        var bytes = TestBlocks.OutputBytes(ctx);
         var at = bytes.AsSpan().IndexOf(RasterCommand);
         Assert.True(at >= 0);
         return (BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at + 4)), BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at + 6)));
@@ -183,7 +183,7 @@ public sealed class ImageBlockHandlerTests
     private static async Task AssertPrintsAsync(string content)
     {
         var ctx = await RunAsync(content);
-        Assert.Contains(RasterCommand.AsSpan(), ctx.OutputBytes().AsSpan());
+        Assert.Contains(RasterCommand.AsSpan(), TestBlocks.OutputBytes(ctx).AsSpan());
     }
 
     private static async Task<PrintContentException> AssertRejectedAsync(string content)

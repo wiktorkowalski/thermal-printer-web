@@ -37,12 +37,14 @@ public sealed class FakePrinterApp() : TestApp("Production")
 }
 
 // The real PrinterService pointed at a loopback port.
-public class LoopbackPrinterApp(int port, TimeSpan? connectTimeout = null) : TestApp("Production")
+internal sealed class LoopbackPrinterApp(int port, TimeSpan? connectTimeout = null) : TestApp("Production")
 {
     public const string Loopback = "127.0.0.1";
 
-    protected override void ConfigurePrinter(IWebHostBuilder builder) => builder.ConfigureServices(services =>
-        services.Configure<PrinterOptions>(options =>
+    protected override void ConfigurePrinter(IWebHostBuilder builder) => PointAt(builder, port, connectTimeout);
+
+    public static void PointAt(IWebHostBuilder builder, int port, TimeSpan? connectTimeout = null)
+        => builder.ConfigureServices(services => services.Configure<PrinterOptions>(options =>
         {
             options.Address = $"{Loopback}:{port}";
             options.ConnectTimeout = connectTimeout ?? options.ConnectTimeout;
@@ -50,4 +52,9 @@ public class LoopbackPrinterApp(int port, TimeSpan? connectTimeout = null) : Tes
 }
 
 // A request that passes validation by mistake must reach a closed loopback port only.
-public sealed class ClosedPortApp() : LoopbackPrinterApp(port: 9);
+public sealed class ClosedPortApp() : TestApp("Production")
+{
+    private const int DiscardPort = 9;
+
+    protected override void ConfigurePrinter(IWebHostBuilder builder) => LoopbackPrinterApp.PointAt(builder, DiscardPort);
+}

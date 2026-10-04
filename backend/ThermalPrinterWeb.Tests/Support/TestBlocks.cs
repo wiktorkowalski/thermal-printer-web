@@ -23,7 +23,7 @@ internal static class TestBlocks
     }
 
     // Everything the handlers added, as the printer gets it.
-    public static byte[] OutputBytes(this BlockContext ctx) => ByteSplicer.Combine([.. ctx.Output]);
+    public static byte[] OutputBytes(BlockContext ctx) => ByteSplicer.Combine([.. ctx.Output]);
 
     public static PrintContent ImageBlock(string content, ImageOptions? options = null)
         => new() { Type = ContentType.Image, Content = content, ImageOptions = options };

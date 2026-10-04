@@ -22,7 +22,7 @@ public sealed class CodeContentEncodingTests
         var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         await new QRCodeBlockHandler().HandleAsync(
             new PrintContent { Type = ContentType.QRCode, Content = content, QRCodeOptions = options }, ctx);
-        return (ctx.OutputBytes(), ctx);
+        return (TestBlocks.OutputBytes(ctx), ctx);
     }
 
     private static PrintContent Barcode(string content, BarcodeType type)
