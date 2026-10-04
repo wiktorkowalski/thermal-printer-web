@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Text;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Bmp;
@@ -389,4 +390,183 @@ public sealed class ImageBlockHandlerTests
     [Fact]
     public async Task Jpeg_HeaderOnly_IsRejected()
         => await AssertRejectedAsync(Convert.ToBase64String(Jpeg()[..4]));
+
+    // Noise does not compress: the picture data is long and holds FF bytes (stuffed as FF 00).
+    // Encoded once. No test writes to it.
+    private static readonly byte[] NoiseJpegBytes = TestImages.Noise(seed: 70, new JpegEncoder { Quality = 90 });
+
+    private static byte[] NoiseJpeg() => NoiseJpegBytes;
+
+    // 24x24 noise from `jpegtran -progressive -restart 1`: the pinned encoder writes baseline files only.
+    // 10 scans, a restart interval (DRI) and restart markers in each scan.
+    private static byte[] ProgressiveJpegWithRestartMarkers() => Convert.FromBase64String(
+        "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDABsSFBcUERsXFhceHBsgKEIrKCUlKFE6PTBCYFVlZF9VXVtqeJmBanGQc1tdhbWGkJ6jq62rZ4C8ybqmx5moq6T/" +
+        "2wBDARweHigjKE4rK06kbl1upKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKT/wgARCAAYABgDASIAAhEBAxEB/8QA" +
+        "FgABAQEAAAAAAAAAAAAAAAAAAAEC/8QAFgEBAQEAAAAAAAAAAAAAAAAAAQAC/90ABAAC/9oADAMBAAIQAxAAAAGyCrLV/9BQMjT/AP/EABgQAQADAQAAAAAA" +
+        "AAAAAAAAAAABESFB/90ABAAD/9oACAEBAAEFAk6nX//QSqn/0e1tP//EABYRAQEBAAAAAAAAAAAAAAAAAAABEf/dAAQAAv/aAAgBAwEBPwFj/9Co/8QAFhEB" +
+        "AQEAAAAAAAAAAAAAAAAAABAR/9oACAECAQE/AZ//0Gv/xAAYEAACAwAAAAAAAAAAAAAAAAAAEAEhMf/dAAQAA//aAAgBAQAGPwIuF//Qf//RMX//xAAfEAEA" +
+        "AgIBBQEAAAAAAAAAAAABABEhMWFBUXGRwfH/2gAIAQEAAT8hpML5gBejczXQB1qf/9BH8Z6RoqkM0z//0REUtX3uIRpzKVvJz8n/3QAEAAL/2gAMAwEAAgAD" +
+        "AAAAEG/P/9CIH//EABwRAQABBAMAAAAAAAAAAAAAAAEAMUGB8BEh8f/aAAgBAwEBPxAsw50dwM//0LHyPqruZ//EABoRAAMAAwEAAAAAAAAAAAAAAAABESEx" +
+        "wfH/2gAIAQIBAT8Qjqo4sc9P/9BCh7P/xAAhEAEBAAICAAcBAAAAAAAAAAABESExAEFRYXGBkbHhwf/dAAQAA//aAAgBAQABPxBBNFBqEQ6j0PrxKRTEEgZf" +
+        "TM5TCgUaYMuMe385/9BArt2FMvrer8cQlFfkGtl88/HACkKds+tY5//RDSYJ0Xu+Hl+8RWVzo3EM634fhQlVCRiT3dT65//Z");
+
+    private static readonly byte[] StartOfScan = [0xFF, 0xDA];
+    private static readonly byte[] EndOfImage = [0xFF, 0xD9];
+
+    // An EXIF segment (APP1) right after SOI. Cameras put a complete small JPEG in it.
+    private static byte[] WithExifThumbnail(byte[] jpeg, byte[] thumbnail)
+    {
+        byte[] payload = [.. "Exif\0\0"u8, .. thumbnail];
+        var length = payload.Length + 2;
+        return [0xFF, 0xD8, 0xFF, 0xE1, (byte)(length >> 8), (byte)length, .. payload, .. jpeg.AsSpan(2)];
+    }
+
+    private static async Task AssertDamagedJpegAsync(byte[] bytes)
+    {
+        var ex = await AssertRejectedAsync(Convert.ToBase64String(bytes));
+        Assert.Equal($"Image rejected: file is damaged (format JPEG, {bytes.Length} bytes). Send a PNG or JPEG.", ex.Message);
+    }
+
+    // Before the check each of these printed: the decoder fills the missing part with grey.
+    public static TheoryData<string, byte[]> TruncatedJpegs()
+    {
+        var data = new TheoryData<string, byte[]>();
+        foreach (var (kind, jpeg) in new[] { ("baseline", NoiseJpeg()), ("progressive", ProgressiveJpegWithRestartMarkers()) })
+        {
+            var firstScan = jpeg.AsSpan().IndexOf(StartOfScan);
+            var lastScan = jpeg.AsSpan().LastIndexOf(StartOfScan);
+            // The picture data holds a data byte FF, written as FF 00.
+            var stuffedByte = jpeg.AsSpan(firstScan).IndexOf<byte>([0xFF, 0x00]);
+            Assert.True(stuffedByte >= 0);
+
+            data.Add($"{kind}: inside the tables", jpeg[..(firstScan / 2)]);
+            data.Add($"{kind}: before the first scan", jpeg[..firstScan]);
+            data.Add($"{kind}: 5 bytes before the end", jpeg[..^5]);
+            data.Add($"{kind}: 1% of the picture data", jpeg[..(firstScan + (jpeg.Length - firstScan) / 100 + 16)]);
+            data.Add($"{kind}: half of the bytes", jpeg[..(jpeg.Length / 2)]);
+            data.Add($"{kind}: half of the last scan", jpeg[..(lastScan + (jpeg.Length - lastScan) / 2)]);
+            data.Add($"{kind}: ends with the FF of a stuffed FF 00", jpeg[..(firstScan + stuffedByte + 1)]);
+            data.Add($"{kind}: no EOI", jpeg[..^2]);
+        }
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(TruncatedJpegs))]
+    public async Task Jpeg_Truncated_IsRejected(string cut, byte[] bytes)
+    {
+        _ = cut; // names the row in the test list
+        await AssertDamagedJpegAsync(bytes);
+    }
+
+    [Fact]
+    public async Task Jpeg_ProgressiveWithRestartMarkers_Prints()
+    {
+        var jpeg = ProgressiveJpegWithRestartMarkers();
+        // SOF2 (progressive), DRI (restart interval), RST0, more than one scan.
+        Assert.True(jpeg.AsSpan().IndexOf<byte>([0xFF, 0xC2]) >= 0);
+        Assert.True(jpeg.AsSpan().IndexOf<byte>([0xFF, 0xDD]) >= 0);
+        Assert.True(jpeg.AsSpan().IndexOf<byte>([0xFF, 0xD0]) >= 0);
+        Assert.NotEqual(jpeg.AsSpan().IndexOf(StartOfScan), jpeg.AsSpan().LastIndexOf(StartOfScan));
+
+        await AssertPrintsAsync(Convert.ToBase64String(jpeg));
+    }
+
+    // Phone photos carry data after EOI: a second image (MPF, HDR gain map), a video (motion photo), padding.
+    public static TheoryData<string, byte[]> JpegTrailers() => new()
+    {
+        { "zero padding", new byte[64] },
+        { "a second JPEG", Jpeg() },
+        // Starts like an MP4 file and ends inside a marker.
+        { "bytes that are not a JPEG", [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6D, 0x70, 0x34, 0x32, 0xFF, 0xDA, 0xFF] },
+    };
+
+    [Theory]
+    [MemberData(nameof(JpegTrailers))]
+    public async Task Jpeg_WithDataAfterEndOfImage_Prints(string trailer, byte[] bytes)
+    {
+        _ = trailer; // names the row in the test list
+        await AssertPrintsAsync(Convert.ToBase64String([.. NoiseJpeg(), .. bytes]));
+    }
+
+    [Fact]
+    public async Task Jpeg_WithExifThumbnail_Prints()
+        => await AssertPrintsAsync(Convert.ToBase64String(WithExifThumbnail(NoiseJpeg(), Jpeg())));
+
+    // The thumbnail is complete and has its own EOI. That EOI does not make the main picture complete.
+    [Fact]
+    public async Task Jpeg_WithExifThumbnail_CutInsideThePictureData_IsRejected()
+    {
+        var jpeg = WithExifThumbnail(NoiseJpeg(), Jpeg());
+        var cut = jpeg[..(jpeg.Length - 1000)];
+        Assert.True(cut.AsSpan().IndexOf(EndOfImage) >= 0);
+        Assert.True(cut.AsSpan().LastIndexOf(StartOfScan) > cut.AsSpan().IndexOf(EndOfImage));
+
+        await AssertDamagedJpegAsync(cut);
+    }
+
+    [Fact]
+    public async Task Jpeg_CutInsideTheExifSegment_AfterTheThumbnail_IsRejected()
+    {
+        byte[] thumbnailAndMoreExif = [.. Jpeg(), .. new byte[32]];
+        var jpeg = WithExifThumbnail(NoiseJpeg(), thumbnailAndMoreExif);
+        var thumbnailEnd = jpeg.AsSpan().IndexOf(EndOfImage) + 2;
+
+        await AssertDamagedJpegAsync(jpeg[..(thumbnailEnd + 8)]);
+    }
+
+    [Theory]
+    // Complete.
+    [InlineData("FFD8 FFD9", true)]
+    [InlineData("FFD8 FFE00004AABB FFD9", true)]
+    [InlineData("FFD8 FFDA0002 12 FF00 34 FFD0 56 FFD9", true)]              // scan with a stuffed FF and a restart marker
+    [InlineData("FFD8 FFDA0002 12 FFDA0002 34 FFD9", true)]                   // two scans
+    [InlineData("FFD8 FFFFFF D9", true)]                                      // fill bytes before a marker
+    [InlineData("FFD8 FF01 FFD9", true)]                                      // TEM has no length
+    [InlineData("FFD8 0011 FFD9", true)]                                      // junk between segments: the decoders skip it
+    [InlineData("FFD8 FF02FFFF FFBF0000 FFD9", true)]                         // reserved codes 02-BF start no segment
+    [InlineData("FFD8 FFC00004AABB FFFE0004AABB FFD9", true)]                 // SOF0 and COM carry a length
+    [InlineData("FFD8 FFD9 FFD8 FF", true)]                                   // nothing after EOI is read
+    [InlineData("FFD8 FFE00004FFD9 FFD9", true)]                              // EOI bytes inside a segment, then the real EOI
+    // Cut off.
+    [InlineData("", false)]
+    [InlineData("FF", false)]
+    [InlineData("FFD8", false)]
+    [InlineData("FFD8 FF", false)]
+    [InlineData("FFD8 FFFF", false)]
+    [InlineData("FFD8 FFE0", false)]                                          // no length
+    [InlineData("FFD8 FFE000", false)]                                        // half a length
+    [InlineData("FFD8 FFE00001 FFD9", false)]                                 // a length below 2 is not valid
+    [InlineData("FFD8 FFE00000 FFD9", false)]
+    [InlineData("FFD8 FFE0FFFF FFD9", false)]                                 // the segment is longer than the file
+    [InlineData("FFD8 FFE00004FFD9", false)]                                  // EOI bytes inside a segment only
+    [InlineData("FFD8 FFDA0002 12 FF00 34", false)]                           // ends inside the scan
+    [InlineData("FFD8 FFDA0002 12 FF00", false)]
+    [InlineData("FFD8 FFDA0002 12 FF", false)]
+    [InlineData("FFD8 FFDA0002 12 FFD0", false)]                              // ends after a restart marker
+    public void JpegReachesEndOfImage_OnMarkerStreams(string hex, bool expected)
+        => Assert.Equal(expected, ImageBlockHandler.JpegReachesEndOfImage(Convert.FromHexString(hex.Replace(" ", ""))));
+
+    // The longest inputs for the marker loop: every byte is a marker prefix, or every pair is a marker.
+    [Theory]
+    [InlineData(0xFF, 0xFF)]
+    [InlineData(0xFF, 0x00)]
+    public void JpegReachesEndOfImage_AtTheByteLimit_Ends(byte first, byte second)
+    {
+        var bytes = new byte[ImageBlockHandler.MaxImageBytes];
+        MemoryMarshal.Cast<byte, ushort>(bytes.AsSpan()).Fill(BinaryPrimitives.ReadUInt16LittleEndian([first, second]));
+
+        Assert.False(ImageBlockHandler.JpegReachesEndOfImage(bytes));
+    }
+
+    // Known limit, not a fault: all pixel data is there, so the print is complete.
+    [Fact]
+    public async Task Png_WithoutTheEndChunk_StillPrints()
+    {
+        var png = TestImages.NoisePng(seed: 70);
+        // IEND: 4 bytes of length, the type, 4 bytes of CRC.
+        Assert.Equal(png.Length - 8, png.AsSpan().LastIndexOf("IEND"u8));
+
+        await AssertPrintsAsync(Convert.ToBase64String(png[..^12]));
+    }
 }

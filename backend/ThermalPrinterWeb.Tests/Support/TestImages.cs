@@ -19,7 +19,9 @@ internal static class TestImages
     public static string PngBase64(int width = 8, int height = 8) => Convert.ToBase64String(Png(width, height));
 
     // Noise does not compress: a cut in the middle of the file lands inside the pixel data.
-    public static byte[] NoisePng(int seed)
+    public static byte[] NoisePng(int seed) => Noise(seed, new PngEncoder());
+
+    public static byte[] Noise(int seed, IImageEncoder encoder)
     {
         using var image = new Image<Rgba32>(64, 64);
         var random = new Random(seed);
@@ -29,7 +31,7 @@ internal static class TestImages
                 foreach (ref var pixel in rows.GetRowSpan(y))
                     pixel = new Rgba32((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256));
         });
-        return Save(image, new PngEncoder());
+        return Save(image, encoder);
     }
 
     private static byte[] Save(Image image, IImageEncoder encoder)

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -125,13 +126,18 @@ internal sealed class ImageBlockHandler : IBlockHandler
         return ms.ToArray();
     }
 
-    // Format and dimensions from the header: no pixel buffer yet.
+    // Format and dimensions from the header: no pixel buffer yet. A JPEG is also read once to its end marker.
     private static (IImageFormat Format, Size Size) CheckHeader(byte[] imageBytes)
     {
         // The format comes from the bytes. A declared MIME type in a data URI is ignored.
         var format = Image.DetectFormat(imageBytes);
         if (format is not (PngFormat or JpegFormat))
             throw new PrintContentException($"Image rejected: format not supported ({Facts(format, imageBytes.Length)}). Send a PNG or JPEG.");
+
+        // The JPEG decoder accepts a file that stops inside the picture data and fills the rest with grey.
+        // A file with all picture data and no EOI is rejected too: the bytes do not show the difference.
+        if (format is JpegFormat && !JpegReachesEndOfImage(imageBytes))
+            throw Damaged(format, imageBytes.Length);
 
         var info = Decode(format, imageBytes, static bytes => Image.Identify(PngAndJpegOnly, bytes, out _))
             ?? throw Damaged(format, imageBytes.Length);
@@ -162,6 +168,54 @@ internal sealed class ImageBlockHandler : IBlockHandler
         {
             throw Damaged(format, imageBytes.Length, ex);
         }
+    }
+
+    // A file that is cut off has no EOI (FF D9) at the end of its marker sequence. A search for the bytes FF D9
+    // is not enough: an EXIF thumbnail has its own EOI, and phone photos carry more data after EOI.
+    internal static bool JpegReachesEndOfImage(ReadOnlySpan<byte> jpeg)
+    {
+        const byte MarkerPrefix = 0xFF;
+        const byte EndOfImage = 0xD9;
+        // SOF0. The markers that carry a length start here.
+        const byte FirstSegmentMarker = 0xC0;
+
+        // After SOI (FF D8).
+        var position = 2;
+        while (position < jpeg.Length)
+        {
+            // Bytes that are not FF are picture data, or junk between segments that the decoders skip too.
+            var prefixOffset = jpeg[position..].IndexOf(MarkerPrefix);
+            if (prefixOffset < 0)
+                return false;
+
+            position += prefixOffset + 1;
+            if (position == jpeg.Length)
+                return false;
+
+            var marker = jpeg[position];
+            // FF FF: the first FF is fill. The second one is read as a prefix in the next turn.
+            if (marker == MarkerPrefix)
+                continue;
+
+            position++;
+            // Bytes after EOI are not read.
+            if (marker == EndOfImage)
+                return true;
+
+            // No length field: FF 00 is a data byte FF, D0-D7 are restart markers, D8 is SOI.
+            // 01-BF are TEM and reserved codes: no real segment, so a stray FF in junk bytes does not start one.
+            if (marker < FirstSegmentMarker || marker is >= 0xD0 and <= 0xD8)
+                continue;
+
+            // Every other marker starts a segment: two bytes of length, which count themselves.
+            // The segment is skipped whole, so an EOI inside it (EXIF thumbnail) does not count.
+            if (!BinaryPrimitives.TryReadUInt16BigEndian(jpeg[position..], out var length) || length < 2 || length > jpeg.Length - position)
+                return false;
+
+            position += length;
+        }
+
+        return false;
     }
 
     internal static bool PixelsOverLimit(int width, int height)
