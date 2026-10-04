@@ -1,7 +1,5 @@
 using System.Net;
-using System.Text;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -18,24 +16,19 @@ public sealed class PrinterAddressTests
     private const string ProductionAddress = "192.168.123.100:9100";
     private const string AddressVariable = "Printer__Address";
     private static readonly TimeSpan EntryPointTimeout = TimeSpan.FromSeconds(30);
-    private const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
+    private const string PrintJson = TestHttp.PrintJson;
 
     // The app with the real PrinterService and the settings files of the repo.
-    private sealed class App(string environment, string? address = null) : WebApplicationFactory<Program>
+    private sealed class App(string environment, string? address = null) : TestApp(environment)
     {
-        public McpToolTests.RecordingLoggerProvider Logs { get; } = new();
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        // The real settings, on purpose: in Production this host has the address of the real printer. No test here sends to it.
+        protected override void ConfigurePrinter(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(environment);
             if (address is not null)
             {
                 builder.ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
                     new Dictionary<string, string?> { ["Printer:Address"] = address }));
             }
-
-            builder.ConfigureServices(services =>
-                services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs)));
         }
 
         public string Address => Services.GetRequiredService<IOptions<PrinterOptions>>().Value.Address;
@@ -46,8 +39,6 @@ public sealed class PrinterAddressTests
 
     private static PrinterOptionsValidator Validator(string environment)
         => new(new HostingEnvironment { EnvironmentName = environment });
-
-    private static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
     [Fact]
     public void Production_WithNoSetting_UsesThePrinterOnTheHomeNetwork()
@@ -78,7 +69,7 @@ public sealed class PrinterAddressTests
         var client = app.CreateClient();
 
         var status = await client.GetAsync("/api/printer/status");
-        var print = await client.PostAsync("/api/printer", Json(PrintJson));
+        var print = await client.PostAsync("/api/printer", TestHttp.Json(PrintJson));
         var beep = await client.PostAsync("/api/printer/beep?count=2&duration=3", null);
 
         Assert.Equal(["Printer target: no printer (Development); print and beep send nothing"], app.InformationLogs("Printer target"));

@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="ThermalPrinterWeb.Tests.Support" />
   </ItemGroup>
 
   <ItemGroup>

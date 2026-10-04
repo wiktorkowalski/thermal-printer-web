@@ -1,11 +1,4 @@
-using System.Collections.Concurrent;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
@@ -16,94 +9,17 @@ using ThermalPrinterWeb.Services.Printing.Handlers;
 namespace ThermalPrinterWeb.Tests;
 
 // Real JSON-RPC over /mcp, with the printer replaced: no test reaches the network.
-public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToolTests.McpApp>
+public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinterApp>
 {
-    private const string Secret = "SECRET-CALLER-CONTENT";
+    private const string Secret = TestBlocks.Secret;
     private const int FontAColumns = 48;
     private const int DoubleWidthColumns = 24;
 
-    public sealed class RecordingPrinter : IPrinterService
-    {
-        public ConcurrentQueue<(List<PrintContent> Content, PrintOptions? Options)> Jobs { get; } = [];
-        public PrintResult Result { get; set; } = PrintResult.Ok;
-
-        public Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
-        {
-            Jobs.Enqueue((content, options));
-            return Task.FromResult(Result);
-        }
-
-        public Task<PrinterStatus> GetStatusAsync() => throw new NotSupportedException();
-        public Task<bool> BeepAsync(int count, int duration) => Task.FromResult(true);
-    }
-
-    public sealed class RecordingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentQueue<(LogLevel Level, string Category, string Message)> Entries { get; } = [];
-
-        public ILogger CreateLogger(string categoryName) => new Logger(categoryName, Entries);
-        public void Dispose() { }
-
-        private sealed class Logger(string category, ConcurrentQueue<(LogLevel, string, string)> entries) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-                => entries.Enqueue((logLevel, category, formatter(state, exception) + exception));
-        }
-    }
-
-    public sealed class McpApp : WebApplicationFactory<Program>
-    {
-        public RecordingPrinter Printer { get; } = new();
-        public RecordingLoggerProvider Logs { get; } = new();
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.UseEnvironment("Production");
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<IPrinterService>();
-                services.AddSingleton<IPrinterService>(Printer);
-                services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs));
-            });
-        }
-    }
-
     private readonly HttpClient _client = app.CreateClient();
-
-    private async Task<JsonElement> RpcAsync(string method, string? paramsJson = null)
-    {
-        var body = $$"""{"jsonrpc":"2.0","id":1,"method":"{{method}}"{{(paramsJson is null ? "" : $",\"params\":{paramsJson}")}}}""";
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
-        {
-            Content = new StringContent(body, Encoding.UTF8, "application/json")
-        };
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-
-        var response = await _client.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        var text = await response.Content.ReadAsStringAsync();
-
-        // Streamable HTTP answers as one SSE event.
-        var data = text.Split('\n').Single(line => line.StartsWith("data: ", StringComparison.Ordinal))["data: ".Length..];
-        return JsonDocument.Parse(data).RootElement.GetProperty("result");
-    }
-
-    private async Task<(bool IsError, string Text)> CallAsync(string tool, string? argumentsJson)
-    {
-        var arguments = argumentsJson is null ? "" : $",\"arguments\":{argumentsJson}";
-        var result = await RpcAsync("tools/call", $$"""{"name":"{{tool}}"{{arguments}}}""");
-
-        var isError = result.TryGetProperty("isError", out var flag) && flag.GetBoolean();
-        return (isError, result.GetProperty("content")[0].GetProperty("text").GetString()!);
-    }
 
     private async Task<JsonElement> ToolAsync(string name)
     {
-        var tools = (await RpcAsync("tools/list")).GetProperty("tools");
+        var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
         return tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == name);
     }
 
@@ -128,7 +44,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [Fact]
     public async Task Initialize_AnyClient_SendsServerInstructions()
     {
-        var result = await RpcAsync("initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}""");
+        var result = await _client.McpAsync("initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}""");
 
         var instructions = result.GetProperty("instructions").GetString();
         Assert.Contains("48 characters", instructions);
@@ -139,50 +55,34 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [Fact]
     public async Task ToolsList_AfterTheChange_KeepsTheToolNames()
     {
-        var tools = (await RpcAsync("tools/list")).GetProperty("tools");
+        var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
 
         Assert.Equal(
             ["beep", "get_status", "print", "print_note"],
             tools.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()).Order());
     }
 
-    // Pins the schema against the fault from #73: an injected service (printer, jobLog) listed as an argument.
-    // The fault needs two hosts that start at the same time (see AssemblyInfo.cs); here it must never show.
-    [Fact]
-    public async Task ToolsList_EveryTool_ListsCallerArgumentsOnlyAndNoInjectedService()
-    {
-        var tools = (await RpcAsync("tools/list")).GetProperty("tools");
-
-        var arguments = tools.EnumerateArray().ToDictionary(
-            tool => tool.GetProperty("name").GetString()!,
-            tool => tool.GetProperty("inputSchema").TryGetProperty("properties", out var properties)
-                ? string.Join(',', properties.EnumerateObject().Select(property => property.Name))
-                : "");
-
-        Assert.Equal(
-            new Dictionary<string, string>
-            {
-                ["get_status"] = "",
-                ["print_note"] = "title,message,imageBase64,source",
-                ["beep"] = "count,duration",
-                ["print"] = "content,options,source"
-            },
-            arguments);
-    }
-
+    // The exact argument list of all four tools. It also pins the schema against the fault from #73:
+    // an injected service (printer, jobLog) listed as an argument. See AssemblyInfo.cs.
     [Theory]
     [InlineData("print", "content,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]
     [InlineData("beep", "count,duration")]
+    [InlineData("get_status", "")]
     public async Task ToolsList_EveryTool_HasOnlyOptionalDescribedArguments(string tool, string expectedArguments)
     {
         var schema = (await ToolAsync(tool)).GetProperty("inputSchema");
+        // A tool with no arguments can leave "properties" out.
+        var hasProperties = schema.TryGetProperty("properties", out var properties);
 
-        Assert.Equal(expectedArguments.Split(','), schema.GetProperty("properties").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(
+            expectedArguments.Split(',', StringSplitOptions.RemoveEmptyEntries),
+            hasProperties ? properties.EnumerateObject().Select(p => p.Name) : []);
         Assert.True(
             !schema.TryGetProperty("required", out var required) || required.GetArrayLength() == 0,
             $"{tool} still has required arguments");
-        AssertEveryPropertyDescribed(schema, tool);
+        if (hasProperties)
+            AssertEveryPropertyDescribed(schema, tool);
     }
 
     [Fact]
@@ -242,7 +142,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     {
         var example = ExampleIn(await ToolAsync(tool));
 
-        var (isError, text) = await CallAsync(tool, example);
+        var (isError, text) = await _client.CallToolAsync(tool, example);
 
         Assert.False(isError, text);
         Assert.DoesNotContain("Not printed", text);
@@ -254,7 +154,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     {
         app.Printer.Jobs.Clear();
 
-        await CallAsync("print", PrinterTools.PrintExample);
+        await _client.CallToolAsync("print", PrinterTools.PrintExample);
 
         Assert.True(app.Printer.Jobs.TryDequeue(out var job));
         foreach (var block in job.Content.Where(block => block.Type == ContentType.Text))
@@ -299,7 +199,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         app.Printer.Jobs.Clear();
         app.Logs.Entries.Clear();
 
-        var (isError, text) = await CallAsync(tool, arguments);
+        var (isError, text) = await _client.CallToolAsync(tool, arguments);
 
         Assert.True(isError);
         Assert.StartsWith($"Wrong arguments for '{tool}': {expectedProblem}. Example of a valid call: {{", text);
@@ -320,7 +220,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [Fact]
     public async Task ToolsCall_PrintWrongShape_PointsToPrintNote()
     {
-        var (_, text) = await CallAsync("print", """{"text":"hello"}""");
+        var (_, text) = await _client.CallToolAsync("print", """{"text":"hello"}""");
 
         Assert.EndsWith($"For a plain note use print_note: {PrinterTools.PrintNoteExample}", text);
     }
@@ -330,7 +230,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     {
         app.Printer.Jobs.Clear();
 
-        var (isError, text) = await CallAsync("print_note", """{"title":"T","message":"M"}""");
+        var (isError, text) = await _client.CallToolAsync("print_note", """{"title":"T","message":"M"}""");
 
         Assert.False(isError);
         Assert.Equal("Printed.", text);
@@ -344,7 +244,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     {
         app.Printer.Jobs.Clear();
 
-        var (isError, text) = await CallAsync("print", """{"content":[{"type":"Text","content":"hello"}]}""");
+        var (isError, text) = await _client.CallToolAsync("print", """{"content":[{"type":"Text","content":"hello"}]}""");
 
         Assert.False(isError);
         Assert.Equal("Printed.", text);
@@ -356,7 +256,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [Fact]
     public async Task ToolsCall_BeepWithNoArguments_Beeps()
     {
-        var (isError, text) = await CallAsync("beep", null);
+        var (isError, text) = await _client.CallToolAsync("beep", null);
 
         Assert.False(isError);
         Assert.Equal("Beeped 1x.", text);
@@ -366,7 +266,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
     [Fact]
     public async Task ToolsCall_BeepWithCountAsString_Beeps()
     {
-        var (isError, text) = await CallAsync("beep", """{"count":"5"}""");
+        var (isError, text) = await _client.CallToolAsync("beep", """{"count":"5"}""");
 
         Assert.False(isError);
         Assert.Equal("Beeped 5x.", text);
@@ -379,7 +279,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         app.Printer.Result = PrintResult.Invalid("Block 0 (Separator): separatorChar must not be empty");
         try
         {
-            var (isError, text) = await CallAsync("print", """{"content":[{"type":"Separator","separatorChar":""}]}""");
+            var (isError, text) = await _client.CallToolAsync("print", """{"content":[{"type":"Separator","separatorChar":""}]}""");
 
             Assert.False(isError);
             Assert.Equal("Not printed: Block 0 (Separator): separatorChar must not be empty", text);
@@ -399,7 +299,7 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
         app.Printer.Result = PrintResult.Busy;
         try
         {
-            var (isError, text) = await CallAsync(tool, arguments);
+            var (isError, text) = await _client.CallToolAsync(tool, arguments);
 
             Assert.False(isError);
             Assert.Equal($"Not printed: {PrintResult.Busy.Error}", text);

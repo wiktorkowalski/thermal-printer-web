@@ -1,53 +1,26 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Sockets;
-using System.Text;
-using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
-using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Tests;
 
 // The real PrinterService against loopback ports: no test reaches the printer.
 public sealed class PrinterFaultTests
 {
-    private const string Loopback = "127.0.0.1";
+    private const string Loopback = LoopbackPrinterApp.Loopback;
     private const string UnreachableStatusJson =
         """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"ready":false,"notReadyReason":"printer unreachable"}""";
-    private const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
+    private const string PrintJson = TestHttp.PrintJson;
 
     // Online, cover closed, paper present.
     private static readonly byte[] ReadyStatus = [0x12];
 
     private static readonly string ServiceCategory = typeof(PrinterService).FullName!;
 
-    // The app with PrinterService pointed at a loopback port.
-    private sealed class App(int port, TimeSpan? connectTimeout = null) : WebApplicationFactory<Program>
-    {
-        public McpToolTests.RecordingLoggerProvider Logs { get; } = new();
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.UseEnvironment("Production");
-            builder.ConfigureServices(services =>
-            {
-                services.Configure<PrinterOptions>(options =>
-                {
-                    options.Address = $"{Loopback}:{port}";
-                    options.ConnectTimeout = connectTimeout ?? options.ConnectTimeout;
-                });
-                services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs));
-            });
-        }
-
-        public List<(LogLevel Level, string Category, string Message)> ServiceLogs
-            => [.. Logs.Entries.Where(entry => entry.Category == ServiceCategory && entry.Level >= LogLevel.Information)];
-    }
+    private static List<(LogLevel Level, string Category, string Message)> ServiceLogs(TestApp app)
+        => [.. app.Logs.Entries.Where(entry => entry.Category == ServiceCategory && entry.Level >= LogLevel.Information)];
 
     // A port with no listener: the connection is refused.
     private static int ClosedPort()
@@ -80,30 +53,6 @@ public sealed class PrinterFaultTests
         return (port, done);
     }
 
-    private static async Task<(HttpStatusCode Status, string Body)> SendAsync(HttpClient client, HttpMethod method, string url, string? json = null)
-    {
-        using var request = new HttpRequestMessage(method, url);
-        if (json is not null)
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        // Streamable HTTP (MCP) needs both; the controller ignores them.
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-
-        using var response = await client.SendAsync(request);
-        return (response.StatusCode, await response.Content.ReadAsStringAsync());
-    }
-
-    internal static async Task<string> CallToolAsync(HttpClient client, string tool, string argumentsJson)
-    {
-        var rpc = """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"TOOL","arguments":ARGUMENTS}}"""
-            .Replace("TOOL", tool)
-            .Replace("ARGUMENTS", argumentsJson);
-        var (_, body) = await SendAsync(client, HttpMethod.Post, "/mcp", rpc);
-
-        var data = body.Split('\n').Single(line => line.StartsWith("data: ", StringComparison.Ordinal))["data: ".Length..];
-        return JsonDocument.Parse(data).RootElement.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
-    }
-
     // What an exception message from the socket holds.
     private static void AssertNoFaultDetails(string text, int port)
     {
@@ -118,14 +67,14 @@ public sealed class PrinterFaultTests
     public async Task GetStatus_ConnectionRefused_Returns503WithoutExceptionText()
     {
         var port = ClosedPort();
-        using var app = new App(port);
+        using var app = new LoopbackPrinterApp(port);
 
-        var (status, body) = await SendAsync(app.CreateClient(), HttpMethod.Get, "/api/printer/status");
+        var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, "/api/printer/status");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal(UnreachableStatusJson, body);
         // The exception, with the address, is in the server log one time.
-        var entry = Assert.Single(app.ServiceLogs);
+        var entry = Assert.Single(ServiceLogs(app));
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.Contains(nameof(SocketException), entry.Message);
         Assert.Contains($"{Loopback}:{port}", entry.Message);
@@ -135,13 +84,13 @@ public sealed class PrinterFaultTests
     public async Task GetStatus_ConnectTimeout_Returns503WithoutExceptionText()
     {
         // A zero timeout cancels the connect the same way a slow network does.
-        using var app = new App(ClosedPort(), TimeSpan.Zero);
+        using var app = new LoopbackPrinterApp(ClosedPort(), TimeSpan.Zero);
 
-        var (status, body) = await SendAsync(app.CreateClient(), HttpMethod.Get, "/api/printer/status");
+        var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, "/api/printer/status");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal(UnreachableStatusJson, body);
-        Assert.Contains(nameof(TaskCanceledException), Assert.Single(app.ServiceLogs).Message);
+        Assert.Contains(nameof(TaskCanceledException), Assert.Single(ServiceLogs(app)).Message);
     }
 
     [Theory]
@@ -150,28 +99,28 @@ public sealed class PrinterFaultTests
     public async Task PostPrinter_PrinterUnreachable_Returns503WithFixedText(bool timeout)
     {
         var port = ClosedPort();
-        using var app = new App(port, timeout ? TimeSpan.Zero : null);
+        using var app = new LoopbackPrinterApp(port, timeout ? TimeSpan.Zero : null);
 
-        var (status, body) = await SendAsync(app.CreateClient(), HttpMethod.Post, "/api/printer", PrintJson);
+        var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, "/api/printer", PrintJson);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("""{"success":false,"error":"Printer not ready: printer unreachable","type":"printer"}""", body);
         // One line for the fault: the status read logs it, the print does not log it again.
-        Assert.Equal(LogLevel.Warning, Assert.Single(app.ServiceLogs).Level);
+        Assert.Equal(LogLevel.Warning, Assert.Single(ServiceLogs(app)).Level);
     }
 
     [Fact]
     public async Task PostPrinter_ConnectionLostAfterTheStatusRead_Returns503WithFixedText()
     {
         var (port, printerDone) = ReadyThenGone();
-        using var app = new App(port);
+        using var app = new LoopbackPrinterApp(port);
 
-        var (status, body) = await SendAsync(app.CreateClient(), HttpMethod.Post, "/api/printer", PrintJson);
+        var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, "/api/printer", PrintJson);
         await printerDone;
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("""{"success":false,"error":"Printer unreachable","type":"printer"}""", body);
-        var entry = Assert.Single(app.ServiceLogs);
+        var entry = Assert.Single(ServiceLogs(app));
         Assert.Equal(LogLevel.Error, entry.Level);
         Assert.StartsWith($"Print failed: no connection to the printer at {Loopback}:{port}", entry.Message);
         Assert.Contains("Exception", entry.Message);
@@ -181,12 +130,12 @@ public sealed class PrinterFaultTests
     public async Task McpTools_PrinterUnreachable_ShowTheSameFixedText()
     {
         var port = ClosedPort();
-        using var app = new App(port);
+        using var app = new LoopbackPrinterApp(port);
         var client = app.CreateClient();
 
-        var print = await CallToolAsync(client, "print", PrintJson);
-        var printNote = await CallToolAsync(client, "print_note", """{"title":"T","message":"M"}""");
-        var status = await CallToolAsync(client, "get_status", "{}");
+        var (_, print) = await client.CallToolAsync("print", PrintJson);
+        var (_, printNote) = await client.CallToolAsync("print_note", """{"title":"T","message":"M"}""");
+        var (_, status) = await client.CallToolAsync("get_status", "{}");
 
         Assert.Equal("Not printed: Printer not ready: printer unreachable", print);
         Assert.Equal("Not printed: Printer not ready: printer unreachable", printNote);
@@ -199,9 +148,9 @@ public sealed class PrinterFaultTests
     public async Task McpPrint_ConnectionLostAfterTheStatusRead_ShowsTheFixedText()
     {
         var (port, printerDone) = ReadyThenGone();
-        using var app = new App(port);
+        using var app = new LoopbackPrinterApp(port);
 
-        var text = await CallToolAsync(app.CreateClient(), "print", PrintJson);
+        var (_, text) = await app.CreateClient().CallToolAsync("print", PrintJson);
         await printerDone;
 
         Assert.Equal("Not printed: Printer unreachable", text);
@@ -211,8 +160,8 @@ public sealed class PrinterFaultTests
     [Fact]
     public async Task PrintAsync_UnexpectedException_ReturnsFixedTextAndLogsTheExceptionOnce()
     {
-        var logs = new McpToolTests.RecordingLoggerProvider();
-        var service = new PrinterService(new LoggerFactory([logs]).CreateLogger<PrinterService>(), [], NoPrinter.Options);
+        var logs = new RecordingLogger<PrinterService>();
+        var service = new PrinterService(logs, [], NoPrinter.Options);
 
         var result = await service.PrintAsync(null!);
 

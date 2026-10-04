@@ -1,5 +1,3 @@
-using ESCPOS_NET.Emitters;
-using ESCPOS_NET.Utilities;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services.Printing;
 using ThermalPrinterWeb.Services.Printing.Handlers;
@@ -14,15 +12,12 @@ public sealed class BlockHandlerInjectionTests
     private const string Attack = "\u001b@\u001dV\u0000\u0010\u0004\u0001";
     private static readonly byte[] CleanAttack = "?@?V????"u8.ToArray();
 
-    private static BlockContext NewContext()
-        => new(new EPSON(), null) { Encoding = CodePages.GetEncoding("PC852") };
-
     private static async Task<(byte[] Bytes, BlockContext Ctx)> RunAsync(IBlockHandler handler, params PrintContent[] blocks)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         foreach (var block in blocks)
             await handler.HandleAsync(block, ctx);
-        return (ByteSplicer.Combine([.. ctx.Output]), ctx);
+        return (ctx.OutputBytes(), ctx);
     }
 
     // Span overloads: a failure prints both byte sequences.
@@ -78,7 +73,7 @@ public sealed class BlockHandlerInjectionTests
     [InlineData(BarcodeType.GS1_128)]
     public async Task Barcode_ControlCharacters_RejectTheBlock(BarcodeType type)
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         var block = new PrintContent
         {
             Type = ContentType.Barcode,
@@ -94,7 +89,7 @@ public sealed class BlockHandlerInjectionTests
     [Fact]
     public async Task QRCode_ControlCharacters_RejectTheBlock()
     {
-        var ctx = NewContext();
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         var block = new PrintContent { Type = ContentType.QRCode, Content = "AB" + Attack + "ĐĄā" };
 
         // A QR code with '?' in place of a character scans to other data: no bytes at all.
