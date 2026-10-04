@@ -75,6 +75,10 @@ builder.Services.AddSingleton<ILoggerProvider, PrintJobTraceLoggerProvider>();
 builder.Services.AddSingleton(services => new PrintJournalReader(
     services.GetRequiredService<JournalDatabase>(), services.GetRequiredService<PrintJournal>()));
 builder.Services.AddSingleton<PrintJobReprinter>();
+builder.Services.AddSingleton(services => new PrintJobDeleter(
+    services.GetRequiredService<PrintJournal>(),
+    services.GetRequiredService<IHttpContextAccessor>(),
+    services.GetRequiredService<ILogger<PrintJobDeleter>>()));
 
 // MCP server over HTTP at /mcp (stateless). McpApiKeyMiddleware guards it with a bearer token.
 builder.Services.AddOptions<McpAuthOptions>().BindConfiguration(McpAuthOptions.SectionName);

@@ -26,6 +26,13 @@ internal interface IPrintJournalStore
 
     // Throws JournalFullException when a size limit stops the write.
     Task AddAsync(PrintJob job, CancellationToken cancellationToken);
+
+    // Deletes the rows of the filter in one transaction, when their number is at most maxRows and, with confirmRows, equal to it.
+    // Else it deletes nothing. The answer holds the rows that fit and says whether they are deleted.
+    Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken);
+
+    // Gives the space of deleted rows back to the disk: the size limit of the journal is the size of its files.
+    Task CompactAsync(CancellationToken cancellationToken);
 }
 
 // Not a fault of the storage: a limit from JournalOptions is reached. The message names the limit and holds no job content.
@@ -58,6 +65,31 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
         await using var db = database.CreateContext();
         db.PrintJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // The foreign keys of PrintJobPayloads and PrintJobTexts delete their rows with the job (cascade, in the database).
+    public async Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken)
+    {
+        await using var db = database.CreateContext();
+        // The count and the delete see the same rows.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var selection = await JobSelection.ReadAsync(db, filter, cancellationToken);
+        if (selection.Rows == 0 || selection.Rows > maxRows || (confirmRows is { } confirmed && confirmed != selection.Rows))
+            return selection;
+
+        await JobSelection.WithReprints(db, filter).ExecuteDeleteAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return selection with { Deleted = true };
+    }
+
+    // A delete leaves free pages in the file; the file keeps its size. VACUUM writes the database again without them,
+    // through the write-ahead log, so the log is cut after it. It needs free disk space of about twice the database.
+    public async Task CompactAsync(CancellationToken cancellationToken)
+    {
+        await using var db = database.CreateContext();
+        await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken);
     }
 
     // SQLite gives the write-ahead log and the shared-memory file the mode of the database file.

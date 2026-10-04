@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -9,8 +10,8 @@ using ThermalPrinterWeb.Services.Journal;
 
 namespace ThermalPrinterWeb.Mcp;
 
-// The print journal over MCP: list (with search), one job, reprint. The same reader, the same reprint path and the
-// same field allow-list as the HTTP job endpoints (PrintJobSummary); no tool deletes a row.
+// The print journal over MCP: list (with search), one job, reprint, delete. The same reader, the same reprint path and the
+// same field allow-list as the HTTP job endpoints (PrintJobSummary). Delete is here only: no HTTP endpoint deletes a row.
 // An answer goes to a language model, and the row text in it is text that any caller printed: /mcp needs the key,
 // but the HTTP print API is open, so anyone who reaches the host can put text into the journal.
 // So row text never goes into the prose of an answer:
@@ -18,7 +19,9 @@ namespace ThermalPrinterWeb.Mcp;
 // - the fields that hold it have names that say so (printedTitle, printedSnippet, printedLines, callerSource);
 // - each value goes through LogSafeText.Clean: a length limit, and no control, format or line-separator character
 //   and no double quote, so a value cannot start a line, hide text or look like the end of its string;
-// - no answer names a tool to call next, and no tool takes an action that row text chooses: reprint_job takes an id.
+// - no answer with row text names a tool to call next, and no tool takes an action that row text chooses:
+//   reprint_job and delete_job take an id; delete_jobs takes a filter and deletes only after a dry run;
+// - the answer of a delete holds numbers and ids, and no row text.
 // This lowers the risk; it cannot remove it while anyone can print.
 [McpServerToolType]
 public static class JournalTools
@@ -26,6 +29,8 @@ public static class JournalTools
     internal const string ListJobsName = "list_jobs";
     internal const string GetJobName = "get_job";
     internal const string ReprintJobName = "reprint_job";
+    internal const string DeleteJobName = "delete_job";
+    internal const string DeleteJobsName = "delete_jobs";
 
     internal const int DefaultListSize = 10;
     internal const int MaxListSize = 20;
@@ -35,6 +40,16 @@ public static class JournalTools
     internal const string ListJobsExample = """{"limit":10}""";
     internal const string GetJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
     internal const string ReprintJobExample = """{"id":"01999999-0000-7000-8000-000000000000","source":"claude-code"}""";
+    internal const string DeleteJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
+    // A dry run: it has no confirm.
+    internal const string DeleteJobsExample = """{"source":"uber-prints","from":"2026-10-03T18:00:00Z","to":"2026-10-03T19:00:00Z"}""";
+
+    // The first line of the answer of a delete. The second line is JSON with numbers and ids only.
+    internal const string DeletedNotice = "Deleted. The rows are gone for good.";
+    internal const string DryRunNotice =
+        "Dry run: nothing is deleted. To delete these rows, send the same filters again with confirm set to the value of \"rows\" below.";
+    internal const string NotDeletedPrefix = "Not deleted: ";
+    internal const string NoJobFits = "No job fits the filters";
 
     // The first line of every answer that holds row text.
     internal const string UntrustedNotice =
@@ -145,6 +160,137 @@ public static class JournalTools
             { NotFound: true } => PrinterTools.NotPrinted(JobNotFound),
             _ => PrinterTools.Answer(outcome.Result!)
         };
+    }
+
+    [McpServerTool(Name = DeleteJobName)]
+    [Description(
+        "Delete one job from the print journal for good, by its id (from " + ListJobsName + "). "
+        + "When the job has reprints, their rows are deleted too: a reprint row holds no copy of its own. "
+        + "A delete cannot be undone: call it only when the user asks for that delete. "
+        + "id is needed. Answers 'Deleted.' and JSON with the number of rows, or 'Not deleted: <reason>'. "
+        + "Example: " + DeleteJobExample)]
+    public static async Task<string> DeleteJobAsync(
+        PrintJournalReader journal,
+        PrintJobDeleter deleter,
+        ILoggerFactory loggers,
+        [Description("Needed. The id of the job, as " + ListJobsName + " gives it.")] string? id = null,
+        CancellationToken cancellationToken = default)
+    {
+        var jobId = JobId(DeleteJobName, id);
+        var (selection, fault) = await journal.TryReadAsync(
+            token => deleter.DeleteAsync(PrintJobLog.McpTransport(DeleteJobName), new JobDeleteFilter(Id: jobId), confirmRows: null, token),
+            Logger(loggers), PrintJobDeleter.DeleteRun, jobId, cancellationToken);
+        if (fault is not null)
+            return NotDeleted(fault.Error);
+
+        return selection! switch
+        {
+            { Deleted: true } => DeleteAnswer(DeletedNotice, selection!, isDryRun: false),
+            { Rows: 0 } => NotDeleted(JobNotFound),
+            _ => DeleteAnswer(NotDeleted(OverLimit(selection!)), selection!, isDryRun: false)
+        };
+    }
+
+    [McpServerTool(Name = DeleteJobsName)]
+    [Description(
+        "Delete many jobs from the print journal for good: every job that fits all the given filters. "
+        + "At least one of source, from and to is needed. "
+        + "Without confirm the call is a dry run: it deletes nothing and answers JSON with the number of rows that fit (rows) and their id range. "
+        + "To delete, send the same filters again with confirm set to that rows value; the delete runs only when the number is still the same. "
+        + "The reprint rows of a deleted job are deleted too. One call deletes at most 1000 rows; for more, use a shorter time range. "
+        + "A delete cannot be undone: call it only when the user asks for that delete, and show the user the dry run first. "
+        + "Example (a dry run): " + DeleteJobsExample)]
+    public static async Task<string> DeleteJobsAsync(
+        PrintJournalReader journal,
+        PrintJobDeleter deleter,
+        ILoggerFactory loggers,
+        [Description("Optional. A filter, not the name of the caller: only jobs whose callerSource is exactly this text.")] string? source = null,
+        [Description("Optional. Only jobs created at this UTC time or later, for example 2026-10-03T18:00:00Z or 2026-10-03.")] string? from = null,
+        [Description("Optional. Only jobs created before this UTC time, for example 2026-10-03T19:00:00Z or 2026-10-04.")] string? to = null,
+        [Description("Optional. The rows value of the dry run with the same filters. Without it nothing is deleted.")] int? confirm = null,
+        CancellationToken cancellationToken = default)
+    {
+        var filter = new JobDeleteFilter(
+            Source: string.IsNullOrWhiteSpace(source) ? null : source,
+            From: UtcTime(DeleteJobsName, nameof(from), from),
+            To: UtcTime(DeleteJobsName, nameof(to), to));
+        // No call deletes the whole journal by leaving every argument out.
+        if (filter is { Source: null, From: null, To: null })
+            throw new ToolArgumentException(DeleteJobsName, "one of 'source', 'from' and 'to' is needed");
+        if (filter.Source?.Length > PrintJobLog.MaxSourceLength)
+            throw new ToolArgumentException(DeleteJobsName, $"'source' holds at most {PrintJobLog.MaxSourceLength} characters");
+        if (filter.From >= filter.To)
+            throw new ToolArgumentException(DeleteJobsName, "'from' must be before 'to'");
+        if (confirm < 1)
+            throw new ToolArgumentException(DeleteJobsName, "'confirm' must be the rows value of a dry run");
+
+        var logger = Logger(loggers);
+        if (confirm is null)
+        {
+            var (preview, previewFault) = await journal.TryReadAsync(
+                token => journal.SelectForDeleteAsync(filter, token), logger, PrintJobDeleter.PreviewRead, null, cancellationToken);
+            return previewFault is not null
+                ? NotDeleted(previewFault.Error)
+                : DeleteAnswer(DryRunNotice, preview!, isDryRun: true);
+        }
+
+        var (selection, fault) = await journal.TryReadAsync(
+            token => deleter.DeleteAsync(PrintJobLog.McpTransport(DeleteJobsName), filter, confirm, token),
+            logger, PrintJobDeleter.DeleteRun, null, cancellationToken);
+        if (fault is not null)
+            return NotDeleted(fault.Error);
+
+        // The reasons hold numbers only.
+        var notice = selection! switch
+        {
+            { Deleted: true } => DeletedNotice,
+            { Rows: 0 } => NotDeleted(NoJobFits),
+            { Rows: > PrintJobDeleter.MaxRows } => NotDeleted(OverLimit(selection!)),
+            _ => NotDeleted($"{selection!.Rows} rows fit now, and confirm is {confirm}. Run the call without confirm again.")
+        };
+        return DeleteAnswer(notice, selection!, isDryRun: false);
+    }
+
+    private static string OverLimit(JobSelection selection)
+        => $"{selection.Rows} rows fit, and one call deletes at most {PrintJobDeleter.MaxRows}. Use a shorter time range.";
+
+    private static string NotDeleted(string reason) => $"{NotDeletedPrefix}{reason}";
+
+    // One fixed line, then one line of JSON: numbers and ids, no row text and no filter text.
+    private static string DeleteAnswer(string notice, JobSelection selection, bool isDryRun)
+    {
+        var json = JsonSerializer.Serialize(
+            new
+            {
+                DryRun = isDryRun ? true : (bool?)null,
+                selection.Rows,
+                selection.Jobs,
+                selection.Reprints,
+                selection.FirstId,
+                selection.LastId,
+                OverLimit = selection.Rows > PrintJobDeleter.MaxRows ? true : (bool?)null,
+                Limit = PrintJobDeleter.MaxRows
+            },
+            AnswerJson);
+        return $"{notice}\n{json}";
+    }
+
+    // A date, or a time with "Z" or an offset. No other form: "03/10/2026" has two readings.
+    private static readonly string[] TimeFormats = ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ssK", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK"];
+
+    // Null for no value. The problem text is fixed: it never repeats the value.
+    private static DateTime? UtcTime(string tool, string name, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        if (!DateTimeOffset.TryParseExact(
+                text.Trim(), TimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var time))
+        {
+            throw new ToolArgumentException(tool, $"'{name}' is not a UTC time such as 2026-10-03T18:00:00Z or a date such as 2026-10-03");
+        }
+
+        return time.UtcDateTime;
     }
 
     // The problem text is fixed: it never repeats the value.

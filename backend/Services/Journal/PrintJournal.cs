@@ -22,6 +22,7 @@ internal sealed class PrintJournal(
     private const string MountInfoPath = "/proc/self/mountinfo";
 
     private static readonly TimeSpan OpenTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DeleteTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Channel<Work> _queue = Channel.CreateUnbounded<Work>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Lock _pendingLock = new();
@@ -31,8 +32,8 @@ internal sealed class PrintJournal(
     private volatile bool _off;
     private bool _full;
 
-    // A row or a barrier. A barrier is done when the writer gets to it.
-    private readonly record struct Work(PrintJob? Job, TaskCompletionSource? Barrier);
+    // A row, a barrier or a delete. A barrier is done when the writer gets to it.
+    private readonly record struct Work(PrintJob? Job = null, TaskCompletionSource? Barrier = null, Func<Task>? Delete = null);
 
     // True from the start: a job that comes before the database is open waits in the queue.
     public bool IsOn => !_off;
@@ -62,15 +63,28 @@ internal sealed class PrintJournal(
         }
 
         // False after the host stopped the writer.
-        if (!_queue.Writer.TryWrite(new Work(job, null)))
+        if (!_queue.Writer.TryWrite(new Work(Job: job)))
             Release(bytes);
+    }
+
+    // Deletes rows in the writer, between two writes: a delete and a write never run at the same time.
+    // "onDeleted" runs in the writer after the rows are gone, also when the caller no longer waits.
+    // Throws when the writer does not run or the delete fails; then no row is deleted.
+    internal async Task<JobSelection> DeleteAsync(
+        JobDeleteFilter filter, int? confirmRows, int maxRows, Action<JobSelection> onDeleted, CancellationToken cancellationToken)
+    {
+        var done = new TaskCompletionSource<JobSelection>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_off || !_queue.Writer.TryWrite(new Work(Delete: () => RunDeleteAsync(filter, confirmRows, maxRows, onDeleted, done, cancellationToken))))
+            throw new InvalidOperationException("The journal writer does not run");
+
+        return await done.Task.WaitAsync(cancellationToken);
     }
 
     // Done when every entry added before the call is stored or given up. For tests.
     internal Task DrainAsync()
     {
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        return _queue.Writer.TryWrite(new Work(null, barrier)) ? barrier.Task : Task.CompletedTask;
+        return _queue.Writer.TryWrite(new Work(Barrier: barrier)) ? barrier.Task : Task.CompletedTask;
     }
 
     // The host waits for the entries in the queue, up to its shutdown timeout.
@@ -94,6 +108,9 @@ internal sealed class PrintJournal(
                     await WriteAsync(job);
                 Release(job.Payload.LargeBytes());
             }
+
+            if (work.Delete is { } delete)
+                await delete();
 
             work.Barrier?.SetResult();
         }
@@ -168,6 +185,52 @@ internal sealed class PrintJournal(
         {
             // No job content: the exception holds none (EF Core logs no parameter values).
             logger.LogWarning(ex, "Journal write failed: job {JobId} is not stored", job.Id);
+        }
+    }
+
+    // No exception leaves this method: it would stop the writer.
+    private async Task RunDeleteAsync(
+        JobDeleteFilter filter,
+        int? confirmRows,
+        int maxRows,
+        Action<JobSelection> onDeleted,
+        TaskCompletionSource<JobSelection> done,
+        CancellationToken cancellationToken)
+    {
+        JobSelection selection;
+        try
+        {
+            // The caller went away while the delete waited for the writer: nothing is deleted.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_off)
+                throw new InvalidOperationException("The journal is off");
+
+            // Not the token of the caller, and no WaitAsync: a delete that started ends or rolls back,
+            // so its answer and its log line say what happened.
+            using var timeout = new CancellationTokenSource(DeleteTimeout);
+            selection = await store.DeleteAsync(filter, confirmRows, maxRows, timeout.Token);
+            if (selection.Deleted)
+                onDeleted(selection);
+            done.TrySetResult(selection);
+        }
+        catch (Exception ex)
+        {
+            done.TrySetException(ex);
+            return;
+        }
+
+        if (!selection.Deleted)
+            return;
+
+        try
+        {
+            // No time limit: SQLite cannot stop a VACUUM, and a write must not start while it runs.
+            // The jobs of that time wait in the queue, up to its limits.
+            await store.CompactAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Journal delete: the database file did not get smaller. Later rows use its free pages.");
         }
     }
 

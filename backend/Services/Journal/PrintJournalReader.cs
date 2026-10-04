@@ -207,6 +207,14 @@ public sealed partial class PrintJournalReader
         return new StoredJob(originalId, content, options, null);
     }
 
+    // The rows that a delete with this filter takes. It deletes nothing: PrintJobDeleter does that, in the journal writer.
+    internal async Task<JobSelection> SelectForDeleteAsync(JobDeleteFilter filter, CancellationToken cancellationToken)
+    {
+        using var timeout = Timeout(cancellationToken);
+        await using var db = Open();
+        return await JobSelection.ReadAsync(db, filter, timeout.Token);
+    }
+
     // The text values only: the entity is never loaded, its blobs are up to 30 MB.
     private static Task<JobCopy?> CopyAsync(JournalDbContext db, Guid jobId, CancellationToken cancellationToken)
         => db.PrintJobPayloads.AsNoTracking()
