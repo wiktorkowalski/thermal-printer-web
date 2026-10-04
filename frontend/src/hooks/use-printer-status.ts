@@ -54,13 +54,40 @@ export function usePrinterStatus(): PrinterStatusState {
 
 export type StatusTone = "ready" | "busy" | "error" | "unknown";
 
+/** Why the printer cannot print. "error": a cause with no text of its own. */
+export type PrinterFault = "offline" | "paper" | "cover" | "cutter" | "unrecoverable" | "autoRecoverable" | "recoverable" | "error";
+
+/**
+ * The one cause to show for a status that is not ready. The four error flags are in the order of
+ * `NotReadyReason` in the backend model; they are absent in the answer of an older server.
+ */
+export function printerFault(status: PrinterStatus): PrinterFault {
+  if (!status.reachable) return "offline";
+  if (status.paperOut) return "paper";
+  if (status.coverOpen) return "cover";
+  if (status.cutterError) return "cutter";
+  if (status.unrecoverableError) return "unrecoverable";
+  if (status.autoRecoverableError) return "autoRecoverable";
+  if (status.recoverableError) return "recoverable";
+  return "error";
+}
+
+const FAULT_TEXT: Record<Exclude<PrinterFault, "error">, { label: string; detail: string }> = {
+  offline: { label: "Offline", detail: "Printer not reachable on the network" },
+  paper: { label: "No paper", detail: "Load a new 80 mm roll" },
+  cover: { label: "Cover open", detail: "Close the cover" },
+  cutter: { label: "Cutter error", detail: "Clear the paper from the cutter" },
+  unrecoverable: { label: "Printer fault", detail: "Switch the printer off and on" },
+  autoRecoverable: { label: "Printer paused", detail: "Wait for the print head to cool down" },
+  recoverable: { label: "Printer error", detail: "Clear the paper path" },
+};
+
 export function describeStatus(state: PrinterStatusState): { tone: StatusTone; label: string; detail: string } {
   const { status, failed } = state;
   if (failed) return { tone: "error", label: "No server", detail: "Cannot reach the print server" };
   if (!status) return { tone: "unknown", label: "Checking…", detail: "Asking the printer" };
   if (status.ready) return { tone: "ready", label: "Ready", detail: "Paper OK · cover closed" };
-  if (!status.reachable) return { tone: "error", label: "Offline", detail: "Printer not reachable on the network" };
-  if (status.paperOut) return { tone: "error", label: "No paper", detail: "Load a new 80 mm roll" };
-  if (status.coverOpen) return { tone: "error", label: "Cover open", detail: "Close the cover" };
+  const fault = printerFault(status);
+  if (fault !== "error") return { tone: "error", ...FAULT_TEXT[fault] };
   return { tone: "error", label: "Not ready", detail: status.notReadyReason ?? "Printer reports an error" };
 }

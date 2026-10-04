@@ -12,9 +12,6 @@ namespace ThermalPrinterWeb.Tests;
 public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinterApp>
 {
     private const string Secret = TestBlocks.Secret;
-    private const int FontAColumns = 48;
-    private const int DoubleWidthColumns = 24;
-
     private readonly HttpClient _client = app.CreateClient();
 
     private async Task<JsonElement> ToolAsync(string name)
@@ -100,7 +97,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         AssertEveryPropertyDescribed(block, "content[]");
         AssertEveryPropertyDescribed(properties.GetProperty("options"), "options");
         Assert.All(
-            ["qrCodeOptions", "barcodeOptions", "imageOptions"],
+            ["qrCodeOptions", "barcodeOptions", "imageOptions", "size"],
             options => AssertEveryPropertyDescribed(block.GetProperty("properties").GetProperty(options), options));
 
         // The numbers a caller needs to avoid a mid-word wrap.
@@ -137,6 +134,20 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.Contains($"at most {LineFeedBlockHandler.MaxLines}.", Description("lines"));
         Assert.Contains($"at most {SeparatorBlockHandler.MaxLength}.", Description("separatorLength"));
         Assert.Contains($"1 to {ImageBlockHandler.MaxPrintHeight}.", imageOptions.GetProperty("maxHeight").GetProperty("description").GetString());
+
+        // The size range, and the characters per line of every width.
+        var range = $"{TextSize.Min} to {TextSize.Max}";
+        var size = block.GetProperty("size").GetProperty("properties");
+        var width = size.GetProperty("width").GetProperty("description").GetString();
+        var widths = Enumerable.Range(TextSize.Min, TextSize.Max - TextSize.Min + 1).ToList();
+        Assert.Contains($"multipliers of {range}", Description("size"));
+        Assert.Contains($"from {range}.", width);
+        Assert.Contains($"from {range}.", size.GetProperty("height").GetProperty("description").GetString());
+        Assert.Contains($"rounded down: {string.Join(", ", widths.Select(w => PaperLength.Columns(fontB: false, w)))} ", width);
+        Assert.Contains($"64 / width: {string.Join(", ", widths.Select(w => PaperLength.Columns(fontB: true, w)))})", width);
+        Assert.Contains($"a headline of {PaperLength.Columns(fontB: false, 3)} characters per line", Description("size"));
+        Assert.Contains($"with \"size\":{{\"width\":3,\"height\":3}} a headline holds {PaperLength.Columns(fontB: false, 3)})", tool.GetProperty("description").GetString());
+        Assert.Contains($"a size of {range})", PrinterTools.ServerInstructions);
     }
 
     [Theory]
@@ -164,7 +175,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.True(app.Printer.Jobs.TryDequeue(out var job));
         foreach (var block in job.Content.Where(block => block.Type == ContentType.Text))
         {
-            var width = block.Style?.Contains(PrintStyle.DoubleWidth) == true ? DoubleWidthColumns : FontAColumns;
+            var width = PaperLength.Columns(block.Style?.Contains(PrintStyle.FontB) == true, TextScale.Of(block.Style, block.Size).Width);
             Assert.All(block.Content!.Split('\n'), line => Assert.True(line.Length <= width, line));
         }
     }
@@ -243,7 +254,8 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.False(isError);
         Assert.Equal("Printed.", text);
         Assert.True(app.Printer.Jobs.TryDequeue(out var job));
-        Assert.Equal(["T", "M"], job.Content.Where(block => block.Type == ContentType.Text).Select(block => block.Content));
+        // Title, message, then the date line.
+        Assert.Equal(["T", "M"], job.Content.Where(block => block.Type == ContentType.Text).Select(block => block.Content).Take(2));
         Assert.DoesNotContain(job.Content, block => block.Type == ContentType.Image);
     }
 

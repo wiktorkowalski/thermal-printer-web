@@ -11,6 +11,8 @@ internal static class TestHttp
     // The smallest print job that passes validation.
     public const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
 
+    public const string PrintUrl = "/api/printer";
+
     public const string McpUrl = "/mcp";
 
     // What every MCP call of a test sends. A call over HTTP sends no Authorization header: that API is open.

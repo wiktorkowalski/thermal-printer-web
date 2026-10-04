@@ -60,6 +60,8 @@ builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<PrintJobLog>();
+// The clock of the app. Its first use: the date line of a simple-mode note (SimpleNote).
+builder.Services.AddSingleton(TimeProvider.System);
 
 // The print journal. A bad setting here turns the journal off; it never stops the app (PrintJournal).
 builder.Services.AddOptions<JournalOptions>()

@@ -11,16 +11,13 @@ public sealed class PrinterFaultTests
 {
     private const string Loopback = TestApp.Loopback;
     private const string UnreachableStatusJson =
-        """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"ready":false,"notReadyReason":"printer unreachable"}""";
+        """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"cutterError":false,"unrecoverableError":false,"autoRecoverableError":false,"recoverableError":false,"ready":false,"notReadyReason":"printer unreachable"}""";
     private const string PrintJson = TestHttp.PrintJson;
 
-    // Online, cover closed, paper present.
-    private static readonly byte[] ReadyStatus = [0x12];
+    private static readonly byte[] ReadyStatus = [WirePrinter.ReadyStatus];
 
-    private static readonly string ServiceCategory = typeof(PrinterService).FullName!;
-
-    private static List<(LogLevel Level, string Category, string Message)> ServiceLogs(TestApp app)
-        => [.. app.Logs.Entries.Where(entry => entry.Category == ServiceCategory && entry.Level >= LogLevel.Information)];
+    // DLE EOT 1, 2, 4 and 3 in one status read.
+    private const int StatusQueries = 4;
 
     // A port with no listener: the connection is refused.
     private static int ClosedPort()
@@ -42,10 +39,10 @@ public sealed class PrinterFaultTests
             using var client = await listener.AcceptTcpClientAsync();
             var stream = client.GetStream();
             var query = new byte[3];
-            for (var i = 0; i < 3; i++)
+            for (var i = 0; i < StatusQueries; i++)
             {
                 await stream.ReadExactlyAsync(query);
-                if (i == 2)
+                if (i == StatusQueries - 1)
                     listener.Dispose();
                 await stream.WriteAsync(ReadyStatus);
             }
@@ -74,7 +71,7 @@ public sealed class PrinterFaultTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal(UnreachableStatusJson, body);
         // The exception, with the address, is in the server log one time.
-        var entry = Assert.Single(ServiceLogs(app));
+        var entry = Assert.Single(app.PrinterServiceLogs());
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.Contains(nameof(SocketException), entry.Message);
         Assert.Contains($"{Loopback}:{port}", entry.Message);
@@ -90,7 +87,7 @@ public sealed class PrinterFaultTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal(UnreachableStatusJson, body);
-        Assert.Contains(nameof(TaskCanceledException), Assert.Single(ServiceLogs(app)).Message);
+        Assert.Contains(nameof(TaskCanceledException), Assert.Single(app.PrinterServiceLogs()).Message);
     }
 
     [Theory]
@@ -106,7 +103,7 @@ public sealed class PrinterFaultTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("""{"success":false,"error":"Printer not ready: printer unreachable","type":"printer"}""", body);
         // One line for the fault: the status read logs it, the print does not log it again.
-        Assert.Equal(LogLevel.Warning, Assert.Single(ServiceLogs(app)).Level);
+        Assert.Equal(LogLevel.Warning, Assert.Single(app.PrinterServiceLogs()).Level);
     }
 
     [Fact]
@@ -120,7 +117,7 @@ public sealed class PrinterFaultTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("""{"success":false,"error":"Printer unreachable","type":"printer"}""", body);
-        var entry = Assert.Single(ServiceLogs(app));
+        var entry = Assert.Single(app.PrinterServiceLogs());
         Assert.Equal(LogLevel.Error, entry.Level);
         Assert.StartsWith($"Print failed: no connection to the printer at {Loopback}:{port}", entry.Message);
         Assert.Contains("Exception", entry.Message);

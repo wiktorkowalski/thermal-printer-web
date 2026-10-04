@@ -31,9 +31,22 @@ internal sealed class PrinterService(
 
     private static readonly TimeSpan StatusReadTimeout = TimeSpan.FromSeconds(2);
 
+    private const byte StatusFrameMask = 0x93;
+    private const byte StatusFrameValue = 0x12;
+
+    // DLE EOT 3, error status. Bits 3, 5 and 6: Epson TM-T20II ESC/POS Quick Reference (M00068700),
+    // "DLE EOT n", n = 3: "bit 3 = 1: Autocutter error", "bit 5 = 1: Unrecoverable error",
+    // "bit 6 = 1: Automatically recoverable error". Bit 2 is not on that card: its name "recoverable error"
+    // comes from a TM-T88V driver (github.com/AkatukiSora/tm-t88v, ParseErrorStatus), the weakest origin of the four.
+    // This printer answers 0x12 when idle. No error bit is verified on hardware.
+    private const byte RecoverableErrorBit = 0x04;
+    private const byte CutterErrorBit = 0x08;
+    private const byte UnrecoverableErrorBit = 0x20;
+    private const byte AutoRecoverableErrorBit = 0x40;
+
     // The printer renders single-byte code pages only; raw UTF-8 prints as garbage
     // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
-    private const string DefaultCodePage = "PC852";
+    private const string DefaultCodePage = CodePages.DefaultName;
 
     // The Kestrel default, set in Program.cs because the image size limit in ImageBlockHandler depends on it.
     internal const long MaxRequestBodyBytes = 30_000_000;
@@ -158,6 +171,11 @@ internal sealed class PrinterService(
         var e = new EPSON();
         var ctx = new BlockContext(e, options);
 
+        // ESC @ first: the job starts from the power-on state, whatever the job before left
+        // (line spacing, text size, barcode and QR settings). It also resets the code page,
+        // so the code page command comes next, then the options.
+        ctx.Add(e.Initialize());
+
         // Determine text encoding based on code page
         var codePageName = options?.CodePage ?? DefaultCodePage;
         var codePage = CodePages.Resolve(codePageName);
@@ -169,6 +187,7 @@ internal sealed class PrinterService(
         }
         else
         {
+            // After ESC @ the printer has its own default code page, not the one of the job before.
             logger.LogWarning(
                 "Unknown code page \"{CodePage}\", printing raw UTF-8 bytes",
                 LogSafeText.Clean(codePageName, CodePages.MaxLoggedNameLength));
@@ -204,11 +223,6 @@ internal sealed class PrinterService(
             var feedLines = options?.FeedLinesAfterPrint ?? 3;
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
-
-        // The printer keeps ESC 3 n after the job: without ESC 2 the next job prints
-        // with this spacing, and its paper estimate is too low.
-        if (options?.DefaultLineSpacing != null)
-            ctx.Add(e.ResetLineSpacing());
 
         PrintJobTrace.Current?.PaperDots = ctx.PaperDots;
         return ctx.Output;
@@ -307,10 +321,24 @@ internal sealed class PrinterService(
             {
                 paperOut = (paperStatus.Value & 0x60) == 0x60; // bits 5,6 set => paper end
                 paperLow = (paperStatus.Value & 0x0C) == 0x0C; // bits 2,3 set => paper near-end
-                raw.Append($"n4={paperStatus.Value:x2}");
+                raw.Append($"n4={paperStatus.Value:x2} ");
             }
 
-            var status = new PrinterStatus(true, online, coverOpen, paperOut, paperLow, raw.ToString().Trim());
+            // Last: a late answer to this query then cannot be read as the answer to another one.
+            // Not sent after a query with no answer: the late answer of that query would be read as this one.
+            var answersInStep = printerStatus.HasValue && offlineStatus.HasValue && paperStatus.HasValue;
+            var errorStatus = answersInStep ? await QueryErrorStatusAsync(stream) : null;
+            // No answer or no status frame: the error status is unknown, and the other queries decide.
+            var errorsKnown = errorStatus is { } answer && IsStatusFrame(answer);
+            var errors = errorsKnown ? errorStatus.GetValueOrDefault() : (byte)0;
+            raw.Append(errorStatus is { } sent ? $"n3={sent:x2}{(errorsKnown ? "" : "!")}" : "n3=?");
+
+            var status = new PrinterStatus(
+                true, online, coverOpen, paperOut, paperLow, raw.ToString(),
+                CutterError: (errors & CutterErrorBit) != 0,
+                UnrecoverableError: (errors & UnrecoverableErrorBit) != 0,
+                AutoRecoverableError: (errors & AutoRecoverableErrorBit) != 0,
+                RecoverableError: (errors & RecoverableErrorBit) != 0);
             logger.LogDebug("Printer status: {Status}", status);
             return status;
         }
@@ -347,6 +375,22 @@ internal sealed class PrinterService(
         {
             logger.LogWarning(ex, "Buzzer beep failed ({Address})", endpoint);
             return false;
+        }
+    }
+
+    // Every DLE EOT answer has bits 1 and 4 set and bits 0 and 7 clear.
+    private static bool IsStatusFrame(byte value) => (value & StatusFrameMask) == StatusFrameValue;
+
+    // DLE EOT 3. A connection that the printer drops here is no answer: the three queries before it did answer.
+    private static async Task<byte?> QueryErrorStatusAsync(NetworkStream stream)
+    {
+        try
+        {
+            return await QueryStatusByteAsync(stream, [0x10, 0x04, 0x03]);
+        }
+        catch (IOException)
+        {
+            return null;
         }
     }
 

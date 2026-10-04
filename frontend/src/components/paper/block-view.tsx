@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
 import { EDITOR_IMAGE_MAX_MB } from "@/lib/printer-limits";
 import { IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
-import { DEFAULT_ALIGNMENT, HEAD_DOTS, countPrintedLines, longestLine, textMetrics } from "@/lib/paper";
+import { DEFAULT_ALIGNMENT, DOUBLE_STYLES, HEAD_DOTS, countPrintedLines, longestLine, textMetrics, textScale } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView, type BarcodeRender } from "./graphic-views";
@@ -67,12 +67,17 @@ export function BlockView(props: BlockViewProps) {
     </button>
   );
 
+  // A size replaces the two double styles: its tag stands in their place.
+  const scale = block.size != null ? textScale(block.style, block.size) : null;
+  const styleTags = [
+    ...(block.style ?? []).filter((s) => !(scale && DOUBLE_STYLES.includes(s))).map((s) => STYLE_TAGS[s] ?? s),
+    ...(scale ? [`${scale.width}x${scale.height}`] : []),
+  ];
+
   const tag = (
     <div className={cn("text-right", selected ? "text-accent-text" : "text-ink-3")}>
       <div className="font-semibold tracking-[1px] uppercase">{label}</div>
-      {block.style && block.style.length > 0 && (
-        <div className="font-mono text-[10px]">{block.style.map((s) => STYLE_TAGS[s] ?? s).join(" ")}</div>
-      )}
+      {styleTags.length > 0 && <div className="font-mono text-[10px]">{styleTags.join(" ")}</div>}
     </div>
   );
 
@@ -121,7 +126,7 @@ export function BlockView(props: BlockViewProps) {
 
   switch (block.type) {
     case "Text": {
-      const m = textMetrics(block.style);
+      const m = textMetrics(block.style, block.size);
       const text = block.content ?? "";
       const longest = longestLine(text);
       const lines = countPrintedLines(text, m.maxChars);
@@ -130,6 +135,7 @@ export function BlockView(props: BlockViewProps) {
         <PaperText
           text={text}
           style={block.style}
+          size={block.size}
           alignment={block.alignment}
           placeholder={block.placeholder}
           label={`Text block ${index + 1}`}
@@ -149,8 +155,8 @@ export function BlockView(props: BlockViewProps) {
     }
     case "Separator": {
       const length = block.separatorLength ?? 32;
-      content = <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(length)} style={block.style} alignment={block.alignment} />;
-      right = <span>{length}/{textMetrics(block.style).maxChars}</span>;
+      content = <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(length)} style={block.style} size={block.size} alignment={block.alignment} />;
+      right = <span>{length}/{textMetrics(block.style, block.size).maxChars}</span>;
       break;
     }
     case "Image":
