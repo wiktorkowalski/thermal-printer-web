@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -206,7 +207,7 @@ public sealed class PayloadErrorTests
         if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(List<>) || !type.GetGenericArguments()[0].IsEnum)
             return null;
 
-        var list = (System.Collections.IList)Activator.CreateInstance(type)!;
+        var list = (IList)Activator.CreateInstance(type)!;
         list.Add(Enum.ToObject(type.GetGenericArguments()[0], 99));
         return list;
     }
@@ -622,7 +623,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
         Assert.Equal(expectedError, body.Error);
     }
 
-    // A number that names an enum member and a name in any casing were valid before #67 and stay valid: the job reaches the printer step.
+    // A number that names an enum member and a name in any casing stay valid: the job reaches the printer step.
     [Theory]
     [InlineData("""{"content":[{"type":0,"content":"x"}]}""")]
     [InlineData("""{"content":[{"type":"text","content":"x"}]}""")]
@@ -659,7 +660,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
         ("""{"type":"QRCode","content":"x","qrCodeOptions":{"correctionLevel":VALUE}}""", "QRCode", "qrCodeOptions.correctionLevel", "3", "Percent25", PayloadErrorTests.QRCodeCorrectionLevelNames)
     ];
 
-    private static string ArgumentsWith(string block, string value)
+    private static string JobWith(string block, string value)
         => "{\"content\":[" + block.Replace(ValuePlaceholder, value, StringComparison.Ordinal) + "]}";
 
     public static TheoryData<string, string> EnumNumbersWithNoName()
@@ -667,10 +668,10 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
         var data = new TheoryData<string, string>();
         foreach (var (block, blockType, field, _, _, validNames) in EnumFields)
         {
-            data.Add(ArgumentsWith(block, "99"), PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
-            data.Add(ArgumentsWith(block, "-1"), PayloadErrorTests.NotAValidValue(0, blockType, field, "-1", validNames));
+            data.Add(JobWith(block, "99"), PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
+            data.Add(JobWith(block, "-1"), PayloadErrorTests.NotAValidValue(0, blockType, field, "-1", validNames));
             // The enum converter reads a number in a string as the number.
-            data.Add(ArgumentsWith(block, "\"99\""), PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
+            data.Add(JobWith(block, "\"99\""), PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
         }
 
         return data;
@@ -681,10 +682,10 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
         var data = new TheoryData<string>();
         foreach (var (block, _, _, definedNumber, name, _) in EnumFields)
         {
-            data.Add(ArgumentsWith(block, definedNumber));
-            data.Add(ArgumentsWith(block, $"\"{name}\""));
-            data.Add(ArgumentsWith(block, $"\"{name.ToLowerInvariant()}\""));
-            data.Add(ArgumentsWith(block, $"\"{name.ToUpperInvariant()}\""));
+            data.Add(JobWith(block, definedNumber));
+            data.Add(JobWith(block, $"\"{name}\""));
+            data.Add(JobWith(block, $"\"{name.ToLowerInvariant()}\""));
+            data.Add(JobWith(block, $"\"{name.ToUpperInvariant()}\""));
         }
 
         // Every enum field left out, with and without its options object.
@@ -700,7 +701,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     {
         var data = new TheoryData<string, string>();
         foreach (var (block, _, field, _, _, _) in EnumFields)
-            data.Add(ArgumentsWith(block, "\"Bogus\""), $"$.content[0].{field}");
+            data.Add(JobWith(block, "\"Bogus\""), $"$.content[0].{field}");
         return data;
     }
 
@@ -708,7 +709,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     {
         var data = new TheoryData<string, string>();
         foreach (var (block, blockType, field, _, _, validNames) in EnumFields)
-            data.Add(ArgumentsWith(block, "99"), "Not printed: " + PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
+            data.Add(JobWith(block, "99"), "Not printed: " + PayloadErrorTests.NotAValidValue(0, blockType, field, "99", validNames));
         return data;
     }
 

@@ -25,7 +25,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrinterOptions.cs   # Printer:Address, Printer:ConnectTimeout, startup validation
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, PaperLength, DecodeQueue, CodePages
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, DecodeQueue, CodePages
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
