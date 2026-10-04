@@ -146,6 +146,30 @@ public sealed class McpToolTests(McpToolTests.McpApp app) : IClassFixture<McpToo
             tools.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()).Order());
     }
 
+    // Pins the schema against the fault from #73: an injected service (printer, jobLog) listed as an argument.
+    // The fault needs two hosts that start at the same time (see AssemblyInfo.cs); here it must never show.
+    [Fact]
+    public async Task ToolsList_EveryTool_ListsCallerArgumentsOnlyAndNoInjectedService()
+    {
+        var tools = (await RpcAsync("tools/list")).GetProperty("tools");
+
+        var arguments = tools.EnumerateArray().ToDictionary(
+            tool => tool.GetProperty("name").GetString()!,
+            tool => tool.GetProperty("inputSchema").TryGetProperty("properties", out var properties)
+                ? string.Join(',', properties.EnumerateObject().Select(property => property.Name))
+                : "");
+
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["get_status"] = "",
+                ["print_note"] = "title,message,imageBase64,source",
+                ["beep"] = "count,duration",
+                ["print"] = "content,options,source"
+            },
+            arguments);
+    }
+
     [Theory]
     [InlineData("print", "content,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]
