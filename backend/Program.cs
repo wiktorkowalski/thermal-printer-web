@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -26,10 +25,7 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
 
 // Add services to the container.
 builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    })
+    .AddJsonOptions(options => PrintJobEntry.ConfigureApiJson(options.JsonSerializerOptions))
     // Model-binding failures answer in the same shape as every other print error.
     .ConfigureApiBehaviorOptions(options =>
     {
@@ -72,6 +68,7 @@ builder.Services.AddOptions<JournalOptions>()
     .BindConfiguration(JournalOptions.SectionName);
 builder.Services.AddSingleton<JournalDatabase>();
 builder.Services.AddSingleton<IPrintJournalStore, SqlitePrintJournalStore>();
+builder.Services.AddSingleton<ContainerLayerCheck>(PrintJournal.IsInContainerLayer);
 builder.Services.AddSingleton<PrintJournal>();
 builder.Services.AddHostedService(services => services.GetRequiredService<PrintJournal>());
 builder.Services.AddSingleton<ILoggerProvider, PrintJobTraceLoggerProvider>();
@@ -145,7 +142,7 @@ if (app.Environment.IsDevelopment())
 app.UseMiddleware<PrintJournalMiddleware>();
 
 app.MapControllers();
-app.MapMcp("/mcp").WithMetadata(new JournaledAttribute("mcp") { JobsOnly = true });
+app.MapMcp("/mcp").WithMetadata(new JournaledAttribute { JobsOnly = true });
 
 // Serve React app SPA (from wwwroot)
 app.MapFallbackToFile("index.html");

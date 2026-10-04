@@ -16,8 +16,9 @@ public sealed class PrintJobLog(ILogger<PrintJobLog> logger, IHttpContextAccesso
     internal static string McpTransport(string tool) => $"mcp:{tool}";
 
     // The reason of a failure is logged where it happens; this line holds the kind only.
-    // content and options are what went to the print path; null when the request held no job.
-    public void Write(string transport, string? source, PrintResult result, List<PrintContent>? content = null, PrintOptions? options = null)
+    // content and options are what went to the print path; null content when the request held no job.
+    // No default values: an entry point that leaves them out would store a row with no blocks.
+    public void Write(string transport, string? source, PrintResult result, List<PrintContent>? content, PrintOptions? options)
     {
         // The journal row of the request (PrintJournalMiddleware). Not a log: it holds the content.
         PrintJobTrace.Current?.Outcome = new PrintJobOutcome(transport, source, result, content, options);

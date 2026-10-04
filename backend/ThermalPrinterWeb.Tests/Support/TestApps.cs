@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Journal;
 
 namespace ThermalPrinterWeb.Tests.Support;
 
@@ -17,17 +18,27 @@ public abstract class TestApp(string environment) : WebApplicationFactory<Progra
     public RecordingLoggerProvider Logs { get; } = new();
 
     // Each host has its own print journal, in the temp directory. The default path is under the repo.
-    public string JournalDirectory { get; } = Path.Combine(Path.GetTempPath(), "thermal-printer-web-tests", Guid.NewGuid().ToString("N"));
+    public string JournalDirectory { get; init; } = NewJournalDirectory();
+
+    // What the host answers for "is the journal directory on the container layer". Set before the first request.
+    public bool InContainerLayer { get; init; }
 
     protected virtual string JournalPathSetting => "Journal:DataPath";
-    protected virtual string JournalPath => JournalDirectory;
+
+    public static string NewJournalDirectory() => Path.Combine(Path.GetTempPath(), "thermal-printer-web-tests", Guid.NewGuid().ToString("N"));
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);
-        UseSettings(builder, (JournalPathSetting, JournalPath));
+        UseSettings(builder, (JournalPathSetting, JournalDirectory));
         builder.ConfigureServices(services =>
-            services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs)));
+        {
+            services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs));
+            // The Docker build runs the tests in a container, where the temp directory is on no volume.
+            // The same log on every machine: no "not a volume" warning unless a test asks for it.
+            services.RemoveAll<ContainerLayerCheck>();
+            services.AddSingleton<ContainerLayerCheck>(_ => InContainerLayer);
+        });
         ConfigurePrinter(builder);
     }
 

@@ -76,10 +76,9 @@ public sealed class PrintJournalTests
     }
 
     // The settings name of the other homelab apps in place of Journal:DataPath.
-    private sealed class DataPathVariableApp(string directory) : TestApp(Production)
+    private sealed class DataPathVariableApp() : TestApp(Production)
     {
         protected override string JournalPathSetting => JournalOptions.DataPathVariable;
-        protected override string JournalPath => directory;
 
         protected override void ConfigurePrinter(IWebHostBuilder builder) => UseRecordingPrinter(builder, new RecordingPrinter());
     }
@@ -230,7 +229,8 @@ public sealed class PrintJournalTests
     [Fact]
     public async Task Restart_KeepsTheRowsAndAddsToThem()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "thermal-printer-web-tests", Guid.NewGuid().ToString("N"));
+        // Not the directory of a host: a host deletes its own when it stops.
+        var directory = TestApp.NewJournalDirectory();
         try
         {
             await using (var first = new App(null, ("Journal:DataPath", directory)))
@@ -602,20 +602,28 @@ public sealed class PrintJournalTests
     [Fact]
     public async Task DataPathVariable_SetsTheDirectory()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "thermal-printer-web-tests", Guid.NewGuid().ToString("N"));
-        try
-        {
-            await using var app = new DataPathVariableApp(directory);
-            await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
+        await using var app = new DataPathVariableApp();
+        await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
 
-            Assert.Single(await app.JournalRowsAsync());
-            Assert.True(File.Exists(Path.Combine(directory, JournalOptions.DatabaseFileName)));
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
-        }
+        Assert.Single(await app.JournalRowsAsync());
+        Assert.True(File.Exists(Path.Combine(app.JournalDirectory, JournalOptions.DatabaseFileName)));
+    }
+
+    // The production case until the owner mounts a volume: the journal works and says that it is lost on a redeploy.
+    [Fact]
+    public async Task Startup_DirectoryOnTheContainerLayer_StoresJobsAndLogsOneWarning()
+    {
+        await using var app = new App { InContainerLayer = true };
+
+        var (status, _) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Single(await app.JournalRowsAsync());
+        var logs = app.JournalLogs();
+        Assert.Equal([LogLevel.Information, LogLevel.Warning], logs.Select(entry => entry.Level));
+        Assert.Equal(
+            $"Journal directory {app.JournalDirectory} is not a volume: the journal is lost when the container is replaced. Mount a volume at {app.JournalDirectory}.",
+            logs[1].Message);
     }
 
     [Fact]
@@ -668,6 +676,21 @@ public sealed class PrintJournalTests
 
         Assert.Equal(expected, PrintJobEntry.ResultOf(result, httpStatus));
         Assert.Equal(JobResult.Printed, PrintJobEntry.ResultOf(PrintResult.Ok, 200));
+    }
+
+    // The hash runs in chunks. It must equal the hash of the whole text as UTF-8, the form in the request body.
+    [Theory]
+    [InlineData("")]
+    [InlineData("QUJD")]
+    [InlineData("zażółć \U0001F600")]
+    [InlineData(null)]
+    public void ImageHash_IsTheSha256OfTheUtf8Text(string? text)
+    {
+        // Null: a text longer than one chunk, with a surrogate pair across each chunk border.
+        text ??= string.Concat(Enumerable.Repeat("abc\U0001F600ż", 5000));
+        var expected = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+        Assert.Equal($"sha256:{expected};chars={text.Length}", PrintJobEntry.ImageHash(text));
     }
 
     [Fact]

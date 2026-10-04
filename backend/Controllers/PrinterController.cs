@@ -14,7 +14,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     private const string BusyRetryAfterSeconds = "5";
 
     [HttpPost]
-    [Journaled(PrintJobLog.HttpTransport)]
+    [Journaled]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status415UnsupportedMediaType)]
@@ -35,7 +35,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         {
             // No job to send, but the caller is known: the same line, so a broken client shows up by name.
             var rejected = PrintResult.Invalid("Request must have Content array or both Name and Message");
-            jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected);
+            jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected, content: null, request.Options);
             return BadRequest(new PrintResponse(false, rejected.Error, PrintResponse.ValidationType));
         }
 

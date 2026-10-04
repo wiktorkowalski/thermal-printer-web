@@ -2,8 +2,8 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using ThermalPrinterWeb.Models;
 
 namespace ThermalPrinterWeb.Services.Journal;
@@ -14,11 +14,10 @@ internal sealed record PrintJobEntry
     internal const int MaxTitleLength = 100;
     internal const string ImageHashPrefix = "sha256:";
 
-    // The same JSON as the HTTP API: camelCase names, enum names.
-    internal static readonly JsonSerializerOptions ApiJson = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
+    private const int HashChunkBytes = 4096;
+
+    // The same JSON as the HTTP API: the web defaults of MVC plus ConfigureApiJson.
+    internal static readonly JsonSerializerOptions ApiJson = CreateApiJson();
 
     // "1.0.0+<commit>" in the Docker image; no commit in a local build.
     internal static readonly string AppVersion =
@@ -28,21 +27,40 @@ internal sealed record PrintJobEntry
     public required DateTime CreatedAt { get; init; }
     public required TimeSpan Duration { get; init; }
 
-    // What the endpoint is, for a request that did not get to PrintJobLog.
-    public required string Transport { get; init; }
     public required int HttpStatus { get; init; }
     public required string? UserAgent { get; init; }
     public required string? RemoteIp { get; init; }
     public required Dictionary<string, string[]> Headers { get; init; }
     public required byte[]? Request { get; init; }
 
-    // An exception that left the endpoint.
-    public Exception? Fault { get; init; }
+    // ApiJson, with a hash in place of each picture.
+    private static readonly JsonSerializerOptions BlocksJsonOptions = new(ApiJson)
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { HashImageContent } }
+    };
 
-    // What the entry holds in memory while it waits for the writer.
-    public long PendingBytes => (Request?.Length ?? 0) + (Trace.Bytes?.Length ?? 0);
+    // What Program.cs sets on the JSON options of the controllers. One place, so the stored blocks stay in the API form.
+    internal static void ConfigureApiJson(JsonSerializerOptions options) => options.Converters.Add(new JsonStringEnumConverter());
 
-    // Runs on the journal writer: it serializes the blocks, and that takes time for a photo.
+    private static JsonSerializerOptions CreateApiJson()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        ConfigureApiJson(options);
+        return options;
+    }
+
+    // The serializer never writes the base64 text of a picture: no copy of up to 22 MB.
+    private static void HashImageContent(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Type != typeof(PrintContent))
+            return;
+
+        var content = typeInfo.Properties.Single(property => property.Name == "content");
+        content.Get = block => (PrintContent)block is { Type: ContentType.Image, Content: { Length: > 0 } base64 }
+            ? ImageHash(base64)
+            : ((PrintContent)block).Content;
+    }
+
     public PrintJob ToRow()
     {
         var outcome = Trace.Outcome;
@@ -54,7 +72,8 @@ internal sealed record PrintJobEntry
             Id = Trace.Id,
             CreatedAt = CreatedAt,
             DurationMs = (long)Duration.TotalMilliseconds,
-            Transport = outcome?.Transport ?? Transport,
+            // No outcome: the request did not get to PrintJobLog. Only the HTTP endpoint stores such a request.
+            Transport = outcome?.Transport ?? PrintJobLog.HttpTransport,
             Source = Cut(outcome?.Source, PrintJobLog.MaxSourceLength),
             UserAgent = Cut(UserAgent, PrintJobLog.MaxUserAgentLength),
             RemoteIp = RemoteIp,
@@ -77,7 +96,7 @@ internal sealed record PrintJobEntry
                 Options = outcome?.Options is null ? null : JsonSerializer.Serialize(outcome.Options, ApiJson),
                 PlainText = plainText,
                 Headers = JsonSerializer.Serialize(Headers, ApiJson),
-                Exception = (Fault ?? Trace.Exception)?.ToString(),
+                Exception = Trace.Exception?.ToString(),
                 Log = Trace.LogLines() is { Length: > 0 } lines ? string.Join('\n', lines) : null
             }
         };
@@ -95,21 +114,26 @@ internal sealed record PrintJobEntry
     };
 
     // The request body holds each picture already. A second copy of a photo is up to 22 MB.
-    internal static string BlocksJson(List<PrintContent> content)
+    internal static string BlocksJson(List<PrintContent> content) => JsonSerializer.Serialize(content, BlocksJsonOptions);
+
+    // The hash of the base64 text as the caller sent it (UTF-8), so it matches the same text in the request body.
+    // In chunks: no second copy of the text.
+    internal static string ImageHash(string base64)
     {
-        var blocks = JsonSerializer.SerializeToNode(content, ApiJson)!.AsArray();
-        foreach (var (index, block) in content.Index())
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var encoder = Encoding.UTF8.GetEncoder();
+        Span<byte> bytes = stackalloc byte[HashChunkBytes];
+        var text = base64.AsSpan();
+        while (!text.IsEmpty)
         {
-            if (block is { Type: ContentType.Image, Content.Length: > 0 })
-                blocks[index]!["content"] = ImageHash(block.Content);
+            // A full buffer ends at a whole character: no surrogate pair is split.
+            encoder.Convert(text, bytes, flush: true, out var charsUsed, out var bytesUsed, out _);
+            hash.AppendData(bytes[..bytesUsed]);
+            text = text[charsUsed..];
         }
 
-        return blocks.ToJsonString(ApiJson);
+        return $"{ImageHashPrefix}{Convert.ToHexStringLower(hash.GetHashAndReset())};chars={base64.Length}";
     }
-
-    // The hash of the base64 text as the caller sent it, so it matches the same text in the request body.
-    internal static string ImageHash(string base64)
-        => $"{ImageHashPrefix}{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(base64)))};chars={base64.Length}";
 
     private static string? PlainText(List<PrintContent> content)
     {

@@ -73,7 +73,7 @@ public static class PrinterTools
 
         var content = SimpleNote.Build(title, message, imageBase64);
         var result = await printer.PrintAsync(content);
-        jobLog.Write(PrintJobLog.McpTransport(PrintNoteName), source, result, content);
+        jobLog.Write(PrintJobLog.McpTransport(PrintNoteName), source, result, content, options: null);
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 

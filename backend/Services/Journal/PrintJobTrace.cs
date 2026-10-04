@@ -33,6 +33,8 @@ internal sealed class PrintJobTrace
     public byte[]? Bytes { get; set; }
     public int? PaperDots { get; set; }
     public PrinterStatus? Status { get; set; }
+
+    // A fault PrinterService handled, or one that left the endpoint (PrintJournalMiddleware).
     public Exception? Exception { get; set; }
 
     public static PrintJobTrace Begin()

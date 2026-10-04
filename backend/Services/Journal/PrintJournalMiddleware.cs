@@ -6,9 +6,8 @@ namespace ThermalPrinterWeb.Services.Journal;
 // JobsOnly: only a request that got to a print (PrintJobLog). The MCP endpoint also serves
 // calls that are not jobs (initialize, tools/list, get_status, beep).
 [AttributeUsage(AttributeTargets.Method)]
-internal sealed class JournaledAttribute(string transport) : Attribute
+internal sealed class JournaledAttribute : Attribute
 {
-    public string Transport { get; } = transport;
     public bool JobsOnly { get; init; }
 }
 
@@ -49,13 +48,15 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
         catch (Exception ex)
         {
             fault = ex;
+            // An exception that left the endpoint. It wins over one the print path stored and handled.
+            trace.Exception = ex;
             throw;
         }
         finally
         {
             PrintJobTrace.End();
             if (trace.Outcome is not null || !journaled.JobsOnly)
-                await RecordAsync(context, journaled, trace, createdAt, Stopwatch.GetElapsedTime(started), buffered, fault);
+                await RecordAsync(context, trace, createdAt, Stopwatch.GetElapsedTime(started), buffered, fault);
         }
     }
 
@@ -76,7 +77,7 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
 
     // Never throws: the caller has its print result, or gets it from the code after this.
     private async Task RecordAsync(
-        HttpContext context, JournaledAttribute journaled, PrintJobTrace trace, DateTime createdAt, TimeSpan duration, bool buffered, Exception? fault)
+        HttpContext context, PrintJobTrace trace, DateTime createdAt, TimeSpan duration, bool buffered, Exception? fault)
     {
         try
         {
@@ -84,12 +85,13 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
             if (fault is null)
                 await context.Response.CompleteAsync();
 
-            journal.Add(new PrintJobEntry
+            // The row is built here, after the response: it holds a hash for each picture, so the
+            // queue of the writer keeps no block content alive.
+            var entry = new PrintJobEntry
             {
                 Trace = trace,
                 CreatedAt = createdAt,
                 Duration = duration,
-                Transport = journaled.Transport,
                 HttpStatus = fault switch
                 {
                     null => context.Response.StatusCode,
@@ -100,9 +102,9 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
                 UserAgent = context.Request.Headers.UserAgent.ToString(),
                 RemoteIp = context.Connection.RemoteIpAddress?.ToString(),
                 Headers = Headers(context.Request),
-                Request = buffered ? await ReadBodyAsync(context.Request) : null,
-                Fault = fault
-            });
+                Request = buffered ? await ReadBodyAsync(context.Request) : null
+            };
+            journal.Add(entry.ToRow());
         }
         catch (Exception ex)
         {

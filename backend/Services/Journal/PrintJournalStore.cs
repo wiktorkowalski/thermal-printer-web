@@ -7,19 +7,15 @@ namespace ThermalPrinterWeb.Services.Journal;
 // Not AddDbContextFactory: that reads the settings when the host starts, and a bad journal setting must not stop the app.
 internal sealed class JournalDatabase(IOptions<JournalOptions> options, IHostEnvironment environment)
 {
-    private readonly Lazy<string> _path = new(() => options.Value.DatabasePath(environment.ContentRootPath));
-    private DbContextOptions<JournalDbContext>? _contextOptions;
+    private readonly Lazy<DbContextOptions<JournalDbContext>> _contextOptions = new(() =>
+        new DbContextOptionsBuilder<JournalDbContext>()
+            .UseSqlite(JournalDbContext.ConnectionString(options.Value.DatabasePath(environment.ContentRootPath)))
+            .Options);
 
     // Throws when the journal settings do not bind.
-    public string Path => _path.Value;
+    public string Path => options.Value.DatabasePath(environment.ContentRootPath);
 
-    public JournalDbContext CreateContext()
-    {
-        _contextOptions ??= new DbContextOptionsBuilder<JournalDbContext>()
-            .UseSqlite(JournalDbContext.ConnectionString(Path))
-            .Options;
-        return new JournalDbContext(_contextOptions);
-    }
+    public JournalDbContext CreateContext() => new(_contextOptions.Value);
 }
 
 // Where the journal rows go. The tests replace it with a store that throws or hangs.
@@ -94,7 +90,7 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
         var path = database.Path;
         var limits = options.Value;
 
-        var rowBytes = (job.Payload.Request?.Length ?? 0L) + (job.Payload.Bytes?.Length ?? 0L);
+        var rowBytes = PrintJournal.PayloadBytes(job);
         var databaseBytes = FileLength(path) + FileLength(path + WriteAheadLogSuffix);
         if (databaseBytes + rowBytes > limits.MaxDatabaseBytes)
         {

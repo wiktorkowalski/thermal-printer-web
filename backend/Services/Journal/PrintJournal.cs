@@ -3,11 +3,15 @@ using Microsoft.Extensions.Options;
 
 namespace ThermalPrinterWeb.Services.Journal;
 
+// A delegate, so a test host answers for itself: CI runs the tests inside a container, on its layer.
+internal delegate bool ContainerLayerCheck(string directory);
+
 // Stores every print job. One background writer, so no print waits for the storage:
 // a request hands its entry over and ends. A fault here costs a journal row, never a print.
 internal sealed class PrintJournal(
     IPrintJournalStore store,
     IOptions<JournalOptions> options,
+    ContainerLayerCheck isInContainerLayer,
     ILogger<PrintJournal> logger) : BackgroundService
 {
     // Entries that wait for the writer. Past a limit a new entry is dropped: a slow disk must not fill the memory.
@@ -24,22 +28,25 @@ internal sealed class PrintJournal(
     private int _pendingJobs;
     private long _pendingBytes;
 
-    private TimeSpan _writeTimeout;
     private volatile bool _off;
     private bool _full;
 
-    // An entry or a barrier. A barrier is done when the writer gets to it.
-    private readonly record struct Work(PrintJobEntry? Entry, TaskCompletionSource? Barrier);
+    // A row or a barrier. A barrier is done when the writer gets to it.
+    private readonly record struct Work(PrintJob? Job, TaskCompletionSource? Barrier);
 
     // True from the start: a job that comes before the database is open waits in the queue.
     public bool IsOn => !_off;
 
-    public void Add(PrintJobEntry entry)
+    // The large values of a row: what it holds in memory while it waits, and what it adds to the database.
+    // The row holds no picture as text: PrintJobEntry.ToRow stores a hash in its place.
+    internal static long PayloadBytes(PrintJob job) => (job.Payload.Request?.Length ?? 0L) + (job.Payload.Bytes?.Length ?? 0L);
+
+    public void Add(PrintJob job)
     {
         if (_off)
             return;
 
-        var bytes = entry.PendingBytes;
+        var bytes = PayloadBytes(job);
         lock (_pendingLock)
         {
             // One entry always fits: a photo job alone can be over half the byte limit.
@@ -53,13 +60,13 @@ internal sealed class PrintJournal(
             {
                 logger.LogWarning(
                     "Journal is behind: job {JobId} is not stored ({PendingJobs} jobs and {PendingBytes} bytes wait for the writer)",
-                    entry.Trace.Id, _pendingJobs, _pendingBytes);
+                    job.Id, _pendingJobs, _pendingBytes);
                 return;
             }
         }
 
         // False after the host stopped the writer.
-        if (!_queue.Writer.TryWrite(new Work(entry, null)))
+        if (!_queue.Writer.TryWrite(new Work(job, null)))
             Release(bytes);
     }
 
@@ -80,17 +87,16 @@ internal sealed class PrintJournal(
     // The stopping token is not used: StopAsync ends the queue, and the loop ends after the last entry.
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Off the startup path: the app listens while the database opens.
-        await Task.Yield();
+        // .NET 10 runs this method off the startup path: the app listens while the database opens.
         _off = !await OpenAsync();
 
         await foreach (var work in _queue.Reader.ReadAllAsync(CancellationToken.None))
         {
-            if (work.Entry is { } entry)
+            if (work.Job is { } job)
             {
                 if (!_off)
-                    await WriteAsync(entry);
-                Release(entry.PendingBytes);
+                    await WriteAsync(job);
+                Release(PayloadBytes(job));
             }
 
             work.Barrier?.SetResult();
@@ -115,13 +121,12 @@ internal sealed class PrintJournal(
                 return false;
             }
 
-            _writeTimeout = settings.WriteTimeout;
             using var timeout = new CancellationTokenSource(OpenTimeout);
             var path = await store.OpenAsync(timeout.Token).WaitAsync(OpenTimeout);
             logger.LogInformation("Journal: {Path}", path);
 
             var directory = Path.GetDirectoryName(path)!;
-            if (IsInContainerLayer(directory))
+            if (isInContainerLayer(directory))
             {
                 logger.LogWarning(
                     "Journal directory {Directory} is not a volume: the journal is lost when the container is replaced. Mount a volume at {Directory}.",
@@ -138,13 +143,15 @@ internal sealed class PrintJournal(
         }
     }
 
-    private async Task WriteAsync(PrintJobEntry entry)
+    private async Task WriteAsync(PrintJob job)
     {
         try
         {
-            using var timeout = new CancellationTokenSource(_writeTimeout);
+            // The settings bind: OpenAsync read them.
+            var writeTimeout = options.Value.WriteTimeout;
+            using var timeout = new CancellationTokenSource(writeTimeout);
             // WaitAsync: a store that ignores the token must not stop the writer.
-            await store.AddAsync(entry.ToRow(), timeout.Token).WaitAsync(_writeTimeout);
+            await store.AddAsync(job, timeout.Token).WaitAsync(writeTimeout);
 
             if (_full)
             {
@@ -164,7 +171,7 @@ internal sealed class PrintJournal(
         catch (Exception ex)
         {
             // No job content: the exception holds none (EF Core logs no parameter values).
-            logger.LogWarning(ex, "Journal write failed: job {JobId} is not stored", entry.Trace.Id);
+            logger.LogWarning(ex, "Journal write failed: job {JobId} is not stored", job.Id);
         }
     }
 
@@ -177,7 +184,8 @@ internal sealed class PrintJournal(
         }
     }
 
-    private static bool IsInContainerLayer(string directory)
+    // True: the directory is inside a container and on no volume, so a new container starts with an empty journal.
+    internal static bool IsInContainerLayer(string directory)
     {
         if (!OperatingSystem.IsLinux()
             || !string.Equals(Environment.GetEnvironmentVariable(ContainerVariable), "true", StringComparison.OrdinalIgnoreCase)
