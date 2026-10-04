@@ -68,7 +68,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     [InlineData("list_jobs", "limit,before,query")]
     [InlineData("get_job", "id")]
     [InlineData("reprint_job", "id,source")]
-    [InlineData("delete_job", "id")]
+    [InlineData("delete_job", "id,confirm")]
     [InlineData("delete_jobs", "source,from,to,confirm")]
     [InlineData("print", "content,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]

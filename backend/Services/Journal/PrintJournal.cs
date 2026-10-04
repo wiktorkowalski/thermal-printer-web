@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
 
@@ -32,8 +33,14 @@ internal sealed class PrintJournal(
     private volatile bool _off;
     private bool _full;
 
-    // A row, a barrier or a delete. A barrier is done when the writer gets to it.
-    private readonly record struct Work(PrintJob? Job = null, TaskCompletionSource? Barrier = null, Func<Task>? Delete = null);
+    // Deletes have their own lane. The writer empties it before each entry of the queue, so a delete waits for at most
+    // the one write that runs, never for the writes that wait: the print API is open, and its traffic must not keep
+    // a delete out. A delete is also the way out of a full journal.
+    private readonly ConcurrentQueue<Func<Task>> _deletes = new();
+
+    // A row, a barrier, or neither: an empty entry wakes the writer for the delete lane.
+    // A barrier is done when the writer gets to it.
+    private readonly record struct Work(PrintJob? Job = null, TaskCompletionSource? Barrier = null);
 
     // True from the start: a job that comes before the database is open waits in the queue.
     public bool IsOn => !_off;
@@ -67,14 +74,19 @@ internal sealed class PrintJournal(
             Release(bytes);
     }
 
-    // Deletes rows in the writer, between two writes: a delete and a write never run at the same time.
-    // "onDeleted" runs in the writer after the rows are gone, also when the caller no longer waits.
+    // Deletes these jobs and their reprint rows in the writer, between two writes: a delete and a write never run at the same time.
+    // Returns the number of deleted rows; null when a job is gone and nothing is deleted.
+    // "onDeleted" gets that number in the writer after the rows are gone, also when the caller no longer waits.
     // Throws when the writer does not run or the delete fails; then no row is deleted.
-    internal async Task<JobSelection> DeleteAsync(
-        JobDeleteFilter filter, int? confirmRows, int maxRows, Action<JobSelection> onDeleted, CancellationToken cancellationToken)
+    internal async Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, Action<int> onDeleted, CancellationToken cancellationToken)
     {
-        var done = new TaskCompletionSource<JobSelection>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (_off || !_queue.Writer.TryWrite(new Work(Delete: () => RunDeleteAsync(filter, confirmRows, maxRows, onDeleted, done, cancellationToken))))
+        if (_off)
+            throw new InvalidOperationException("The journal is off");
+
+        var done = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _deletes.Enqueue(() => RunDeleteAsync(jobIds, onDeleted, done, cancellationToken));
+        // False after the host stopped the writer.
+        if (!_queue.Writer.TryWrite(new Work()))
             throw new InvalidOperationException("The journal writer does not run");
 
         return await done.Task.WaitAsync(cancellationToken);
@@ -102,15 +114,16 @@ internal sealed class PrintJournal(
 
         await foreach (var work in _queue.Reader.ReadAllAsync(CancellationToken.None))
         {
+            // First: a delete goes before the entries that wait.
+            while (_deletes.TryDequeue(out var delete))
+                await delete();
+
             if (work.Job is { } job)
             {
                 if (!_off)
                     await WriteAsync(job);
                 Release(job.Payload.LargeBytes());
             }
-
-            if (work.Delete is { } delete)
-                await delete();
 
             work.Barrier?.SetResult();
         }
@@ -190,14 +203,9 @@ internal sealed class PrintJournal(
 
     // No exception leaves this method: it would stop the writer.
     private async Task RunDeleteAsync(
-        JobDeleteFilter filter,
-        int? confirmRows,
-        int maxRows,
-        Action<JobSelection> onDeleted,
-        TaskCompletionSource<JobSelection> done,
-        CancellationToken cancellationToken)
+        IReadOnlyList<Guid> jobIds, Action<int> onDeleted, TaskCompletionSource<int?> done, CancellationToken cancellationToken)
     {
-        JobSelection selection;
+        int? deleted;
         try
         {
             // The caller went away while the delete waited for the writer: nothing is deleted.
@@ -208,10 +216,10 @@ internal sealed class PrintJournal(
             // Not the token of the caller, and no WaitAsync: a delete that started ends or rolls back,
             // so its answer and its log line say what happened.
             using var timeout = new CancellationTokenSource(DeleteTimeout);
-            selection = await store.DeleteAsync(filter, confirmRows, maxRows, timeout.Token);
-            if (selection.Deleted)
-                onDeleted(selection);
-            done.TrySetResult(selection);
+            deleted = await store.DeleteAsync(jobIds, timeout.Token);
+            if (deleted is { } rows)
+                onDeleted(rows);
+            done.TrySetResult(deleted);
         }
         catch (Exception ex)
         {
@@ -219,13 +227,13 @@ internal sealed class PrintJournal(
             return;
         }
 
-        if (!selection.Deleted)
+        if (deleted is null)
             return;
 
         try
         {
-            // No time limit: SQLite cannot stop a VACUUM, and a write must not start while it runs.
-            // The jobs of that time wait in the queue, up to its limits.
+            // No time limit: SQLite cannot stop the statement, and a write must not start while it runs.
+            // Its work is in proportion to the deleted rows. The jobs of that time wait in the queue, up to its limits.
             await store.CompactAsync(CancellationToken.None);
         }
         catch (Exception ex)

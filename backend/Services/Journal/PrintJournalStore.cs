@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -27,11 +28,12 @@ internal interface IPrintJournalStore
     // Throws JournalFullException when a size limit stops the write.
     Task AddAsync(PrintJob job, CancellationToken cancellationToken);
 
-    // Deletes the rows of the filter in one transaction, when their number is at most maxRows and, with confirmRows, equal to it.
-    // Else it deletes nothing. The answer holds the rows that fit and says whether they are deleted.
-    Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken);
+    // Deletes these jobs and their reprint rows in one transaction. Returns the number of deleted rows.
+    // Null: one of the jobs is gone, and nothing is deleted.
+    Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, CancellationToken cancellationToken);
 
     // Gives the space of deleted rows back to the disk: the size limit of the journal is the size of its files.
+    // SQLite cannot stop it, so the token is for the wait before it only.
     Task CompactAsync(CancellationToken cancellationToken);
 }
 
@@ -41,6 +43,10 @@ internal sealed class JournalFullException(string message) : Exception(message);
 internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions<JournalOptions> options) : IPrintJournalStore
 {
     private const string WriteAheadLogSuffix = "-wal";
+    private const string CutWriteAheadLog = "PRAGMA wal_checkpoint(TRUNCATE);";
+
+    // The value of "PRAGMA auto_vacuum" for the mode INCREMENTAL.
+    private const long IncrementalAutoVacuum = 2;
 
     // The journal holds what was printed: only the user of the app reads it.
     private const UnixFileMode DirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
@@ -52,10 +58,30 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
         CreateFile(path);
 
         await using var db = database.CreateContext();
+        // One connection for all of it: the auto_vacuum setting of a file with tables takes effect in the VACUUM of the same connection.
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        // Before the first table: a new file is made in this mode. It lets a delete give its pages back (CompactAsync).
+        await db.Database.ExecuteSqlRawAsync("PRAGMA auto_vacuum=INCREMENTAL;", cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         // Stays set in the database file. A reader over ssh does not block the writer.
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+
+        // A file from before this mode: one VACUUM writes it again in the mode. Once per file.
+        if (await AutoVacuumModeAsync(db, cancellationToken) != IncrementalAutoVacuum)
+        {
+            await db.Database.ExecuteSqlRawAsync("PRAGMA auto_vacuum=INCREMENTAL;", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync(CutWriteAheadLog, cancellationToken);
+        }
+
         return path;
+    }
+
+    private static async Task<long> AutoVacuumModeAsync(JournalDbContext db, CancellationToken cancellationToken)
+    {
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "PRAGMA auto_vacuum;";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
     public async Task AddAsync(PrintJob job, CancellationToken cancellationToken)
@@ -68,28 +94,31 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
     }
 
     // The foreign keys of PrintJobPayloads and PrintJobTexts delete their rows with the job (cascade, in the database).
-    public async Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken)
+    // No space check: a delete must work while the journal is full.
+    public async Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, CancellationToken cancellationToken)
     {
         await using var db = database.CreateContext();
-        // The count and the delete see the same rows.
+        // The check and the delete see the same rows.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        var selection = await JobSelection.ReadAsync(db, filter, cancellationToken);
-        if (selection.Rows == 0 || selection.Rows > maxRows || (confirmRows is { } confirmed && confirmed != selection.Rows))
-            return selection;
+        if (await db.PrintJobs.CountAsync(job => jobIds.Contains(job.Id), cancellationToken) != jobIds.Count)
+            return null;
 
-        await JobSelection.WithReprints(db, filter).ExecuteDeleteAsync(cancellationToken);
+        // ReprintOf has no index: this reads the small PrintJobs rows only.
+        var rows = await db.PrintJobs
+            .Where(job => jobIds.Contains(job.Id) || (job.ReprintOf != null && jobIds.Contains(job.ReprintOf.Value)))
+            .ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return selection with { Deleted = true };
+        return rows;
     }
 
-    // A delete leaves free pages in the file; the file keeps its size. VACUUM writes the database again without them,
-    // through the write-ahead log, so the log is cut after it. It needs free disk space of about twice the database.
+    // A delete leaves free pages in the file; the file keeps its size. This takes the free pages off the end of the file:
+    // the work is in proportion to the deleted rows, not to the database. The write-ahead log is cut after it.
     public async Task CompactAsync(CancellationToken cancellationToken)
     {
         await using var db = database.CreateContext();
-        await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("PRAGMA incremental_vacuum;", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(CutWriteAheadLog, cancellationToken);
     }
 
     // SQLite gives the write-ahead log and the shared-memory file the mode of the database file.

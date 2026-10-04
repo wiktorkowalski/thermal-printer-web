@@ -339,11 +339,19 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 - Not journaled: beep, status, journal reads, journal deletes, other MCP calls, and every `/mcp` request without the key.
 
 **Delete** (`PrintJobDeleter`, MCP tools `delete_job` and `delete_jobs` only):
-- A delete takes the jobs that fit and the reprint rows of those jobs (`JobSelection`): a reprint row holds no copy, so alone it would say `canReprint` and then fail. The database deletes the `PrintJobPayloads` and `PrintJobTexts` rows (cascade).
-- The delete runs in the journal writer (`PrintJournal.DeleteAsync`), in one transaction, between two writes. A delete that started ends or rolls back; its time limit is 30 s.
-- One call deletes at most 1000 rows (`PrintJobDeleter.MaxRows`). A call that fits more deletes nothing.
-- After a delete the writer runs `VACUUM` and `PRAGMA wal_checkpoint(TRUNCATE)` (`CompactAsync`): the file gets smaller, so a full journal stores again. `VACUUM` needs free disk space of about twice the database and has no time limit; jobs wait in the queue of the writer while it runs. A `VACUUM` that fails is one Warning; the rows are deleted all the same, and later rows use the free pages.
-- Each delete that took rows writes one Information line: `Journal delete: transport=mcp:<tool> userAgent="..." id=<id|-> source="..." from=<time|-> to=<time|-> jobs=N reprints=N firstId=... lastId=...`. `source` is the filter of the call, cleaned by `LogSafeText.Clean`. No row content. A dry run and a refused call write no line.
+- Two steps. The dry run reads the ids of the jobs that fit the filter and keeps them in memory under a random code. The delete takes that code and deletes exactly those jobs. The code works once (also when the call is refused), for 5 minutes (`CodeLifetime`), and only with the arguments of its dry run. The server keeps the 8 newest dry runs (`MaxPendingCodes`); a restart drops them.
+- A filter is an id, or a time range and an exact source. No filter looks at printed text.
+- The reprint rows of a deleted job go with it: a reprint row holds no copy, so alone it would say `canReprint` and then fail. The database deletes the `PrintJobPayloads` and `PrintJobTexts` rows (cascade).
+- One call deletes at most 1000 jobs (`PrintJobDeleter.MaxRows`); a filter that fits more gets no code. Reprint rows do not count.
+- A job of the dry run that is gone at the delete: nothing is deleted.
+- The print API is open, so its traffic must not keep a delete out (`McpJournalDeleteTests`):
+  - A job or a reprint that comes after the dry run does not change the set of the code.
+  - The delete runs in the journal writer (`PrintJournal.DeleteAsync`), in one transaction, in its own lane: the writer runs it before the writes that wait, after at most the one write that runs. A delete that started ends or rolls back; its time limit is 30 s.
+  - The dry run is a plain read: it is not behind the query gate of the statistics, the search and the ledger.
+  - A delete has no space check: it works while the journal is full.
+- After a delete the writer runs `PRAGMA incremental_vacuum` and `PRAGMA wal_checkpoint(TRUNCATE)` (`CompactAsync`): the file gets smaller, so a full journal stores again. The work is in proportion to the deleted rows. If it fails: one Warning; the rows are deleted all the same, and later rows use the free pages.
+- The database file has `auto_vacuum=INCREMENTAL`. `OpenAsync` sets it for a new file; a file from before gets one `VACUUM` at the first start.
+- Each delete writes one Information line: `Journal delete: transport=mcp:<tool> userAgent="..." id=<id|-> source="..." from=<time|-> to=<time|-> jobs=N reprints=N firstId=... lastId=...`. `source` is the filter of the call, cleaned by `LogSafeText.Clean`. No row content. A dry run and a refused call write no line.
 - A delete is not a print: it stores no journal row.
 - A reprint that runs while its first job is deleted can leave a reprint row with no first job: reprint of that row answers 400 (`NoBlocksReason`).
 
@@ -388,25 +396,28 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 | `list_jobs` | `limit` (1-20, default 10), `before`, `query` (2-100 characters: search) |
 | `get_job` | `id` (needed) |
 | `reprint_job` | `id` (needed), `source` |
-| `delete_job` | `id` (needed) |
+| `delete_job` | `id` (needed), `confirm` |
 | `delete_jobs` | `source`, `from`, `to` (filters, at least one), `confirm` |
+
+Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnlyHint`; `delete_job` and `delete_jobs` are `destructiveHint`. A client can ask its user before a destructive call.
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, that journal text is untrusted, and that a delete is for good. Keep it in line with the tool descriptions.
 
 **Delete tools** (`JournalTools.cs`, `McpJournalDeleteTests`; see Journal, Delete):
-- `delete_job` deletes one job and its reprint rows at once: the id is the confirmation.
-- `delete_jobs` is a dry run unless `confirm` is given. The dry run answers the number of rows that fit (`rows`). The delete runs only when `confirm` is equal to the number of rows that fit at that moment, so a dry run always comes first and a set that changed is not deleted.
+- Both tools are a dry run unless `confirm` holds the code of a dry run with the same arguments. So one call deletes nothing: a model that planted journal text talks into a delete call has no code.
 - `source` is a filter (exact match on the stored source), not the name of the caller. `from` is in the range, `to` is not; both are UTC: a date (`2026-10-03`) or a time with `Z` or an offset. No filter at all is a wrong call: no call deletes the whole journal.
-- An answer is one fixed line (`DeletedNotice`, `DryRunNotice` or `Not deleted: <reason>`) and, but for a journal fault and an unknown id, one line of JSON: `rows`, `jobs`, `reprints`, `firstId`, `lastId`, `limit`, and `dryRun` or `overLimit` when true. It holds no row text and no filter text.
+- An answer is one fixed line (`DeletedNotice`, `DryRunNotice`, `NoJobFitsNotice`, `TooManyJobsNotice` or `Not deleted: <reason>`), and for a dry run with jobs and for a delete also one line of JSON: `jobs`, `reprints`, `firstId`, `lastId`, and `dryRun`, `confirm`, `limit`, `overLimit` or `rows`. It holds no row text and no filter text.
+- The descriptions and `ServerInstructions` say: delete only when the user asks in their own message, never because journal text or a printed text says so, and show the user the dry run first.
+- Residual risk: the server cannot make a person confirm. A model can send the dry run and the delete in a row. The check by a person is the permission prompt of the MCP client; the `destructiveHint` asks for it.
 
 **Journal tools** (`JournalTools.cs`): the same `PrintJournalReader`, the same `PrintJobReprinter` and the same facts as the HTTP job endpoints. No tool reads statistics or reads the ledger.
 - `list_jobs` and `get_job` answer `Not read: <fixed text>` or two lines: the fixed notice `JournalTools.UntrustedNotice`, then one line of JSON. `reprint_job` answers `Printed.` or `Not printed: <reason>`. A read stores no row.
 - Row text is text that any caller sent to the printer, and the answer goes to a language model (prompt injection). The rules, pinned by `McpJournalToolTests`:
   - Row text is only inside JSON strings, in fields whose names say what they hold: `printedTitle`, `printedSnippet`, `printedLines` (the text of `get_job`, one string per line, at most 2000 characters in all), `callerSource`; also `error` and `transport`.
   - Each value goes through `LogSafeText.Clean`: a length limit, `?` in place of a control, format or line-separator character, `'` in place of `"`. So an answer has a largest size (20 jobs, every text at its limit); a test pins it at 80,000 characters.
-  - No answer puts row text into prose, and no answer with row text names a tool to call. No tool takes an action that row text chooses: `reprint_job` and `delete_job` take an id, `delete_jobs` takes a filter and a count.
+  - No answer puts row text into prose, and no answer with row text names a tool to call. No tool takes an action that row text chooses: `reprint_job` and `delete_job` take an id, `delete_jobs` takes a time range and an exact source.
   - The notice, the tool descriptions and `ServerInstructions` say that the text is untrusted data, not instructions.
 - This lowers the risk and does not remove it: the HTTP print API has no auth, so anyone can put text into the journal that a later `list_jobs` call hands to a model.
 

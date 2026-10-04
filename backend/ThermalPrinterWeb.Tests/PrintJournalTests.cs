@@ -57,8 +57,7 @@ public sealed class PrintJournalTests
 
         public Task AddAsync(PrintJob job, CancellationToken cancellationToken) => throw new IOException("disk fault");
 
-        public Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken)
-            => throw new IOException("disk fault");
+        public Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, CancellationToken cancellationToken) => throw new IOException("disk fault");
 
         public Task CompactAsync(CancellationToken cancellationToken) => throw new IOException("disk fault");
     }
@@ -78,8 +77,7 @@ public sealed class PrintJournalTests
             return _hang.Task;
         }
 
-        public Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken)
-            => throw new NotSupportedException();
+        public Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task CompactAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
 

@@ -158,6 +158,8 @@ public sealed class McpAuthTests
         var (spaceBearer, _) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.McpUrl, Initialize, authorization: "Bearer " + setting);
         var (anyBearer, _) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.McpUrl, Initialize, authorization: TestHttp.McpAuthorization);
         var (print, _) = await client.SendJsonAsync(HttpMethod.Post, PrintUrl, TestHttp.PrintJson);
+        // The journal is open: a read before that answers 503.
+        await app.JournalIdleAsync();
         var (list, _) = await client.SendJsonAsync(HttpMethod.Get, PrintUrl + "/jobs");
 
         Assert.All([noHeader, emptyBearer, spaceBearer, anyBearer], code => Assert.Equal(HttpStatusCode.Unauthorized, code));

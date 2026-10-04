@@ -67,8 +67,7 @@ public sealed class JournalReadTests
 
         public Task AddAsync(PrintJob job, CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public Task<JobSelection> DeleteAsync(JobDeleteFilter filter, int? confirmRows, int maxRows, CancellationToken cancellationToken)
-            => throw new NotSupportedException();
+        public Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task CompactAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
     }
