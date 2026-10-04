@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { IMAGE_HASH_PREFIX, type PrintContent } from "@/types/printer";
+import type { PrintContent } from "@/types/printer";
+import { IMAGE_HASH_PREFIX } from "@/lib/printer-limits";
 import { cn } from "@/lib/utils";
 import { DEFAULT_ALIGNMENT } from "@/lib/paper";
 import { PaperText } from "./paper-text";

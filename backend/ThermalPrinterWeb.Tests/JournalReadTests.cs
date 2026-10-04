@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -420,10 +421,24 @@ public sealed class JournalReadTests
         Assert.Equal("web/tray", reprint.Source);
         Assert.Equal(JobResult.Printed, reprint.Result);
         Assert.Equal(original.Title, reprint.Title);
-        Assert.Equal(original.Payload.Blocks, reprint.Payload.Blocks);
-        Assert.Equal(original.Payload.Options, reprint.Payload.Options);
-        Assert.Equal(original.Payload.Bytes, reprint.Payload.Bytes);
+        Assert.Equal(original.BlockCount, reprint.BlockCount);
+        Assert.Equal(original.PaperDots, reprint.PaperDots);
+        // The same printer data was built again.
+        Assert.Equal(original.ByteCount, reprint.ByteCount);
         Assert.NotNull(reprint.PrinterStatus);
+        // The row is a reference: no second copy of the job.
+        Assert.Null(reprint.Payload.Blocks);
+        Assert.Null(reprint.Payload.Options);
+        Assert.Null(reprint.Payload.Bytes);
+        Assert.Null(reprint.Payload.PlainText);
+        Assert.Null(reprint.Payload.Request);
+
+        // The content of a reprint is the content of its first job.
+        var first = await GetJsonAsync(client, $"{JobsUrl}/{original.Id}");
+        var second = await GetJsonAsync(client, $"{JobsUrl}/{reprint.Id}");
+        Assert.Equal(first.GetProperty("blocks").GetRawText(), second.GetProperty("blocks").GetRawText());
+        Assert.Equal(first.GetProperty("options").GetRawText(), second.GetProperty("options").GetRawText());
+        Assert.Equal(original.Id, second.GetProperty("job").GetProperty("reprintOf").GetGuid());
 
         // One line per job, and no row content in it.
         var lines = app.Logs.Entries.Where(entry => entry.Message.StartsWith(PrintJobLine, StringComparison.Ordinal)).ToList();
@@ -472,10 +487,79 @@ public sealed class JournalReadTests
         Assert.All(rows.Skip(1), row =>
         {
             Assert.Equal(original.Id, row.ReprintOf);
-            Assert.Equal(original.Payload.Bytes, row.Payload.Bytes);
-            Assert.Equal(original.Payload.Blocks, row.Payload.Blocks);
+            // The picture was found: the same printer data was built.
+            Assert.Equal(original.ByteCount, row.ByteCount);
+            Assert.Null(row.Payload.Bytes);
+            Assert.Null(row.Payload.Request);
             Assert.Equal(JobResult.Printed, row.Result);
         });
+    }
+
+    // No auth on the endpoint: a caller that repeats a reprint of a large job must not fill the journal.
+    [Fact]
+    public async Task Reprint_LargeJobManyTimes_AddsSmallRowsOnly()
+    {
+        const int Reprints = 20;
+        const long MaxBytesPerReprint = 8 * 1024;
+        await using var app = new NoPrinterApp();
+        var client = app.CreateClient();
+        var text = string.Join('\n', Enumerable.Repeat(new string('x', 47), 150));
+        var original = await PrintAsync(app, client, JsonSerializer.Serialize(new
+        {
+            content = new object[]
+            {
+                new { type = "Text", content = text }, new { type = "Text", content = text },
+                new { type = "Image", content = Convert.ToBase64String(TestImages.NoisePng(1)) }
+            }
+        }));
+        Assert.Equal(JobResult.Printed, original.Result);
+        var jobBytes = original.Payload.LargeBytes() + original.Payload.Blocks!.Length;
+        Assert.True(jobBytes > 4 * MaxBytesPerReprint, $"The job is {jobBytes} bytes: too small for this test.");
+        var before = await DatabaseBytesAsync(app);
+
+        for (var i = 0; i < Reprints; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await ReprintAsync(client, original.Id)).Status);
+            // The writer takes at most PrintJournal.MaxPendingJobs waiting rows: each row is stored before the next call.
+            await app.JournalIdleAsync();
+        }
+        // A read stores nothing.
+        await GetJsonAsync(client, JobsUrl);
+        await GetJsonAsync(client, $"{JobsUrl}/{original.Id}");
+
+        var rows = await app.JournalRowsAsync();
+        Assert.Equal(Reprints + 1, rows.Count);
+        var growth = await DatabaseBytesAsync(app) - before;
+        Assert.True(growth < Reprints * MaxBytesPerReprint, $"{Reprints} reprints added {growth} bytes; the job is {jobBytes} bytes.");
+    }
+
+    // A refused reprint is a row too: it holds the reason, and no copy of the job.
+    [Fact]
+    public async Task Reprint_Refused_StoresTheSmallFactsOnly()
+    {
+        await using var app = new App();
+        var client = app.CreateClient();
+        var original = await PrintAsync(app, client, TextJob(new string('x', 5000)));
+        app.Printer.Result = PrintResult.Invalid("Block 0 (Text): refused");
+
+        var (status, _) = await ReprintAsync(client, original.Id);
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        var reprint = (await app.JournalRowsAsync())[^1];
+        Assert.Equal(JobResult.Validation, reprint.Result);
+        Assert.Equal("Block 0 (Text): refused", reprint.Error);
+        Assert.Equal(0, reprint.Payload.LargeBytes());
+        Assert.Null(reprint.Payload.Blocks);
+        Assert.Null(reprint.Payload.PlainText);
+    }
+
+    // The database file with its write-ahead log folded in.
+    private static async Task<long> DatabaseBytesAsync(TestApp app)
+    {
+        await app.JournalIdleAsync();
+        await using var db = app.JournalDb();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE);");
+        return new FileInfo(Path.Combine(app.JournalDirectory, JournalOptions.DatabaseFileName)).Length;
     }
 
     [Fact]
@@ -582,7 +666,7 @@ public sealed class JournalReadTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, busy.StatusCode);
         Assert.Equal("5", Assert.Single(busy.Headers.GetValues("Retry-After")));
-        AssertResponse(await busy.Content.ReadAsStringAsync(), PrintResponse.BusyType, PrintJobsController.ReprintBusyError);
+        AssertResponse(await busy.Content.ReadAsStringAsync(), PrintResponse.BusyType, PrintResult.ReprintBusy.Error!);
         // The gate is free again after a reprint that ran.
         Assert.Equal(HttpStatusCode.OK, after);
         Assert.Single(app.Printer.Jobs);

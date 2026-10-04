@@ -56,10 +56,8 @@ export function useTray(): TrayState {
       (list) => {
         if (mine !== generation.current) return;
         setLoadingMore(false);
-        setPage((current) => {
-          const known = new Set(current.jobs.map((job) => job.id));
-          return { status: "ready", jobs: [...current.jobs, ...list.jobs.filter((job) => !known.has(job.id))], next: list.next };
-        });
+        // The next page starts below the last id on screen: no row comes twice.
+        setPage((current) => ({ status: "ready", jobs: [...current.jobs, ...list.jobs], next: list.next }));
       },
       () => {
         // The rows on screen stay; the button is there for another try.

@@ -161,15 +161,12 @@ export interface PrintJobList {
   next: string | null;
 }
 
-/** GET /api/printer/jobs/{id}. An image block holds a hash (IMAGE_HASH_PREFIX), not the picture. */
+/** GET /api/printer/jobs/{id}. An image block holds a hash (IMAGE_HASH_PREFIX in lib/printer-limits.ts), not the picture. */
 export interface PrintJobDetail {
   job: PrintJobSummary;
   blocks: (PrintContent | null)[] | null;
   options: PrintOptions | null;
 }
-
-// backend/Services/Journal/PrintJobEntry.cs: ImageHashPrefix
-export const IMAGE_HASH_PREFIX = "sha256:";
 
 export interface PrintRequest {
   name?: string;

@@ -47,8 +47,8 @@ export const QR_MODULES_PER_BYTE = 25;
 // backend/Controllers/PrintResultResponse.cs: BusyRetryAfterSeconds (the Retry-After of a busy answer)
 export const BUSY_RETRY_AFTER_SECONDS = 5;
 
-// backend/Services/Journal/PrintJournalReader.cs: DefaultPageSize. The server caps a page at MaxPageSize (50).
-export const TRAY_PAGE_SIZE = 20;
+// backend/Services/Journal/PrintJobEntry.cs: ImageHashPrefix. A stored image block holds a hash that starts with it.
+export const IMAGE_HASH_PREFIX = "sha256:";
 
 // Stricter in the editor on purpose. The backend takes more, the editor does not offer it.
 // A file over this does not fit the draft in localStorage.

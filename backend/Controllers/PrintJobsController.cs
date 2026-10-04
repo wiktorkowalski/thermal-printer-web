@@ -11,7 +11,7 @@ namespace ThermalPrinterWeb.Controllers;
 [ApiController]
 [Route("api/printer/jobs")]
 [NoIndex]
-public class PrintJobsController(
+public sealed class PrintJobsController(
     IPrinterService printerService,
     PrintJobLog jobLog,
     PrintJournalReader journal,
@@ -26,7 +26,6 @@ public class PrintJobsController(
     internal const string InvalidIdError = "The job id is not valid";
     internal const string InvalidCursorError = "before is not a valid job id";
     internal const string NotFoundError = "Job not found";
-    internal const string ReprintBusyError = "Server busy: another reprint runs. Send it again in a few seconds.";
 
     // Newest first. "before" is the "next" value of the page before; "printed=true" leaves out every job that did not print.
     [HttpGet]
@@ -46,18 +45,8 @@ public class PrintJobsController(
             cursor = parsed;
         }
 
-        if (!journal.IsOn)
-            return JournalFault(JournalOffError);
-
-        try
-        {
-            return Ok(await journal.ListAsync(cursor, limit, printed, HttpContext.RequestAborted));
-        }
-        catch (Exception ex) when (!HttpContext.RequestAborted.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "Journal read failed: the job list");
-            return JournalFault(JournalUnavailableError);
-        }
+        var (list, fault) = await ReadAsync(null, token => journal.ListAsync(cursor, limit, printed, token));
+        return fault ?? Ok(list);
     }
 
     [HttpGet("{id}")]
@@ -70,19 +59,8 @@ public class PrintJobsController(
         if (!TryParseId(id, out var jobId))
             return BadRequest(new PrintResponse(false, InvalidIdError, PrintResponse.ValidationType));
 
-        if (!journal.IsOn)
-            return JournalFault(JournalOffError);
-
-        try
-        {
-            var job = await journal.GetAsync(jobId, HttpContext.RequestAborted);
-            return job is null ? JobNotFound() : Ok(job);
-        }
-        catch (Exception ex) when (!HttpContext.RequestAborted.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "Journal read failed: job {JobId}", jobId);
-            return JournalFault(JournalUnavailableError);
-        }
+        var (job, fault) = await ReadAsync(jobId, token => journal.GetAsync(jobId, token));
+        return fault ?? (job is null ? JobNotFound() : Ok(job));
     }
 
     // One call, one print: the stored blocks go through the same print path as a new job, and the journal gets a new row.
@@ -98,28 +76,15 @@ public class PrintJobsController(
         if (!TryParseId(id, out var jobId))
             return BadRequest(new PrintResponse(false, InvalidIdError, PrintResponse.ValidationType));
 
-        if (!journal.IsOn)
-            return JournalFault(JournalOffError);
-
+        // No job yet: no row and no "Print job:" line.
         if (!journal.TryBeginReprint())
-        {
-            Response.Headers.RetryAfter = PrintResultResponse.BusyRetryAfterSeconds;
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new PrintResponse(false, ReprintBusyError, PrintResponse.BusyType));
-        }
+            return this.ToResponse(PrintResult.ReprintBusy);
 
         try
         {
-            StoredJob? stored;
-            try
-            {
-                stored = await journal.LoadForReprintAsync(jobId, HttpContext.RequestAborted);
-            }
-            catch (Exception ex) when (!HttpContext.RequestAborted.IsCancellationRequested)
-            {
-                logger.LogWarning(ex, "Journal read failed: job {JobId}", jobId);
-                return JournalFault(JournalUnavailableError);
-            }
-
+            var (stored, fault) = await ReadAsync(jobId, token => journal.LoadForReprintAsync(jobId, token));
+            if (fault is not null)
+                return fault;
             if (stored is null)
                 return JobNotFound();
 
@@ -135,6 +100,27 @@ public class PrintJobsController(
         finally
         {
             journal.EndReprint();
+        }
+    }
+
+    // One journal read. A fault answer in place of the value: the journal is off, not open yet, or the read failed.
+    // No detail of the storage goes to the caller; the log gets one Warning with the job id.
+    private async Task<(T? Value, IActionResult? Fault)> ReadAsync<T>(Guid? jobId, Func<CancellationToken, Task<T>> read)
+    {
+        if (!journal.IsOn)
+            return (default, JournalFault(JournalOffError));
+
+        try
+        {
+            return (await read(HttpContext.RequestAborted), null);
+        }
+        catch (Exception ex) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            if (jobId is null)
+                logger.LogWarning(ex, "Journal read failed: the job list");
+            else
+                logger.LogWarning(ex, "Journal read failed: job {JobId}", jobId);
+            return (default, JournalFault(JournalUnavailableError));
         }
     }
 

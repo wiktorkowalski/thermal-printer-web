@@ -1,12 +1,12 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Printer, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { loadTrayCopy, type TrayCopy } from "@/lib/tray";
+import { loadTrayCopy } from "@/lib/tray";
 import type { TrayState } from "@/hooks/use-tray";
 import { usePrintJob } from "@/hooks/use-print-job";
 import type { PrinterStatusState } from "@/hooks/use-printer-status";
 import { isBlocked } from "@/lib/printer-light";
-import type { PrintJobSummary } from "@/types/printer";
+import type { PrintContent } from "@/types/printer";
 import { PaperGutters } from "./paper/paper-context";
 import { PaperDocument } from "./paper/paper-document";
 import { Toast } from "./print-chrome";
@@ -35,19 +35,19 @@ function NoPreview({ children }: { children: ReactNode }) {
 }
 
 /** A tiny copy of the printed strip, torn off at both ends. The blocks come from the server, one read per job. */
-function Thumbnail({ job, index }: { job: PrintJobSummary; index: number }) {
-  const [copy, setCopy] = useState<TrayCopy | "failed" | null>(null);
+function Thumbnail({ id, index }: { id: string; index: number }) {
+  const [copy, setCopy] = useState<PrintContent[] | "failed" | null>(null);
 
   useEffect(() => {
     let current = true;
-    loadTrayCopy(job.id).then(
+    loadTrayCopy(id).then(
       (loaded) => current && setCopy(loaded),
       () => current && setCopy("failed"),
     );
     return () => {
       current = false;
     };
-  }, [job.id]);
+  }, [id]);
 
   const noPreview = <NoPreview>no preview</NoPreview>;
   return (
@@ -60,12 +60,12 @@ function Thumbnail({ job, index }: { job: PrintJobSummary; index: number }) {
       <div className="paper-font max-h-[170px] overflow-hidden [mask-image:linear-gradient(black_75%,transparent)]" style={{ fontSize: "4.3px" }}>
         {copy === null ? (
           <NoPreview>…</NoPreview>
-        ) : copy === "failed" || copy.content.length === 0 ? (
+        ) : copy === "failed" || copy.length === 0 ? (
           noPreview
         ) : (
           <PreviewBoundary fallback={noPreview}>
             <PaperGutters.Provider value={false}>
-              <PaperDocument content={copy.content} feedLines={0} autoCut={false} />
+              <PaperDocument content={copy} feedLines={0} autoCut={false} />
             </PaperGutters.Provider>
           </PreviewBoundary>
         )}
@@ -138,7 +138,7 @@ export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; on
             const title = entry.title || "Untitled";
             return (
               <li key={entry.id} className="flex items-start gap-4">
-                <Thumbnail job={entry} index={index} />
+                <Thumbnail id={entry.id} index={index} />
                 <div className="flex min-w-0 flex-col gap-1.5 pt-1.5 text-sm">
                   <span className="truncate font-semibold">{title}</span>
                   <span className="truncate font-mono text-xs text-ink-2">

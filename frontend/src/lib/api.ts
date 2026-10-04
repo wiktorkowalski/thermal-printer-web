@@ -1,6 +1,6 @@
 import axios, { AxiosError } from "axios";
 import type { PrintRequest, PrintContent, PrintOptions, PrintResponse, PrintJobList, PrintJobDetail } from "../types/printer";
-import { BUSY_RETRY_AFTER_SECONDS, TRAY_PAGE_SIZE } from "./printer-limits";
+import { BUSY_RETRY_AFTER_SECONDS } from "./printer-limits";
 
 const API_BASE_URL = "/api";
 
@@ -217,7 +217,7 @@ export const printerApi = {
   async listJobs(before?: string | null): Promise<PrintJobList> {
     try {
       const response = await api.get<PrintJobList>("/printer/jobs", {
-        params: { printed: true, limit: TRAY_PAGE_SIZE, before: before ?? undefined },
+        params: { printed: true, before: before ?? undefined },
         timeout: 10000,
       });
       if (!Array.isArray(response.data?.jobs)) throw new Error("Unexpected job list response");

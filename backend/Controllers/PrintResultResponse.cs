@@ -7,7 +7,7 @@ namespace ThermalPrinterWeb.Controllers;
 internal static class PrintResultResponse
 {
     // A full decode queue clears in a few seconds; so does a reprint that runs.
-    internal const string BusyRetryAfterSeconds = "5";
+    private const string BusyRetryAfterSeconds = "5";
 
     public static IActionResult ToResponse(this ControllerBase controller, PrintResult result)
     {

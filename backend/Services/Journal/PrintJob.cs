@@ -46,6 +46,7 @@ internal sealed class PrintJob
     public required string AppVersion { get; set; }
 
     // A reprint: the id of the job that was first sent. Null for every other job.
+    // The payload of a reprint row holds no copy of the job; its content is the content of that first job.
     public Guid? ReprintOf { get; set; }
 
     public PrintJobPayload Payload { get; set; } = null!;

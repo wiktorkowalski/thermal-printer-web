@@ -1,4 +1,4 @@
-import type { PrintContent, PrintOptions } from "@/types/printer";
+import type { PrintContent } from "@/types/printer";
 import { printerApi } from "./api";
 
 // The tray shows the print journal of the server (GET /api/printer/jobs).
@@ -22,29 +22,23 @@ export function dropLegacyTray() {
   }
 }
 
-/** The blocks of a stored job, for its thumbnail. An image block holds a hash, not the picture. */
-export interface TrayCopy {
-  content: PrintContent[];
-  options: PrintOptions;
-}
-
 // The server writes null for a value that is not set; the paper components take undefined.
-function withoutNulls<T>(value: unknown): T {
-  return JSON.parse(JSON.stringify(value ?? null), (_key, item: unknown) => (item === null ? undefined : item)) as T;
+function withoutNulls(blocks: unknown): PrintContent[] {
+  const parsed = JSON.parse(JSON.stringify(blocks ?? []), (_key, item: unknown) => (item === null ? undefined : item)) as unknown;
+  return Array.isArray(parsed) ? parsed.filter((block): block is PrintContent => !!block) : [];
 }
 
 // A stored job does not change, so one read per job is enough.
 const MAX_COPIES = 100;
-const copies = new Map<string, Promise<TrayCopy>>();
+const copies = new Map<string, Promise<PrintContent[]>>();
 
-export function loadTrayCopy(id: string): Promise<TrayCopy> {
+/** The blocks of a stored job, for its thumbnail. An image block holds a hash, not the picture. */
+export function loadTrayCopy(id: string): Promise<PrintContent[]> {
   let copy = copies.get(id);
   if (!copy) {
-    if (copies.size >= MAX_COPIES) copies.clear();
-    copy = printerApi.getJob(id).then((detail) => ({
-      content: (withoutNulls<(PrintContent | undefined)[] | undefined>(detail.blocks) ?? []).filter((block): block is PrintContent => !!block),
-      options: withoutNulls<PrintOptions | undefined>(detail.options) ?? {},
-    }));
+    // The oldest entry goes first: a Map keeps the order of insertion.
+    if (copies.size >= MAX_COPIES) copies.delete(copies.keys().next().value!);
+    copy = printerApi.getJob(id).then((detail) => withoutNulls(detail.blocks));
     // A failed read is tried again the next time the thumbnail shows.
     copy.catch(() => copies.delete(id));
     copies.set(id, copy);
