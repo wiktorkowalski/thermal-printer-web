@@ -373,7 +373,10 @@ export default function Journal({ printer }: { printer: PrinterStatusState }) {
           {ledger.status === "loading" && <div className={noteClass}>Reading the strips…</div>}
           {ledger.status !== "loading" && ledger.status !== "ready" && <FaultNote fault={ledger.status} onRetry={() => void loadLedger()} />}
           {ledger.status === "ready" && ledger.data.papercuts.length === 0 && (
-            <div className={noteClass}>No papercut strip yet. A strip counts when its first line is PAPERCUT.</div>
+            <div className={noteClass}>
+              {ledger.data.more ? "No papercut strip among the newest prints. Older prints are not read." : "No papercut strip yet."} A strip counts when its
+              first line is PAPERCUT.
+            </div>
           )}
           {ledger.status === "ready" && ledger.data.papercuts.length > 0 && (
             <>
