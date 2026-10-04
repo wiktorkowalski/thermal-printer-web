@@ -213,7 +213,7 @@ public sealed class DecodeQueueBusyTests(ClosedPortApp app) : IClassFixture<Clos
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
 
-        var response = Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [TestBlocks.ImageBlock(PngBase64())] }));
+        var response = Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [TestBlocks.ImageBlock(PngBase64())] }, TimeProvider.System));
 
         Assert.Equal(503, response.StatusCode);
         Assert.Equal(new PrintResponse(false, PrintResult.Busy.Error, "busy"), response.Value);

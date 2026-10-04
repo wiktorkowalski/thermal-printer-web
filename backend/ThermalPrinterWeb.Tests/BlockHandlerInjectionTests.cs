@@ -43,7 +43,7 @@ public sealed class BlockHandlerInjectionTests
     [Fact]
     public async Task SimpleNote_TitleAndMessage_AreSanitized()
     {
-        var note = SimpleNote.Build("Title\u001b@", "Body\u001dV\u0000");
+        var note = SimpleNote.Build("Title\u001b@", "Body\u001dV\u0000", new DateOnly(2026, 10, 4));
         var textBlocks = note.Where(b => b.Type == ContentType.Text).ToArray();
 
         var (bytes, ctx) = await RunAsync(new TextBlockHandler(), textBlocks);

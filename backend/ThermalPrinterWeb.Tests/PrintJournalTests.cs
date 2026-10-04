@@ -26,6 +26,9 @@ public sealed class PrintJournalTests
     private const string McpPrintNote = "mcp:print_note";
     private const string PrintUrl = "/api/printer";
 
+    // 23 characters: simple mode wraps a title at 24, and the journal title is the first line.
+    private const string JobTitle = "T " + Secret;
+
     private static readonly string JournalCategory = typeof(PrintJournal).FullName!;
 
     // A fake printer and a journal with the settings and the store of the test.
@@ -103,14 +106,14 @@ public sealed class PrintJournalTests
         var arguments = new Dictionary<string, object?> { ["source"] = source };
         if (path is HttpSimple or McpPrintNote)
         {
-            arguments[path == HttpSimple ? "name" : "title"] = "Title " + Secret;
+            arguments[path == HttpSimple ? "name" : "title"] = JobTitle;
             arguments["message"] = Secret;
         }
         else
         {
             arguments["content"] = new object[]
             {
-                new { type = "Text", content = "Title " + Secret, style = new[] { "Bold" } },
+                new { type = "Text", content = JobTitle, style = new[] { "Bold" } },
                 new { type = "Text", content = Secret }
             };
             arguments["options"] = new { feedLinesAfterPrint = 5 };
@@ -141,7 +144,7 @@ public sealed class PrintJournalTests
         Assert.Equal(JobResult.Printed, job.Result);
         Assert.Null(job.Error);
         Assert.Equal(200, job.HttpStatus);
-        Assert.Equal("Title " + Secret, job.Title);
+        Assert.Equal(JobTitle, job.Title);
         Assert.InRange(job.CreatedAt, before.AddSeconds(-1), DateTime.UtcNow.AddSeconds(1));
         Assert.InRange(job.DurationMs, 0, 60_000);
         Assert.False(string.IsNullOrWhiteSpace(job.AppVersion));
@@ -160,9 +163,9 @@ public sealed class PrintJournalTests
         // The blocks that went to the print path, in the JSON of the API.
         var blocks = JsonSerializer.Deserialize<List<PrintContent>>(job.Payload.Blocks!, PrintJobEntry.ApiJson)!;
         Assert.Equal(job.BlockCount, blocks.Count);
-        Assert.Equal("Title " + Secret, blocks.First(block => block.Type == ContentType.Text).Content);
+        Assert.Equal(JobTitle, blocks.First(block => block.Type == ContentType.Text).Content);
         Assert.Contains("\"type\":\"Text\"", job.Payload.Blocks);
-        Assert.StartsWith("Title " + Secret + "\n", job.Payload.PlainText);
+        Assert.StartsWith(JobTitle + "\n", job.Payload.PlainText);
 
         // The printer bytes are what the service builds from the stored blocks.
         var service = (PrinterService)app.Services.GetRequiredService<IPrinterService>();

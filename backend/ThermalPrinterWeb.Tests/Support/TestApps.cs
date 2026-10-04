@@ -96,9 +96,17 @@ public sealed class ClosedPortApp() : TestApp(Production)
 }
 
 // The real PrinterService with no printer: it builds each job and sends nothing.
-internal sealed class NoPrinterApp() : TestApp("Development")
+// A clock, when given, takes the place of the system clock: the date line of a simple-mode note.
+internal sealed class NoPrinterApp(TimeProvider? clock = null) : TestApp("Development")
 {
     // An address in the shell of the developer must not turn a test into a real print.
-    protected override void ConfigurePrinter(IWebHostBuilder builder)
-        => builder.ConfigureServices(services => services.Configure<PrinterOptions>(options => options.Address = string.Empty));
+    protected override void ConfigurePrinter(IWebHostBuilder builder) => builder.ConfigureServices(services =>
+    {
+        services.Configure<PrinterOptions>(options => options.Address = string.Empty);
+        if (clock is not null)
+        {
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton(clock);
+        }
+    });
 }

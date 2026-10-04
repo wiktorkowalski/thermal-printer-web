@@ -46,7 +46,7 @@ internal sealed class PrinterService(
 
     // The printer renders single-byte code pages only; raw UTF-8 prints as garbage
     // for anything outside ASCII, so default to Latin-2 (covers Polish) instead.
-    private const string DefaultCodePage = "PC852";
+    private const string DefaultCodePage = CodePages.DefaultName;
 
     // The Kestrel default, set in Program.cs because the image size limit in ImageBlockHandler depends on it.
     internal const long MaxRequestBodyBytes = 30_000_000;

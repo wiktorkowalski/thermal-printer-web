@@ -12,9 +12,6 @@ namespace ThermalPrinterWeb.Tests;
 public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinterApp>
 {
     private const string Secret = TestBlocks.Secret;
-    private const int FontAColumns = 48;
-    private const int DoubleWidthColumns = 24;
-
     private readonly HttpClient _client = app.CreateClient();
 
     private async Task<JsonElement> ToolAsync(string name)
@@ -176,7 +173,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.True(app.Printer.Jobs.TryDequeue(out var job));
         foreach (var block in job.Content.Where(block => block.Type == ContentType.Text))
         {
-            var width = block.Style?.Contains(PrintStyle.DoubleWidth) == true ? DoubleWidthColumns : FontAColumns;
+            var width = PaperLength.Columns(block.Style?.Contains(PrintStyle.FontB) == true, TextScale.Of(block.Style, block.Size).Width);
             Assert.All(block.Content!.Split('\n'), line => Assert.True(line.Length <= width, line));
         }
     }
@@ -255,7 +252,8 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.False(isError);
         Assert.Equal("Printed.", text);
         Assert.True(app.Printer.Jobs.TryDequeue(out var job));
-        Assert.Equal(["T", "M"], job.Content.Where(block => block.Type == ContentType.Text).Select(block => block.Content));
+        // Title, message, then the date line.
+        Assert.Equal(["T", "M"], job.Content.Where(block => block.Type == ContentType.Text).Select(block => block.Content).Take(2));
         Assert.DoesNotContain(job.Content, block => block.Type == ContentType.Image);
     }
 

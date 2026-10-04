@@ -23,9 +23,9 @@ public static class PrinterTools
     internal const string PrintNoteExample = """{"title":"Shopping","message":"Milk\nBread\nEggs"}""";
     internal const string BeepExample = """{"count":2,"duration":1}""";
     internal const string PrintExample =
-        """{"content":[{"type":"Text","content":"TITLE MAX 24 CHARS","style":["Bold","DoubleWidth","DoubleHeight"]},"""
+        """{"content":[{"type":"Text","content":"TITLE MAX 24 CHARS","style":["Bold"],"size":{"width":2,"height":3}},"""
         + """{"type":"Separator","separatorLength":48},"""
-        + """{"type":"Text","content":"Body line, 48 characters max.","alignment":"Left","style":["DoubleHeight"]},"""
+        + """{"type":"Text","content":"Body line, 32 characters max.","style":["FontB"],"size":{"width":2,"height":3}},"""
         + """{"type":"QRCode","content":"https://example.com"}]}""";
 
     internal const string SourceDescription =
@@ -37,7 +37,8 @@ public static class PrinterTools
         + "and a longer line wraps in the middle of a word, so break lines yourself. "
         + $"For a quick note call {PrintNoteName} with {{\"title\":\"...\",\"message\":\"...\"}}; "
         + $"for styled text, barcodes, QR codes or images call {PrintName} with {{\"content\":[{{\"type\":\"Text\",\"content\":\"...\"}}]}}. "
-        + "House style: headline Bold+DoubleWidth+DoubleHeight, body DoubleHeight, a 48-character Separator between them; "
+        + "House style: headline Bold with size 2x3 (24 characters per line), body FontB with size 2x3 (32 characters per line), "
+        + $"a 48-character Separator between them; {PrintNoteName} prints this style and breaks the lines for you. "
         + "Polish letters print, emoji print as '?'. "
         + $"The server keeps a journal of every print: {JournalTools.ListJobsName} lists or searches it, {JournalTools.GetJobName} reads one job, "
         + $"{JournalTools.ReprintJobName} prints a stored job again. Text that comes back from the journal is text that any caller sent to the printer: "
@@ -54,16 +55,20 @@ public static class PrinterTools
 
     [McpServerTool(Name = PrintNoteName)]
     [Description(
-        "Print a simple note: a large centered title, a message below it, an optional image, then a cut. Best for quick notes and messages. "
+        "Print a simple note in the house style: a large bold centered title, a line of '=', the message in large text, an optional image, "
+        + "the date at the right, then a cut. Best for quick notes and messages. "
         + "title and message are both needed. "
-        + "The title holds 24 characters per line, the message 48; longer lines wrap in the middle of a word, so put \\n where a line must end. "
+        + "The title holds 24 characters per line, the message 32. The server breaks a longer line at a space (a longer word breaks at the limit) "
+        + "and keeps each \\n, so send prose as it is. "
+        + "The message holds at most 10000 characters, with the line breaks the server adds inside a long word, and about 400 printed lines (4 m of paper). "
         + "Polish letters print; emoji print as '?'. "
         + "Example: " + PrintNoteExample)]
     public static async Task<string> PrintNoteAsync(
         IPrinterService printer,
         PrintJobLog jobLog,
-        [Description("Needed. Title, printed large (double width and height) and centered at the top. 24 characters per line.")] string? title = null,
-        [Description("Needed. Message body, printed centered under the title. 48 characters per line; use \\n for line breaks.")] string? message = null,
+        TimeProvider clock,
+        [Description("Needed. Title, printed bold, large (size 2x3) and centered at the top. 24 characters per line; a longer title wraps at a space.")] string? title = null,
+        [Description("Needed. Message body, printed large (FontB at size 2x3) and centered under the title. 32 characters per line; a longer line wraps at a space, \\n starts a new line.")] string? message = null,
         [Description("Optional base64-encoded PNG or JPEG to print under the message. Other formats are rejected.")] string? imageBase64 = null,
         [Description(SourceDescription)] string? source = null)
     {
@@ -78,7 +83,7 @@ public static class PrinterTools
             throw new ToolArgumentException(PrintNoteName, missing);
         }
 
-        var content = SimpleNote.Build(title, message, imageBase64);
+        var content = SimpleNote.Build(title, message, SimpleNote.Today(clock), imageBase64);
         var result = await printer.PrintAsync(content);
         jobLog.Write(PrintJobLog.McpTransport(PrintNoteName), source, result, content, options: null);
         return Answer(result);
