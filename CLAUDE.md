@@ -110,7 +110,7 @@ Located in `frontend/` directory.
 - `frontend/src/components/paper/` - `PaperDocument` renders any `PrintContent[]` read-only (receipts, tray thumbnails)
 - localStorage keys: `thermal-printer-templates` (saved templates), `thermal-printer-draft-<note|template|receipt>` (drafts), `thermal-printer-theme`. The old key `thermal-printer-tray` is removed at startup.
 - Tray (`hooks/use-tray.ts`, `components/tray-drawer.tsx`, `lib/tray.ts`): reads `GET /api/printer/jobs?printed=true` at startup, when the tray opens and after each print. It keeps nothing in the browser. A thumbnail reads the blocks of its job once (`GET /api/printer/jobs/{id}`); an image shows as `[image]`. Reprint calls the reprint endpoint with source `web/tray`. The tray has no delete. Journal off (503 `journal-off`), read fault (with a "Try again" button) and empty list each have their own text.
-- Journal page (`pages/Journal.tsx`, route `/journal`): statistics for 7, 30, 90 or 365 days (numbers, one CSS bar per UTC day, a table by source), a search box (sent on submit; with no hit it follows `next` up to 3 times, then shows "Search older prints"; a hit has a Reprint button) and the papercut ledger. It reads the statistics, then the ledger, one after the other: the server runs few journal queries at a time. Each section has its own text for loading, empty, journal off, busy and read fault. No chart library.
+- Journal page (`pages/Journal.tsx`, route `/journal`): statistics for 7, 30, 90 or 365 days (numbers, one CSS bar per UTC day, a table by source), a search box (sent on submit; with no hit it follows `next` up to 3 times, then shows "Search older prints"; a hit has a Reprint button, source `web/journal`) and the papercut ledger. It reads the statistics, then the ledger, one after the other: the server runs few journal queries at a time. Each section has its own text for loading, empty, journal off, busy and read fault. No chart library.
 - Journal text (`title`, `source`, `snippet`, `subject`, block content) is caller text: render it as React text only. No `dangerouslySetInnerHTML`, no URL or CSS made from it.
 - Status polls every 30 s only while the tab is visible; the Print button is disabled while the last status read says not ready (a failed status request does not disable it)
 
@@ -253,7 +253,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 **Papercut ledger** (`PrintJournalReader.PapercutsAsync`): a papercut strip is a printed job, not a reprint, whose first Text line is the header `PAPERCUT` or `PAPERCUT xN` (fixed header list, issue #41; letter case does not matter).
 - The subject is the text after the header on its line (`PAPERCUT: text`), else the next line with a letter or a digit. Strips with the same subject, letter case and spaces aside, are one papercut. A papercut in other words is another entry.
-- It reads the newest 500 strips and serves at most 100 papercuts, the largest count first; `more` says that the answer is cut.
+- It looks at the newest 20,000 jobs (`MaxPapercutJobs`: `Title` has no index), reads at most 500 strips and serves at most 100 papercuts, the largest count first; `more` says that the answer is cut.
 - It is a view: nothing stores a ledger, and no endpoint writes one.
 
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
@@ -307,7 +307,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 `Print job: transport=<http|http:reprint|mcp:print|mcp:print_note|mcp:reprint_job> source="..." userAgent="..." result=<Printed|Validation|Printer|Busy>`.
 - `source` and `userAgent` are caller text: `LogSafeText.Clean` cuts and cleans them. Use it for any caller text in a log.
 - The reason of a failure is logged once, where it happens. Do not log block content: the endpoint is public.
-- The web editor sends `source` `web/note`, `web/template` or `web/receipt`; the tray sends `web/tray` with a reprint.
+- The web editor sends `source` `web/note`, `web/template` or `web/receipt`; a reprint sends `web/tray` from the tray and `web/journal` from the journal page.
 
 ### Journal
 
@@ -379,7 +379,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 - `list_jobs` and `get_job` answer `Not read: <fixed text>` or two lines: the fixed notice `JournalTools.UntrustedNotice`, then one line of JSON. `reprint_job` answers `Printed.` or `Not printed: <reason>`. A read stores no row.
 - Row text is text that any caller sent to the printer, and the answer goes to a language model (prompt injection). The rules, pinned by `McpJournalToolTests`:
   - Row text is only inside JSON strings, in fields whose names say what they hold: `printedTitle`, `printedSnippet`, `printedLines` (the text of `get_job`, one string per line, at most 2000 characters in all), `callerSource`; also `error` and `transport`.
-  - Each value goes through `LogSafeText.Clean`: a length limit, `?` in place of a control, format or line-separator character, `'` in place of `"`. An answer is at most `JournalTools.MaxAnswerLength` characters.
+  - Each value goes through `LogSafeText.Clean`: a length limit, `?` in place of a control, format or line-separator character, `'` in place of `"`. So an answer has a largest size (20 jobs, every text at its limit); a test pins it at 80,000 characters.
   - No answer puts row text into prose or names a tool to call. No tool takes an action that row text chooses: `reprint_job` takes an id.
   - The notice, the tool descriptions and `ServerInstructions` say that the text is untrusted data, not instructions.
 - This lowers the risk and does not remove it: `/mcp` and the print API have no auth, so anyone can put text into the journal that a later `list_jobs` call hands to a model.

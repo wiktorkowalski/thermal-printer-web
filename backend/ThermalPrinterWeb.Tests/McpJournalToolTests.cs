@@ -20,6 +20,9 @@ public sealed class McpJournalToolTests
     private const string PrintJobLine = "Print job:";
     private const string UnknownId = "01999999-0000-7000-8000-000000000000";
 
+    // The ceiling of one answer: the most jobs, every text at its limit, each character in the \uXXXX form of JSON.
+    private const int MaxAnswerLength = 80_000;
+
     // The only names a job in an answer may hold: the names of PrintJobSummary and the snippet.
     private static readonly string[] JobNames =
         ["id", "createdAt", "transport", "callerSource", "result", "error", "printedTitle", "blockCount", "paperDots", "reprintOf", "canReprint", "printedSnippet"];
@@ -256,7 +259,7 @@ public sealed class McpJournalToolTests
             AnswerJson(answer);
             Assert.Equal(answer.IndexOf(JournalTools.UntrustedNotice, StringComparison.Ordinal), answer.LastIndexOf(JournalTools.UntrustedNotice, StringComparison.Ordinal));
             Assert.DoesNotContain(answer.Split('\n')[1], IsLineEndOrHidden);
-            Assert.InRange(answer.Length, 1, JournalTools.MaxAnswerLength);
+            Assert.InRange(answer.Length, 1, MaxAnswerLength);
         });
 
         foreach (var job in new[] { AnswerJson(list).GetProperty("jobs")[0], AnswerJson(found).GetProperty("jobs")[0], AnswerJson(one).GetProperty("job") })
@@ -325,8 +328,8 @@ public sealed class McpJournalToolTests
 
         Assert.Equal(JournalTools.MaxListSize, AnswerJson(list).GetProperty("jobs").GetArrayLength());
         Assert.Equal(JournalTools.MaxListSize, AnswerJson(found).GetProperty("jobs").GetArrayLength());
-        Assert.InRange(list.Length, 1, JournalTools.MaxAnswerLength);
-        Assert.InRange(found.Length, 1, JournalTools.MaxAnswerLength);
+        Assert.InRange(list.Length, 1, MaxAnswerLength);
+        Assert.InRange(found.Length, 1, MaxAnswerLength);
     }
 
     [Fact]

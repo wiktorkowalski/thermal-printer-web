@@ -9,7 +9,7 @@ import { isBlocked } from "@/lib/printer-light";
 import type { PrintContent } from "@/types/printer";
 import { PaperGutters } from "./paper/paper-context";
 import { PaperDocument } from "./paper/paper-document";
-import { Toast } from "./print-chrome";
+import { Toast, noteClass } from "./print-chrome";
 
 /** A stored job is caller data from any device: a block that does not render must not take the tray down. */
 class PreviewBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
@@ -67,8 +67,6 @@ function Thumbnail({ id, index }: { id: string; index: number }) {
     </div>
   );
 }
-
-const noteClass = "rounded-xl border border-dashed border-line-strong p-5 text-sm text-ink-2";
 
 export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; onClose: () => void; printer: PrinterStatusState; tray: TrayState }) {
   const job = usePrintJob(printer);
@@ -143,7 +141,7 @@ export function TrayDrawer({ open, onClose, printer, tray }: { open: boolean; on
                     <button
                       type="button"
                       disabled={!entry.canReprint || job.printing || isBlocked(printer)}
-                      onClick={() => void job.reprint(entry.id)}
+                      onClick={() => void job.reprint(entry.id, "web/tray")}
                       aria-label={`Reprint ${title}`}
                       className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] hover:bg-well disabled:opacity-40"
                     >

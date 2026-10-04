@@ -31,10 +31,6 @@ public static class JournalTools
     internal const int MaxTextLength = 2000;
     internal const int MaxErrorLength = 200;
 
-    // A ceiling that a test pins, not a cut in the code: MaxListSize jobs with every text at its limit, for text
-    // that the JSON writer puts out in its \uXXXX form (6 characters for one).
-    internal const int MaxAnswerLength = 80_000;
-
     internal const string ListJobsExample = """{"limit":10}""";
     internal const string GetJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
     internal const string ReprintJobExample = """{"id":"01999999-0000-7000-8000-000000000000","source":"claude-code"}""";
@@ -56,8 +52,7 @@ public static class JournalTools
     private static readonly JsonSerializerOptions AnswerJson = new(JsonSerializerDefaults.Web)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() }
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     [McpServerTool(Name = ListJobsName)]
@@ -76,13 +71,8 @@ public static class JournalTools
         [Description("Optional. Text to find in the printed text, 2 to 100 characters.")] string? query = null,
         CancellationToken cancellationToken = default)
     {
-        Guid? cursor = null;
-        if (!string.IsNullOrEmpty(before))
-        {
-            if (!PrintJournalReader.TryParseId(before, out var id))
-                throw new ToolArgumentException(ListJobsName, "'before' is not a job id");
-            cursor = id;
-        }
+        if (!PrintJournalReader.TryParseCursor(before, out var cursor))
+            throw new ToolArgumentException(ListJobsName, "'before' is not a job id");
 
         var size = Math.Clamp(limit, 1, MaxListSize);
         var logger = Logger(loggers);
@@ -189,7 +179,7 @@ public static class JournalTools
         if (text is null)
             return (null, false);
 
-        var lines = new List<string>();
+        List<string> lines = [];
         var left = MaxTextLength;
         foreach (var line in text.Split('\n'))
         {

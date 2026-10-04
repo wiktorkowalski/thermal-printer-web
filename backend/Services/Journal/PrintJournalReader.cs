@@ -110,6 +110,19 @@ public sealed partial class PrintJournalReader
     // The form the list gives out. Any other text is not an id.
     public static bool TryParseId(string text, out Guid id) => Guid.TryParseExact(text, "D", out id);
 
+    // The "before" value of a caller. No value is no cursor: the first page. False: the value is not an id.
+    public static bool TryParseCursor(string? before, out Guid? cursor)
+    {
+        cursor = null;
+        if (string.IsNullOrEmpty(before))
+            return true;
+        if (!TryParseId(before, out var id))
+            return false;
+
+        cursor = id;
+        return true;
+    }
+
     // False: the journal is off, and no read is tried. True does not say that the database is open yet.
     public bool IsOn => _journal.IsOn;
 

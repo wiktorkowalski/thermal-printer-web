@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Printer, RefreshCw, Search } from "lucide-react";
 import { cn, when } from "@/lib/utils";
 import { printerApi, type PrintError } from "@/lib/api";
-import { DOTS_PER_MM } from "@/lib/paper";
+import { dotsToMm } from "@/lib/paper";
 import { isBlocked } from "@/lib/printer-light";
 import { SEARCH_MAX_QUERY_LENGTH, SEARCH_MIN_QUERY_LENGTH, STATS_MAX_DAYS } from "@/lib/printer-limits";
 import type { PrinterStatusState } from "@/hooks/use-printer-status";
 import { usePrintJob } from "@/hooks/use-print-job";
 import type { PapercutLedger, PrintJobDayStats, PrintJobSearchHit, PrintJobStats } from "@/types/printer";
-import { Toast } from "@/components/print-chrome";
+import { Toast, noteClass, pillButtonClass } from "@/components/print-chrome";
 import { Segmented, inputClass } from "@/components/editor/controls";
 
 /**
@@ -38,13 +38,9 @@ const PERIODS = [
 // One search reads a limited number of prints. With no hit yet, the page asks for the next part by itself this many times.
 const SEARCH_ROUNDS = 3;
 
-const noteClass = "rounded-xl border border-dashed border-line-strong p-5 text-sm text-ink-2";
-const pillButtonClass =
-  "flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] text-ink hover:bg-well disabled:opacity-40";
-
 function paper(dots: number): string {
-  const mm = dots / DOTS_PER_MM;
-  return mm >= 1000 ? `${(mm / 1000).toFixed(2)} m` : `${Math.round(mm)} mm`;
+  const mm = dotsToMm(dots);
+  return mm >= 1000 ? `${(mm / 1000).toFixed(2)} m` : `${mm} mm`;
 }
 
 function day(iso: string): string {
@@ -106,7 +102,8 @@ function DayBars({ days }: { days: PrintJobDayStats[] }) {
   );
 }
 
-function Statistics({ stats }: { stats: PrintJobStats }) {
+// memo: a key press in the search box and each printer status read must not draw up to 365 bars again.
+const Statistics = memo(function Statistics({ stats }: { stats: PrintJobStats }) {
   const { totals } = stats;
   if (totals.jobs === 0) return <div className={noteClass}>No print in this time. Pick a longer time, or print a note.</div>;
 
@@ -166,7 +163,7 @@ function Statistics({ stats }: { stats: PrintJobStats }) {
       )}
     </div>
   );
-}
+});
 
 /** The snippet with its match marked. Printed text: React text nodes only. */
 function Snippet({ text, query }: { text: string; query: string }) {
@@ -273,7 +270,7 @@ export default function Journal({ printer }: { printer: PrinterStatusState }) {
   };
 
   const searching = search.status === "loading";
-  const searchFault = search.status === "off" || search.status === "busy" || search.status === "error" ? search.status : null;
+  const searchFault = search.status in FAULT_TEXT ? (search.status as Fault) : null;
 
   return (
     <main className="mx-auto flex w-full max-w-[920px] flex-col gap-10 px-4 pt-8 pb-24 md:px-8 md:pt-12">
@@ -346,7 +343,7 @@ export default function Journal({ printer }: { printer: PrinterStatusState }) {
                     <button
                       type="button"
                       disabled={!hit.canReprint || job.printing || isBlocked(printer)}
-                      onClick={() => void job.reprint(hit.id)}
+                      onClick={() => void job.reprint(hit.id, "web/journal")}
                       aria-label={`Reprint ${title}`}
                       className={cn(pillButtonClass, "shrink-0")}
                     >

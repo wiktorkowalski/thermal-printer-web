@@ -29,6 +29,7 @@ public sealed partial class PrintJournalReader
 
     // The fixed header of a papercut strip (issue #41): "PAPERCUT" or "PAPERCUT xN" as the first line.
     internal const string PapercutHeader = "PAPERCUT";
+    internal const int MaxPapercutJobs = 20_000;
     internal const int MaxPapercutStrips = 500;
     internal const int MaxPapercuts = 100;
     internal const int MaxSubjectLength = 100;
@@ -65,17 +66,31 @@ public sealed partial class PrintJournalReader
         await using var db = Open();
         var window = db.PrintJobs.AsNoTracking().Where(job => job.CreatedAt >= start && job.CreatedAt < end);
 
-        var perDay = await window
-            .GroupBy(job => job.CreatedAt.Date)
+        // One read for the days and the results: at most one row per day and result.
+        var cells = await window
+            .GroupBy(job => new { Day = job.CreatedAt.Date, job.Result })
             .Select(group => new
             {
-                Day = group.Key,
+                group.Key.Day,
+                group.Key.Result,
                 Jobs = group.Count(),
-                Printed = group.Count(job => job.Result == JobResult.Printed),
                 Reprints = group.Count(job => job.ReprintOf != null),
-                PaperDots = group.Sum(job => job.Result == JobResult.Printed ? (long)(job.PaperDots ?? 0) : 0L)
+                PaperDots = group.Sum(job => (long)(job.PaperDots ?? 0))
             })
-            .ToDictionaryAsync(day => DateOnly.FromDateTime(day.Day), timeout.Token);
+            .ToListAsync(timeout.Token);
+        var perDay = cells
+            .GroupBy(cell => DateOnly.FromDateTime(cell.Day))
+            .ToDictionary(day => day.Key, day =>
+            {
+                var printed = day.Where(cell => cell.Result == JobResult.Printed).ToList();
+                return new
+                {
+                    Jobs = day.Sum(cell => cell.Jobs),
+                    Printed = printed.Sum(cell => cell.Jobs),
+                    Reprints = day.Sum(cell => cell.Reprints),
+                    PaperDots = printed.Sum(cell => cell.PaperDots)
+                };
+            });
 
         // "source" is caller text: a caller can make any number of names. The answer holds the largest only.
         var sources = await window
@@ -92,10 +107,9 @@ public sealed partial class PrintJournalReader
             .Take(MaxStatsSources + 1)
             .ToListAsync(timeout.Token);
 
-        var results = await window
-            .GroupBy(job => job.Result)
-            .Select(group => new { Result = group.Key, Jobs = group.Count() })
-            .ToListAsync(timeout.Token);
+        var results = cells
+            .GroupBy(cell => cell.Result)
+            .Select(result => new { Result = result.Key, Jobs = result.Sum(cell => cell.Jobs) });
 
         var byDay = Enumerable.Range(0, to.DayNumber - from.DayNumber + 1)
             .Select(from.AddDays)
@@ -129,7 +143,7 @@ public sealed partial class PrintJournalReader
         using var timeout = Timeout(cancellationToken);
         await using var db = Open();
 
-        var found = new List<(Guid Id, string Snippet)>();
+        List<(Guid Id, string Snippet)> found = [];
         var cursor = before;
         Guid? next = null;
         var read = 0;
@@ -169,6 +183,9 @@ public sealed partial class PrintJournalReader
             }
         }
 
+        if (found.Count == 0)
+            return new PrintJobSearchResult([], next);
+
         var ids = found.Select(hit => hit.Id).ToList();
         var facts = await db.PrintJobs.AsNoTracking()
             .Where(job => ids.Contains(job.Id))
@@ -189,7 +206,10 @@ public sealed partial class PrintJournalReader
         using var timeout = Timeout(cancellationToken);
         await using var db = Open();
 
+        // "Title" has no index. The read goes over the newest jobs only, so its cost does not grow with the journal.
         var rows = await db.PrintJobs.AsNoTracking()
+            .OrderByDescending(job => job.Id)
+            .Take(MaxPapercutJobs)
             .Where(job => job.Result == JobResult.Printed && job.ReprintOf == null && job.Title != null && job.Title.StartsWith(PapercutHeader))
             .OrderByDescending(job => job.Id)
             .Take(MaxPapercutStrips + 1)
@@ -200,18 +220,18 @@ public sealed partial class PrintJournalReader
                 (job, text) => new { job.Id, job.CreatedAt, Head = text.Text.Substring(0, PapercutHeadLength) })
             .ToListAsync(timeout.Token);
 
-        var papercuts = new Dictionary<string, PapercutEntry>(StringComparer.Ordinal);
+        var papercuts = new Dictionary<string, PapercutEntry>(StringComparer.OrdinalIgnoreCase);
         var strips = 0;
         // Newest first: the first strip of a subject gives the text and the id that the ledger shows.
-        foreach (var row in rows.OrderByDescending(row => row.CreatedAt).ThenByDescending(row => row.Id).Take(MaxPapercutStrips))
+        // The join gives the rows back in no fixed order. The id is a GUID v7: its order is the order in time.
+        foreach (var row in rows.OrderByDescending(row => row.Id).Take(MaxPapercutStrips))
         {
             if (PapercutSubject(row.Head) is not { } subject)
                 continue;
 
             strips++;
             var at = DateTime.SpecifyKind(row.CreatedAt, DateTimeKind.Utc);
-            var key = subject.ToUpperInvariant();
-            papercuts[key] = papercuts.TryGetValue(key, out var entry)
+            papercuts[subject] = papercuts.TryGetValue(subject, out var entry)
                 ? entry with { Count = entry.Count + 1, FirstAt = at }
                 : new PapercutEntry(subject, 1, at, at, row.Id);
         }

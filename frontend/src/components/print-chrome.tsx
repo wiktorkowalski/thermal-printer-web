@@ -64,6 +64,12 @@ export function PrintDock({ printing, blocked = false, label = "Print", onPrint,
   );
 }
 
+/** A dashed box for a state with nothing to list: loading, empty, journal off, read fault. */
+export const noteClass = "rounded-xl border border-dashed border-line-strong p-5 text-sm text-ink-2";
+
+export const pillButtonClass =
+  "flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] text-ink hover:bg-well disabled:opacity-40";
+
 export const roundButtonClass =
   "flex size-14 items-center justify-center rounded-full border border-line-strong bg-surface shadow-[0_4px_12px_rgba(60,45,20,.1)]";
 

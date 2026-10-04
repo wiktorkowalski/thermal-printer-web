@@ -272,8 +272,8 @@ export const printerApi = {
   },
 
   /** Prints a stored job again. The server builds it from the journal; one call is one print. */
-  async reprint(id: string): Promise<void> {
-    await withRetry(() => api.post(`/printer/jobs/${encodeURIComponent(id)}/reprint`, null, { params: { source: "web/tray" } }));
+  async reprint(id: string, source: string): Promise<void> {
+    await withRetry(() => api.post(`/printer/jobs/${encodeURIComponent(id)}/reprint`, null, { params: { source } }));
   },
 
   /**

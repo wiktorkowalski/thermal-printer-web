@@ -27,9 +27,6 @@ public sealed class PrintJobsController(
     internal static readonly string InvalidQueryError =
         $"q must hold {PrintJournalReader.MinQueryLength} to {PrintJournalReader.MaxQueryLength} characters";
 
-    // Other journal queries run. They take a few seconds at most.
-    private const string BusyRetryAfterSeconds = "5";
-
     // Newest first. "before" is the "next" value of the page before; "printed=true" leaves out every job that did not print.
     [HttpGet]
     [ProducesResponseType(typeof(PrintJobList), StatusCodes.Status200OK)]
@@ -40,7 +37,7 @@ public sealed class PrintJobsController(
         [FromQuery] int limit = PrintJournalReader.DefaultPageSize,
         [FromQuery] bool printed = false)
     {
-        if (!TryParseCursor(before, out var cursor))
+        if (!PrintJournalReader.TryParseCursor(before, out var cursor))
             return Invalid(InvalidCursorError);
 
         var (list, fault) = await ReadAsync(PrintJournalReader.ListRead, null, token => journal.ListAsync(cursor, limit, printed, token));
@@ -71,7 +68,7 @@ public sealed class PrintJobsController(
     {
         if (PrintJournalReader.CleanQuery(q) is not { } query)
             return Invalid(InvalidQueryError);
-        if (!TryParseCursor(before, out var cursor))
+        if (!PrintJournalReader.TryParseCursor(before, out var cursor))
             return Invalid(InvalidCursorError);
 
         var (result, fault) = await ReadAsync(PrintJournalReader.SearchRead, null, token => journal.SearchAsync(query, cursor, limit, token));
@@ -134,21 +131,8 @@ public sealed class PrintJobsController(
     private ObjectResult JournalFaultAnswer(JournalFault fault)
     {
         if (fault == JournalFault.Busy)
-            Response.Headers.RetryAfter = BusyRetryAfterSeconds;
+            Response.Headers.RetryAfter = PrintResultResponse.BusyRetryAfterSeconds;
         return StatusCode(StatusCodes.Status503ServiceUnavailable, new PrintResponse(false, fault.Error, fault.Type));
-    }
-
-    // No value is no cursor: the first page.
-    private static bool TryParseCursor(string? before, out Guid? cursor)
-    {
-        cursor = null;
-        if (string.IsNullOrEmpty(before))
-            return true;
-        if (!PrintJournalReader.TryParseId(before, out var id))
-            return false;
-
-        cursor = id;
-        return true;
     }
 
     private BadRequestObjectResult Invalid(string error) => BadRequest(new PrintResponse(false, error, PrintResponse.ValidationType));
