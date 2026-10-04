@@ -55,10 +55,10 @@ export function usePrinterStatus(): PrinterStatusState {
 export type StatusTone = "ready" | "busy" | "error" | "unknown";
 
 /** Why the printer cannot print. "error": a cause with no text of its own. */
-export type PrinterFault = "offline" | "paper" | "cover" | "cutter" | "unrecoverable" | "autoRecoverable" | "error";
+export type PrinterFault = "offline" | "paper" | "cover" | "cutter" | "unrecoverable" | "autoRecoverable" | "recoverable" | "error";
 
 /**
- * The one cause to show for a status that is not ready. The error flags follow the order of
+ * The one cause to show for a status that is not ready. The four error flags are in the order of
  * `NotReadyReason` in the backend model; they are absent in the answer of an older server.
  */
 export function printerFault(status: PrinterStatus): PrinterFault {
@@ -68,6 +68,7 @@ export function printerFault(status: PrinterStatus): PrinterFault {
   if (status.cutterError) return "cutter";
   if (status.unrecoverableError) return "unrecoverable";
   if (status.autoRecoverableError) return "autoRecoverable";
+  if (status.recoverableError) return "recoverable";
   return "error";
 }
 
@@ -78,6 +79,7 @@ const FAULT_TEXT: Record<Exclude<PrinterFault, "error">, { label: string; detail
   cutter: { label: "Cutter error", detail: "Clear the paper from the cutter" },
   unrecoverable: { label: "Printer fault", detail: "Switch the printer off and on" },
   autoRecoverable: { label: "Printer paused", detail: "Wait for the print head to cool down" },
+  recoverable: { label: "Printer error", detail: "Clear the paper path" },
 };
 
 export function describeStatus(state: PrinterStatusState): { tone: StatusTone; label: string; detail: string } {

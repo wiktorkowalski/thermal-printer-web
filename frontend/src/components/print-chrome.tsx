@@ -86,6 +86,10 @@ const STEPS: Record<PrinterFault, { title: string; steps: string[] }> = {
     title: "Printer paused",
     steps: ["Wait a few minutes: the print head cools down.", "The light turns green by itself."],
   },
+  recoverable: {
+    title: "Printer error",
+    steps: ["Open the cover and clear the paper path.", "Close the cover until it clicks.", "If the light stays red, switch the printer off and on again."],
+  },
   paper: {
     title: "Out of paper",
     steps: ["Open the cover.", "Drop in a new 80 mm roll, paper end towards you.", "Close the cover. The light turns green."],

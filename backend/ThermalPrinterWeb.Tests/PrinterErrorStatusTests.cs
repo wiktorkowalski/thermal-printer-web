@@ -121,8 +121,22 @@ public sealed class PrinterErrorStatusTests
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(StatusJson("n1=16 n2=12 n4=12 n3=?"), body);
         Assert.Empty(app.PrinterServiceLogs());
-        // One read timeout of 2 s, not one per query.
-        Assert.InRange(time.Elapsed, TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(3.9));
+        // The read waited for the answer, one time.
+        Assert.True(time.Elapsed > TimeSpan.FromSeconds(1.5), $"The read took {time.Elapsed}.");
+        Assert.Equal([1, 2, 4, 3], printer.Queries);
+    }
+
+    // The late answer to query 4 must not be read as the error status.
+    [Fact]
+    public async Task GetStatus_EarlierQueryGetsNoAnswer_DoesNotSendTheErrorQuery()
+    {
+        await using var printer = new WirePrinter { N4 = null, N3 = 0x1A };
+        using var app = new LoopbackPrinterApp(printer.Port);
+
+        var (_, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Get, StatusUrl);
+
+        Assert.Equal(StatusJson("n1=16 n2=12 n3=?"), body);
+        Assert.Equal([1, 2, 4], printer.Queries);
     }
 
     [Fact]

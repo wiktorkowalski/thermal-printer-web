@@ -8,6 +8,7 @@ const LIGHT_LABEL: Record<PrinterFault, string> = {
   cutter: "CUTTER",
   unrecoverable: "FAULT",
   autoRecoverable: "WAIT",
+  recoverable: "ERROR",
   error: "ERROR",
 };
 

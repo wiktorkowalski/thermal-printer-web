@@ -325,7 +325,9 @@ internal sealed class PrinterService(
             }
 
             // Last: a late answer to this query then cannot be read as the answer to another one.
-            var errorStatus = await QueryErrorStatusAsync(stream);
+            // Not sent after a query with no answer: the late answer of that query would be read as this one.
+            var answersInStep = printerStatus.HasValue && offlineStatus.HasValue && paperStatus.HasValue;
+            var errorStatus = answersInStep ? await QueryErrorStatusAsync(stream) : null;
             // No answer or no status frame: the error status is unknown, and the other queries decide.
             var errorsKnown = errorStatus is { } answer && IsStatusFrame(answer);
             var errors = errorsKnown ? errorStatus.GetValueOrDefault() : (byte)0;

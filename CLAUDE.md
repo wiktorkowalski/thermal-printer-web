@@ -255,11 +255,10 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 | `ready` | | Reachable, online, cover closed, paper present, no error flag. |
 | `notReadyReason` | | One cause, the first that applies: `printer unreachable`, `cover open`, `paper out`, `cutter error`, `unrecoverable error`, `auto-recoverable error`, `recoverable error`, `printer offline`. Null when ready. |
 
-- The four error flags are not verified on hardware: the printer was only seen idle (n3 = `12`). Bits 3, 5 and 6 are from the Epson TM-T20II ESC/POS Quick Reference; bit 2 has a weaker origin (see `PrinterService`).
+- The four error flags are not verified on hardware: the idle value (n3 = `12`) is the only confirmed one. Bits 3, 5 and 6 are from the Epson TM-T20II ESC/POS Quick Reference; bit 2 has a weaker origin (see `PrinterService`).
 - Not ready blocks a print: 503 `printer`, `Printer not ready: <notReadyReason>`, one Warning. The journal row holds the status JSON.
-- Query 3 with no answer (`n3=?` in `raw`) or with a byte that is not a status frame (`n3=xx!`; a frame has bits 1 and 4 set, bits 0 and 7 clear): the error status is unknown, every error flag is false, the other queries decide `ready`. No log line. A silent query 3 adds 2 s to each status read and each print.
+- Query 3 with no answer (`n3=?` in `raw`) or with a byte that is not a status frame (`n3=xx!`; a frame has bits 1 and 4 set, bits 0 and 7 clear): the error status is unknown, every error flag is false, the other queries decide `ready`. No log line. A silent query 3 adds 2 s to each status read and each print. Query 3 is not sent after a query with no answer (`n3=?`): a late answer would be read as the error status.
 - A status read logs at Debug only (the web UI polls it); an unreachable printer is one Warning. The controller logs nothing.
-- Development with no printer: `ready` true, every flag false.
 - The web UI shows one cause (`printerFault` in `hooks/use-printer-status.ts`): header label, light label on the drawn printer (`lib/printer-light.ts`), steps above the paper (`PrinterAlert`).
 - `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
 
