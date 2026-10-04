@@ -79,6 +79,8 @@ Located in `backend/` directory.
 
 **Print path**: `PrinterService.PrintAsync` builds the whole document first, then reads the printer status, then sends. So a payload fault is reported as such even while the printer is off. A handler rejects a block with `PrintContentException`; its message goes to the caller, so it must not repeat caller content.
 
+**Reset prelude**: every job starts with `ESC @` (`1B 40`), then the code page command `ESC t n` (`1B 74 12` for PC852), then `ESC 3 n` when `options.defaultLineSpacing` is set. `ESC @` resets size, underline, alignment, line spacing and the code page, so a job does not depend on the job before it. Without the code page command after it, Polish letters print wrong. A job sends no `ESC 2` at its end. An unknown code page name sends no code page command: the printer uses its own default page.
+
 **Printer Configuration** (`backend/Services/PrinterOptions.cs`):
 - `Printer:Address` (env `Printer__Address`) is `host` or `host:port`; the port defaults to 9100. `Printer:ConnectTimeout` is `hh:mm:ss`, default 3 s, at most 1 min.
 - The default address is the constant `PrinterOptions.DefaultAddress`. Keep `Printer:Address` out of `appsettings.json`: a value there also binds in Development when `appsettings.Development.json` is not found.
@@ -258,7 +260,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
 
-**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes` (that needs the reset prelude of issue #45).
+**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job.
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
 - No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
