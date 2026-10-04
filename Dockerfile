@@ -19,7 +19,9 @@ COPY backend/ ./
 RUN dotnet test ThermalPrinterWeb.Tests -c Release --no-restore
 # Copy frontend build output to backend wwwroot
 COPY --from=frontend-build /app/frontend/dist ./wwwroot
-RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
+# After the tests: a new commit does not run them again when the code is the same. Empty in a local build.
+ARG GIT_SHA=
+RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false /p:SourceRevisionId=$GIT_SHA
 
 # Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

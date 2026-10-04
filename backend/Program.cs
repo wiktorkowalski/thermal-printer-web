@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -8,6 +7,7 @@ using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Journal;
 using ThermalPrinterWeb.Services.Printing;
 
 // A JSON body that does not parse or bind: truncated JSON, a string where a number goes, an enum name that does not exist.
@@ -25,10 +25,7 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
 
 // Add services to the container.
 builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    })
+    .AddJsonOptions(options => PrintJobEntry.ConfigureApiJson(options.JsonSerializerOptions))
     // Model-binding failures answer in the same shape as every other print error.
     .ConfigureApiBehaviorOptions(options =>
     {
@@ -63,6 +60,18 @@ builder.Services.AddSingleton<IPrinterService, PrinterService>();
 builder.Services.AddPrinterBlockHandlers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<PrintJobLog>();
+
+// The print journal. A bad setting here turns the journal off; it never stops the app (PrintJournal).
+builder.Services.AddOptions<JournalOptions>()
+    .Configure<IConfiguration>((options, configuration) =>
+        options.DataPath = configuration[JournalOptions.DataPathVariable] ?? options.DataPath)
+    .BindConfiguration(JournalOptions.SectionName);
+builder.Services.AddSingleton<JournalDatabase>();
+builder.Services.AddSingleton<IPrintJournalStore, SqlitePrintJournalStore>();
+builder.Services.AddSingleton<ContainerLayerCheck>(PrintJournal.IsInContainerLayer);
+builder.Services.AddSingleton<PrintJournal>();
+builder.Services.AddHostedService(services => services.GetRequiredService<PrintJournal>());
+builder.Services.AddSingleton<ILoggerProvider, PrintJobTraceLoggerProvider>();
 
 // MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
 builder.Services.AddMcpServer(options => options.ServerInstructions = PrinterTools.ServerInstructions)
@@ -129,8 +138,11 @@ if (app.Environment.IsDevelopment())
     app.UseCors("AllowReact");
 }
 
+// After routing: the middleware reads the endpoint to know which requests are print jobs.
+app.UseMiddleware<PrintJournalMiddleware>();
+
 app.MapControllers();
-app.MapMcp("/mcp");
+app.MapMcp("/mcp").WithMetadata(new JournaledAttribute { JobsOnly = true });
 
 // Serve React app SPA (from wwwroot)
 app.MapFallbackToFile("index.html");

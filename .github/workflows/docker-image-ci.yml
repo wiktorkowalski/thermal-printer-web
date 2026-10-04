@@ -20,6 +20,9 @@ jobs:
       context: .
       # Empty: the multi-stage Dockerfile builds the frontend + .NET itself.
       dotnet-project: ""
+      # The commit goes into the app version, and the print journal stores it with each job.
+      build-args: |
+        GIT_SHA=${{ github.sha }}
       deploy-compose-path: /home/ubuntu/docker/thermal-printer-web
       deploy-runner-labels: '["self-hosted", "homelab"]'
     secrets: inherit

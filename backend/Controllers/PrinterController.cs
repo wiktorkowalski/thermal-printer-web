@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Journal;
 using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Controllers;
@@ -13,6 +14,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     private const string BusyRetryAfterSeconds = "5";
 
     [HttpPost]
+    [Journaled]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status415UnsupportedMediaType)]
@@ -33,12 +35,12 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         {
             // No job to send, but the caller is known: the same line, so a broken client shows up by name.
             var rejected = PrintResult.Invalid("Request must have Content array or both Name and Message");
-            jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected);
+            jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected, content: null, request.Options);
             return BadRequest(new PrintResponse(false, rejected.Error, PrintResponse.ValidationType));
         }
 
         var result = await printerService.PrintAsync(content, request.Options);
-        jobLog.Write(PrintJobLog.HttpTransport, request.Source, result);
+        jobLog.Write(PrintJobLog.HttpTransport, request.Source, result, content, request.Options);
 
         if (result.Success)
             return Ok(new PrintResponse(true));
