@@ -43,9 +43,8 @@ public sealed class PrintJobDeleter
     // Dry runs whose code can still be used. The oldest goes first.
     internal const int MaxPendingCodes = 8;
 
-    // Fixed texts for the log of a failed call.
+    // Fixed text for the log of a failed dry run.
     internal const string PreviewRead = "the jobs of a delete";
-    internal const string DeleteRun = "a delete";
 
     private const int CodeBytes = 8;
 
@@ -76,9 +75,22 @@ public sealed class PrintJobDeleter
 
     // Deletes the jobs of the dry run that gave this code. The code works once, also when the call is refused.
     // A fault in place of the value: the journal is off or the delete failed; then no row is deleted.
-    internal Task<(DeleteOutcome? Value, JournalFault? Fault)> DeleteAsync(
+    // The writer logs a delete that failed (PrintJournal): it also does so when the caller no longer waits.
+    internal async Task<(DeleteOutcome? Value, JournalFault? Fault)> DeleteAsync(
         string transport, JobDeleteFilter filter, string code, CancellationToken cancellationToken)
-        => _reader.TryReadAsync(token => RunDeleteAsync(transport, filter, code, token), _logger, DeleteRun, filter.Id, cancellationToken);
+    {
+        if (!_reader.IsOn)
+            return (null, JournalFault.Off);
+
+        try
+        {
+            return (await RunDeleteAsync(transport, filter, code, cancellationToken), null);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (null, JournalFault.Unavailable);
+        }
+    }
 
     private async Task<DeletePreview> ReadPreviewAsync(JobDeleteFilter filter, CancellationToken cancellationToken)
     {

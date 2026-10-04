@@ -573,6 +573,8 @@ public sealed class McpJournalDeleteTests
     [InlineData("2026-10-03T18:00:00Z", "2026-10-03T19:00:00Z", 2)]
     [InlineData("2026-10-03T18:00:00.0000000Z", "2026-10-03T19:00:00.0000001Z", 3)]
     [InlineData("2026-10-03T18:00:01Z", null, 2)]
+    // A time with no zone is UTC.
+    [InlineData("2026-10-03T18:00:00", "2026-10-03T19:00:00", 2)]
     [InlineData(null, "2026-10-03T18:00:00Z", 1)]
     // A date is its first moment.
     [InlineData("2026-10-03", "2026-10-04", 3)]
@@ -791,7 +793,8 @@ public sealed class McpJournalDeleteTests
         // The fault text of the store goes to the log, never to the caller.
         Assert.DoesNotContain(Secret, answer);
         var warning = Assert.Single(app.Logs.Entries, entry => entry.Level >= LogLevel.Warning);
-        Assert.StartsWith($"Journal read failed: job {job.Id}", warning.Message);
+        Assert.Equal(JournalCategory, warning.Category);
+        Assert.StartsWith("Journal delete failed: no row is deleted", warning.Message);
         Assert.Empty(app.AuditLines());
         Assert.Equal((1, 1, 1), await app.RowCountsAsync());
 

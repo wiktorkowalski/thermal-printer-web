@@ -266,7 +266,7 @@ public static class JournalTools
 
     private static string NotDeleted(string reason) => $"{NotDeletedPrefix}{reason}";
 
-    // A date, or a time with "Z" or an offset. No other form: "03/10/2026" has two readings.
+    // A date, or a time; a time with no "Z" and no offset is UTC. No other form: "03/10/2026" has two readings.
     private static readonly string[] TimeFormats = ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ssK", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK"];
 
     // Null for no value. The problem text is fixed: it never repeats the value.

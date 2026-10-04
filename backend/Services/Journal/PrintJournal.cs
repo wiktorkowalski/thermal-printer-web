@@ -217,18 +217,37 @@ internal sealed class PrintJournal(
             // so its answer and its log line say what happened.
             using var timeout = new CancellationTokenSource(DeleteTimeout);
             deleted = await store.DeleteAsync(jobIds, timeout.Token);
-            if (deleted is { } rows)
-                onDeleted(rows);
-            done.TrySetResult(deleted);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
         {
             done.TrySetException(ex);
             return;
         }
-
-        if (deleted is null)
+        catch (Exception ex)
+        {
+            // Logged here: the caller may be gone. The exception holds no row content (EF Core logs no parameter values).
+            logger.LogWarning(ex, "Journal delete failed: no row is deleted");
+            done.TrySetException(ex);
             return;
+        }
+
+        if (deleted is not { } rows)
+        {
+            done.TrySetResult(deleted);
+            return;
+        }
+
+        try
+        {
+            onDeleted(rows);
+        }
+        catch (Exception ex)
+        {
+            // A fault in the log line must not turn a delete that happened into "not deleted".
+            logger.LogWarning(ex, "Journal delete: {Rows} rows are deleted, and the line that says so was not written", rows);
+        }
+
+        done.TrySetResult(deleted);
 
         try
         {

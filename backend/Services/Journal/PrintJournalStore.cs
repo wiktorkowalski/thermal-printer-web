@@ -40,10 +40,12 @@ internal interface IPrintJournalStore
 // Not a fault of the storage: a limit from JournalOptions is reached. The message names the limit and holds no job content.
 internal sealed class JournalFullException(string message) : Exception(message);
 
-internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions<JournalOptions> options) : IPrintJournalStore
+internal sealed class SqlitePrintJournalStore(
+    JournalDatabase database, IOptions<JournalOptions> options, ILogger<SqlitePrintJournalStore> logger) : IPrintJournalStore
 {
     private const string WriteAheadLogSuffix = "-wal";
     private const string CutWriteAheadLog = "PRAGMA wal_checkpoint(TRUNCATE);";
+    private const string SetIncrementalAutoVacuum = "PRAGMA auto_vacuum=INCREMENTAL;";
 
     // The value of "PRAGMA auto_vacuum" for the mode INCREMENTAL.
     private const long IncrementalAutoVacuum = 2;
@@ -61,17 +63,26 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
         // One connection for all of it: the auto_vacuum setting of a file with tables takes effect in the VACUUM of the same connection.
         await db.Database.OpenConnectionAsync(cancellationToken);
         // Before the first table: a new file is made in this mode. It lets a delete give its pages back (CompactAsync).
-        await db.Database.ExecuteSqlRawAsync("PRAGMA auto_vacuum=INCREMENTAL;", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(SetIncrementalAutoVacuum, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         // Stays set in the database file. A reader over ssh does not block the writer.
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
 
-        // A file from before this mode: one VACUUM writes it again in the mode. Once per file.
-        if (await AutoVacuumModeAsync(db, cancellationToken) != IncrementalAutoVacuum)
+        try
         {
-            await db.Database.ExecuteSqlRawAsync("PRAGMA auto_vacuum=INCREMENTAL;", cancellationToken);
-            await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
-            await db.Database.ExecuteSqlRawAsync(CutWriteAheadLog, cancellationToken);
+            // A file from before this mode: one VACUUM writes it again in the mode. Once per file.
+            // It needs free disk space of about the size of the file.
+            if (await AutoVacuumModeAsync(db, cancellationToken) != IncrementalAutoVacuum)
+            {
+                await db.Database.ExecuteSqlRawAsync(SetIncrementalAutoVacuum, cancellationToken);
+                await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
+                await db.Database.ExecuteSqlRawAsync(CutWriteAheadLog, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The journal works without the mode; the next start tries again.
+            logger.LogWarning(ex, "Journal: the database file did not get the auto_vacuum mode. A delete does not make the file smaller.");
         }
 
         return path;
