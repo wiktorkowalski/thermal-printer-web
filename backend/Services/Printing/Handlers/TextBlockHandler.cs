@@ -21,7 +21,7 @@ internal sealed class TextBlockHandler : IBlockHandler
         if (lines > MaxLines)
             throw PrintContentException.OverLimit("text line count", lines, MaxLines);
 
-        ctx.AddRange(StyledText.Build(ctx, text, item.Style));
+        ctx.AddRange(StyledText.Build(ctx, text, item.Style, item.Size));
         return Task.CompletedTask;
     }
 }

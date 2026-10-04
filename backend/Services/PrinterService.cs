@@ -158,6 +158,11 @@ internal sealed class PrinterService(
         var e = new EPSON();
         var ctx = new BlockContext(e, options);
 
+        // ESC @ first: the job starts from the power-on state, whatever the job before left
+        // (line spacing, text size, barcode and QR settings). It also resets the code page,
+        // so the code page command comes next, then the options.
+        ctx.Add(e.Initialize());
+
         // Determine text encoding based on code page
         var codePageName = options?.CodePage ?? DefaultCodePage;
         var codePage = CodePages.Resolve(codePageName);
@@ -169,6 +174,7 @@ internal sealed class PrinterService(
         }
         else
         {
+            // After ESC @ the printer has its own default code page, not the one of the job before.
             logger.LogWarning(
                 "Unknown code page \"{CodePage}\", printing raw UTF-8 bytes",
                 LogSafeText.Clean(codePageName, CodePages.MaxLoggedNameLength));
@@ -204,11 +210,6 @@ internal sealed class PrinterService(
             var feedLines = options?.FeedLinesAfterPrint ?? 3;
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
-
-        // The printer keeps ESC 3 n after the job: without ESC 2 the next job prints
-        // with this spacing, and its paper estimate is too low.
-        if (options?.DefaultLineSpacing != null)
-            ctx.Add(e.ResetLineSpacing());
 
         PrintJobTrace.Current?.PaperDots = ctx.PaperDots;
         return ctx.Output;

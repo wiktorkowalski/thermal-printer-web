@@ -104,11 +104,19 @@ export interface ImageOptions {
   useLegacyMode?: boolean;
 }
 
+/** Character size as multipliers, 1 to 8 each. An axis that is left out is 1. */
+export interface TextSize {
+  width?: number;
+  height?: number;
+}
+
 export interface PrintContent {
   type: ContentType;
   content?: string;
   alignment?: Alignment;
   style?: PrintStyle[];
+  /** Text and Separator. When present it replaces the DoubleWidth and DoubleHeight styles. */
+  size?: TextSize | null;
   barcodeOptions?: BarcodeOptions;
   qrCodeOptions?: QRCodeOptions;
   imageOptions?: ImageOptions;

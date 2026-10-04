@@ -14,8 +14,7 @@ public sealed class PrinterFaultTests
         """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"ready":false,"notReadyReason":"printer unreachable"}""";
     private const string PrintJson = TestHttp.PrintJson;
 
-    // Online, cover closed, paper present.
-    private static readonly byte[] ReadyStatus = [0x12];
+    private static readonly byte[] ReadyStatus = [WirePrinter.ReadyStatus];
 
     private static readonly string ServiceCategory = typeof(PrinterService).FullName!;
 

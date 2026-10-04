@@ -1,11 +1,15 @@
 import type { CSSProperties, Ref } from "react";
-import type { Alignment, PrintStyle } from "@/types/printer";
+import type { Alignment, PrintStyle, TextSize } from "@/types/printer";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
 import { DEFAULT_ALIGNMENT, DOTS_PER_CH, countPrintedLines, textMetrics } from "@/lib/paper";
+
+// How much of the unused width sits left of the line.
+const SLACK_LEFT = { Left: 0, Center: 0.5, Right: 1 } as const;
 
 interface PaperTextProps {
   text: string;
   style?: PrintStyle[];
+  size?: TextSize | null;
   alignment?: Alignment;
   placeholder?: string;
   /** When set, the text is edited in place through a transparent textarea. */
@@ -16,20 +20,22 @@ interface PaperTextProps {
 
 /**
  * Renders one ESC/POS text block at 1:1 scale. The glyph box is laid out at
- * `maxChars` columns and then scaled so it always fills the 48ch printable
- * width, which is how DoubleWidth and Font B behave on the printer.
+ * `maxChars` columns and then scaled by the glyph size, which is how a size,
+ * DoubleWidth and Font B behave on the printer. A full line can be narrower
+ * than the 48ch printable width (9 glyphs at 5x): the alignment places the box.
  */
-export function PaperText({ text, style = [], alignment = DEFAULT_ALIGNMENT, placeholder, onChange, textareaRef, label }: PaperTextProps) {
-  const m = textMetrics(style);
+export function PaperText({ text, style = [], size, alignment = DEFAULT_ALIGNMENT, placeholder, onChange, textareaRef, label }: PaperTextProps) {
+  const m = textMetrics(style, size);
   const shown = text || placeholder || "";
   const lines = countPrintedLines(shown, m.maxChars);
   const lineCh = m.lineDots / DOTS_PER_CH;
   const reverse = style.includes("ReverseMode");
+  const slackCh = CHARS_PER_LINE.normal - m.maxChars * m.scaleX;
 
   const glyphStyle: CSSProperties = {
     position: "absolute",
     top: 0,
-    left: 0,
+    left: `${slackCh * (SLACK_LEFT[alignment] ?? SLACK_LEFT.Center)}ch`,
     width: `${m.maxChars}ch`,
     height: `${(lines * lineCh) / m.scaleY}ch`,
     transform: `scale(${m.scaleX}, ${m.scaleY})`,

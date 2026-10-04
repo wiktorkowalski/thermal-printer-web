@@ -22,7 +22,7 @@ internal sealed class SeparatorBlockHandler : IBlockHandler
             throw PrintContentException.OverLimit("separatorLength", length, MaxLength);
 
         var sep = new string(separatorChar[0], length);
-        ctx.AddRange(StyledText.Build(ctx, sep, item.Style));
+        ctx.AddRange(StyledText.Build(ctx, sep, item.Style, item.Size));
         return Task.CompletedTask;
     }
 }

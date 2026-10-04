@@ -12,9 +12,9 @@ import {
 } from "@/types/printer";
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
-import { BARCODE_MAX_HEIGHT_DOTS, EDITOR_BARCODE_MIN_HEIGHT_DOTS, EDITOR_LINE_FEED_MAX_LINES } from "@/lib/printer-limits";
+import { BARCODE_MAX_HEIGHT_DOTS, EDITOR_BARCODE_MIN_HEIGHT_DOTS, EDITOR_LINE_FEED_MAX_LINES, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
 import { HEAD_DOTS, LINE_DOTS, longestLine, textMetrics } from "@/lib/paper";
-import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
+import { BLOCK_LABELS, blockError, textSizePatch, type Block } from "@/editor/document";
 import { SectionLabel, Segmented, Switch, ToggleChip, fieldLabelClass, inputClass, quietButtonClass } from "./controls";
 
 export interface InspectorProps {
@@ -33,11 +33,12 @@ const TEXT_STYLES: { style: PrintStyle; label: string; className?: string }[] = 
   { style: "Underline", label: "Underline", className: "underline" },
   { style: "Italic", label: "Italic", className: "italic" },
   { style: "FontB", label: "Font B · 64" },
-  { style: "DoubleWidth", label: "Double width" },
-  { style: "DoubleHeight", label: "Double height" },
   { style: "ReverseMode", label: "Reverse" },
   { style: "UpsideDownMode", label: "Upside-down" },
 ];
+
+// Width and height multipliers of the text, 1 to 8 (GS ! n).
+const TEXT_SIZES = Array.from({ length: TEXT_SIZE_MAX - TEXT_SIZE_MIN + 1 }, (_, i) => TEXT_SIZE_MIN + i);
 
 const BARCODE_TYPES: { value: BarcodeType; label: string }[] = [
   { value: BarcodeType.CODE128, label: "CODE128" },
@@ -105,7 +106,27 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
   let body: ReactNode = null;
   switch (block.type) {
     case "Text": {
-      const m = textMetrics(block.style);
+      const m = textMetrics(block.style, block.size);
+      const scale = { width: m.width, height: m.height };
+      const sizeSelect = (axis: "width" | "height") => (
+        <Field label={axis === "width" ? "Width" : "Height"} htmlFor={`${id}-${axis}`}>
+          <select
+            id={`${id}-${axis}`}
+            value={scale[axis]}
+            onChange={(e) => {
+              const next = { ...scale, [axis]: Number(e.target.value) };
+              onUpdate(textSizePatch(block, next.width, next.height));
+            }}
+            className={cn(inputClass, "font-mono")}
+          >
+            {TEXT_SIZES.map((n) => (
+              <option key={n} value={n}>
+                {n}×
+              </option>
+            ))}
+          </select>
+        </Field>
+      );
       body = (
         <>
           <div className="flex flex-col gap-2.5">
@@ -116,6 +137,10 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
                   {label}
                 </ToggleChip>
               ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {sizeSelect("width")}
+              {sizeSelect("height")}
             </div>
           </div>
           <div className="flex flex-col gap-2.5">
@@ -145,7 +170,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
                 id={`${id}-len`}
                 type="number"
                 min={1}
-                max={textMetrics(block.style).maxChars}
+                max={textMetrics(block.style, block.size).maxChars}
                 value={block.separatorLength ?? CHARS_PER_LINE.normal}
                 onChange={(e) => onUpdate({ separatorLength: Number(e.target.value) || 1 })}
                 className={cn(inputClass, "font-mono")}
