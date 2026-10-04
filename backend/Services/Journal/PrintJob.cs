@@ -22,7 +22,7 @@ internal sealed class PrintJob
     // The whole request, in milliseconds.
     public long DurationMs { get; set; }
 
-    // "http", "http:reprint", "mcp:print" or "mcp:print_note".
+    // "http", "http:reprint", "mcp:print", "mcp:print_note" or "mcp:reprint_job".
     public required string Transport { get; set; }
     public string? Source { get; set; }
     public string? UserAgent { get; set; }
@@ -50,6 +50,19 @@ internal sealed class PrintJob
     public Guid? ReprintOf { get; set; }
 
     public PrintJobPayload Payload { get; set; } = null!;
+
+    // Null: the job has no printed text, or the row is a reprint.
+    public PrintJobText? Text { get; set; }
+}
+
+// The printed text of a job, cut at PrintJobEntry.MaxSearchTextLength, in its own small table.
+// The search and the papercut ledger read it: the same text in PrintJobPayload sits behind values of up to 30 MB.
+internal sealed class PrintJobText
+{
+    public Guid JobId { get; set; }
+
+    // The Text blocks, one per line.
+    public required string Text { get; set; }
 }
 
 // The large values of a job, in their own table: a list query over PrintJob reads none of them.

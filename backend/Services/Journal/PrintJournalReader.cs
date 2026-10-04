@@ -12,10 +12,23 @@ internal sealed record StoredJob(Guid OriginalId, List<PrintContent>? Content, P
     public static StoredJob NoCopy(Guid originalId, string reason) => new(originalId, null, null, reason);
 }
 
-// Reads the journal for the public job endpoints. Every read has its own short-lived context and a time limit,
-// so a reader cannot hold the database against the writer. A list reads PrintJobs only.
-// Public on purpose: the controller takes it as an injected parameter. The constructor is internal, so Program.cs builds it.
-public sealed class PrintJournalReader
+// Why a journal read gave no value. The texts are fixed and go to the caller: no detail of the storage.
+public sealed record JournalFault(string Error, string Type)
+{
+    public static readonly JournalFault Off = new("The print journal is off", PrintResponse.JournalOffType);
+
+    // Not open yet, or the read failed: a later call can pass.
+    public static readonly JournalFault Unavailable = new("The print journal is not available", PrintResponse.JournalType);
+
+    // Too many statistics, search or ledger reads run (PrintJournalReader.MaxQueries).
+    public static readonly JournalFault Busy = new("Server busy: other journal queries run. Send it again in a few seconds.", PrintResponse.BusyType);
+}
+
+// Reads the journal for the public job endpoints and the MCP tools. Every read has its own short-lived context
+// and a time limit, so a reader cannot hold the database against the writer. A list reads PrintJobs only.
+// Public on purpose: the controller and the MCP tools take it as an injected parameter.
+// The constructor is internal, so Program.cs builds it. The statistics, the search and the ledger are in PrintJournalReader.Queries.cs.
+public sealed partial class PrintJournalReader
 {
     internal const int DefaultPageSize = 20;
     internal const int MaxPageSize = 50;
@@ -25,6 +38,10 @@ public sealed class PrintJournalReader
     internal const string NoImageReason = "The job has an image that the journal did not store";
     internal const string UnreadableReason = "The stored job cannot be read";
 
+    // Fixed texts for the log: what a failed read was for.
+    internal const string ListRead = "the job list";
+    internal const string JobRead = "a job";
+
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
 
     // One reprint at a time: a reprint of an image job reads a request of up to 30 MB, and the call that starts it is a few bytes.
@@ -32,11 +49,39 @@ public sealed class PrintJournalReader
 
     private readonly JournalDatabase _database;
     private readonly PrintJournal _journal;
+    private readonly TimeSpan _searchBudget;
 
-    internal PrintJournalReader(JournalDatabase database, PrintJournal journal)
+    internal PrintJournalReader(JournalDatabase database, PrintJournal journal, TimeSpan? searchBudget = null)
     {
         _database = database;
         _journal = journal;
+        _searchBudget = searchBudget ?? DefaultSearchBudget;
+    }
+
+    // One journal read for a caller. A fault in place of the value: the journal is off, not open yet, busy, or the read failed.
+    // The log gets one Warning for a failed read: "what" is a fixed text, and the job id when the read is for one job.
+    public async Task<(T? Value, JournalFault? Fault)> TryReadAsync<T>(
+        Func<CancellationToken, Task<T>> read, ILogger logger, string what, Guid? jobId, CancellationToken cancellationToken)
+    {
+        if (!IsOn)
+            return (default, JournalFault.Off);
+
+        try
+        {
+            return (await read(cancellationToken), null);
+        }
+        catch (JournalBusyException)
+        {
+            return (default, JournalFault.Busy);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            if (jobId is null)
+                logger.LogWarning(ex, "Journal read failed: {What}", what);
+            else
+                logger.LogWarning(ex, "Journal read failed: job {JobId}", jobId);
+            return (default, JournalFault.Unavailable);
+        }
     }
 
     private static readonly Expression<Func<PrintJob, JobFacts>> Facts = job => new JobFacts(
@@ -61,6 +106,9 @@ public sealed class PrintJournalReader
             ReprintOf,
             CanReprint: BlockCount is not null);
     }
+
+    // The form the list gives out. Any other text is not an id.
+    public static bool TryParseId(string text, out Guid id) => Guid.TryParseExact(text, "D", out id);
 
     // False: the journal is off, and no read is tried. True does not say that the database is open yet.
     public bool IsOn => _journal.IsOn;

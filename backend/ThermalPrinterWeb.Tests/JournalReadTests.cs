@@ -28,6 +28,15 @@ public sealed class JournalReadTests
         ["id", "createdAt", "transport", "source", "result", "error", "title", "blockCount", "paperDots", "reprintOf", "canReprint"];
     private static readonly string[] ListNames = ["jobs", "next"];
     private static readonly string[] DetailNames = ["job", "blocks", "options"];
+    private static readonly string[] SearchNames = ["hits", "next"];
+    private static readonly string[] HitNames = ["job", "snippet"];
+    private static readonly string[] StatsNames = ["from", "to", "totals", "byDay", "bySource", "moreSources", "byResult"];
+    private static readonly string[] CountNames = ["jobs", "printed", "reprints", "paperDots"];
+    private static readonly string[] DayNames = ["day", "jobs", "printed", "paperDots"];
+    private static readonly string[] SourceNames = ["source", "jobs", "printed", "paperDots"];
+    private static readonly string[] ResultNames = ["result", "jobs"];
+    private static readonly string[] LedgerNames = ["papercuts", "strips", "more"];
+    private static readonly string[] PapercutNames = ["subject", "count", "firstAt", "lastAt", "lastJobId"];
 
     private static readonly string ControllerCategory = typeof(PrintJobsController).FullName!;
 
@@ -213,6 +222,15 @@ public sealed class JournalReadTests
         Assert.Equal(SummaryNames, PropertyNames(typeof(PrintJobSummary)));
         Assert.Equal(ListNames, PropertyNames(typeof(PrintJobList)));
         Assert.Equal(DetailNames, PropertyNames(typeof(PrintJobDetail)));
+        Assert.Equal(SearchNames, PropertyNames(typeof(PrintJobSearchResult)));
+        Assert.Equal(HitNames, PropertyNames(typeof(PrintJobSearchHit)));
+        Assert.Equal(StatsNames, PropertyNames(typeof(PrintJobStats)));
+        Assert.Equal(CountNames, PropertyNames(typeof(PrintJobCounts)));
+        Assert.Equal(DayNames, PropertyNames(typeof(PrintJobDayStats)));
+        Assert.Equal(SourceNames, PropertyNames(typeof(PrintJobSourceStats)));
+        Assert.Equal(ResultNames, PropertyNames(typeof(PrintJobResultStats)));
+        Assert.Equal(LedgerNames, PropertyNames(typeof(PapercutLedger)));
+        Assert.Equal(PapercutNames, PropertyNames(typeof(PapercutEntry)));
     }
 
     [Fact]
@@ -242,8 +260,12 @@ public sealed class JournalReadTests
         var (_, list) = await client.SendJsonAsync(HttpMethod.Get, JobsUrl);
         var (_, detail) = await client.SendJsonAsync(HttpMethod.Get, $"{JobsUrl}/{job.Id}");
         var (_, reprint) = await ReprintAsync(client, job.Id);
+        var (_, stats) = await client.SendJsonAsync(HttpMethod.Get, $"{JobsUrl}/stats");
+        var (_, search) = await client.SendJsonAsync(HttpMethod.Get, $"{JobsUrl}/search?q=picture");
+        var (_, papercuts) = await client.SendJsonAsync(HttpMethod.Get, $"{JobsUrl}/papercuts");
+        Assert.Contains("With a picture", search);
 
-        foreach (var body in new[] { list, detail, reprint })
+        foreach (var body in new[] { list, detail, reprint, stats, search, papercuts })
         {
             Assert.DoesNotContain(Secret, body);
             Assert.DoesNotContain("203.0.113.77", body);
@@ -260,6 +282,17 @@ public sealed class JournalReadTests
         var one = JsonDocument.Parse(detail).RootElement;
         Assert.Equal(DetailNames, Names(one));
         Assert.Equal(SummaryNames, Names(one.GetProperty("job")));
+        var searched = JsonDocument.Parse(search).RootElement;
+        Assert.Equal(SearchNames, Names(searched));
+        Assert.Equal(HitNames, Names(searched.GetProperty("hits")[0]));
+        Assert.Equal(SummaryNames, Names(searched.GetProperty("hits")[0].GetProperty("job")));
+        var counted = JsonDocument.Parse(stats).RootElement;
+        Assert.Equal(StatsNames, Names(counted));
+        Assert.Equal(CountNames, Names(counted.GetProperty("totals")));
+        Assert.Equal(DayNames, Names(counted.GetProperty("byDay")[0]));
+        Assert.Equal(SourceNames, Names(counted.GetProperty("bySource")[0]));
+        Assert.Equal(ResultNames, Names(counted.GetProperty("byResult")[0]));
+        Assert.Equal(LedgerNames, Names(JsonDocument.Parse(papercuts).RootElement));
     }
 
     [Fact]
@@ -319,6 +352,9 @@ public sealed class JournalReadTests
     [InlineData("GET", JobsUrl)]
     [InlineData("GET", JobsUrl + "/01999999-0000-7000-8000-000000000000")]
     [InlineData("POST", JobsUrl + "/01999999-0000-7000-8000-000000000000/reprint")]
+    [InlineData("GET", JobsUrl + "/stats")]
+    [InlineData("GET", JobsUrl + "/search?q=text")]
+    [InlineData("GET", JobsUrl + "/papercuts")]
     public async Task JournalOff_EveryEndpoint_Answers503WithItsType(string method, string url)
     {
         await using var app = JournalOffApp();
@@ -328,7 +364,7 @@ public sealed class JournalReadTests
         var (status, body) = await client.SendJsonAsync(new HttpMethod(method), url);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
-        AssertResponse(body, PrintResponse.JournalOffType, PrintJobsController.JournalOffError);
+        AssertResponse(body, PrintResponse.JournalOffType, JournalFault.Off.Error);
         Assert.Empty(app.Printer.Jobs);
     }
 
@@ -336,6 +372,9 @@ public sealed class JournalReadTests
     [InlineData("GET", JobsUrl)]
     [InlineData("GET", JobsUrl + "/01999999-0000-7000-8000-000000000000")]
     [InlineData("POST", JobsUrl + "/01999999-0000-7000-8000-000000000000/reprint")]
+    [InlineData("GET", JobsUrl + "/stats")]
+    [InlineData("GET", JobsUrl + "/search?q=" + Secret)]
+    [InlineData("GET", JobsUrl + "/papercuts")]
     public async Task DatabaseFault_EveryEndpoint_Answers503AndLogsOneWarningWithNoDetailForTheCaller(string method, string url)
     {
         await using var app = new App(new NoDatabaseStore());
@@ -345,12 +384,14 @@ public sealed class JournalReadTests
         var (status, body) = await client.SendJsonAsync(new HttpMethod(method), url);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
-        AssertResponse(body, PrintResponse.JournalType, PrintJobsController.JournalUnavailableError);
+        AssertResponse(body, PrintResponse.JournalType, JournalFault.Unavailable.Error);
         Assert.DoesNotContain("SQLite", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(app.JournalDirectory, body);
         var warning = Assert.Single(app.Logs.Entries, entry => entry.Category == ControllerCategory);
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.StartsWith("Journal read failed", warning.Message);
+        // The search text goes to no log.
+        Assert.DoesNotContain(app.Logs.Entries, entry => entry.Message.Contains(Secret));
         Assert.Empty(app.Printer.Jobs);
     }
 

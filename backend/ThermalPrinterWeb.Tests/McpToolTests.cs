@@ -58,13 +58,16 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
 
         Assert.Equal(
-            ["beep", "get_status", "print", "print_note"],
+            ["beep", "get_job", "get_status", "list_jobs", "print", "print_note", "reprint_job"],
             tools.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()).Order());
     }
 
-    // The exact argument list of all four tools. It also pins the schema against the fault from #73:
-    // an injected service (printer, jobLog) listed as an argument. See AssemblyInfo.cs.
+    // The exact argument list of every tool. It also pins the schema against the fault from #73:
+    // an injected service (printer, jobLog, journal, loggers) listed as an argument. See AssemblyInfo.cs.
     [Theory]
+    [InlineData("list_jobs", "limit,before,query")]
+    [InlineData("get_job", "id")]
+    [InlineData("reprint_job", "id,source")]
     [InlineData("print", "content,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]
     [InlineData("beep", "count,duration")]

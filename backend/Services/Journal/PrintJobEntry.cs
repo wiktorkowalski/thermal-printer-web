@@ -13,6 +13,9 @@ namespace ThermalPrinterWeb.Services.Journal;
 internal sealed record PrintJobEntry
 {
     internal const int MaxTitleLength = 100;
+
+    // What the search sees of one job. The migration that fills PrintJobTexts for old rows repeats this number.
+    internal const int MaxSearchTextLength = 10_000;
     internal const string ImageHashPrefix = "sha256:";
     private const string ImageHashLengthMarker = ";chars=";
 
@@ -93,10 +96,12 @@ internal sealed record PrintJobEntry
             RequestBytes = Request?.Length ?? 0,
             AppVersion = AppVersion,
             ReprintOf = Trace.ReprintOf,
+            Text = plainText is null || isReprint ? null : new PrintJobText { JobId = Trace.Id, Text = CutAtCharacter(plainText, MaxSearchTextLength) },
             Payload = new PrintJobPayload
             {
                 JobId = Trace.Id,
-                Request = Request,
+                // A reprint over MCP comes with a JSON-RPC body: it holds the id only, and a caller can pad it.
+                Request = isReprint ? null : Request,
                 Bytes = isReprint ? null : Trace.Bytes,
                 Blocks = content is null || isReprint ? null : BlocksJson(content),
                 Options = outcome?.Options is null || isReprint ? null : JsonSerializer.Serialize(outcome.Options, ApiJson),
@@ -164,6 +169,15 @@ internal sealed record PrintJobEntry
         var texts = content.Where(block => block is { Type: ContentType.Text, Content: not null }).Select(block => block.Content);
         var text = string.Join('\n', texts);
         return text.Length == 0 ? null : text;
+    }
+
+    // The start of a text. The cut never splits a surrogate pair.
+    internal static string CutAtCharacter(string text, int maxLength)
+    {
+        if (text.Length <= maxLength)
+            return text;
+
+        return text[..(char.IsHighSurrogate(text[maxLength - 1]) ? maxLength - 1 : maxLength)];
     }
 
     private static string? Cut(string? value, int maxLength)
