@@ -12,6 +12,7 @@ internal static class TestHttp
     public const string PrintJson = """{"content":[{"type":"Text","content":"x"}]}""";
 
     private const string McpUrl = "/mcp";
+    private const string SseData = "data: ";
 
     public static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
@@ -34,13 +35,12 @@ internal static class TestHttp
     // One JSON-RPC call. Returns the "result" member of the answer.
     public static async Task<JsonElement> McpAsync(this HttpClient client, string method, string? paramsJson = null, string? userAgent = null)
     {
-        const string sseData = "data: ";
         var body = $$"""{"jsonrpc":"2.0","id":1,"method":"{{method}}"{{(paramsJson is null ? "" : $",\"params\":{paramsJson}")}}}""";
         var (status, text) = await client.SendJsonAsync(HttpMethod.Post, McpUrl, body, userAgent);
         Assert.Equal(HttpStatusCode.OK, status);
 
         // Streamable HTTP answers as one SSE event.
-        var data = text.Split('\n').Single(line => line.StartsWith(sseData, StringComparison.Ordinal))[sseData.Length..];
+        var data = text.Split('\n').Single(line => line.StartsWith(SseData, StringComparison.Ordinal))[SseData.Length..];
         return JsonDocument.Parse(data).RootElement.GetProperty("result");
     }
 

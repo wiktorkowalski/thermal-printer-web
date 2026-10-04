@@ -9,7 +9,7 @@ namespace ThermalPrinterWeb.Tests;
 // The real PrinterService against loopback ports: no test reaches the printer.
 public sealed class PrinterFaultTests
 {
-    private const string Loopback = LoopbackPrinterApp.Loopback;
+    private const string Loopback = TestApp.Loopback;
     private const string UnreachableStatusJson =
         """{"reachable":false,"online":false,"coverOpen":false,"paperOut":false,"paperLow":false,"raw":null,"ready":false,"notReadyReason":"printer unreachable"}""";
     private const string PrintJson = TestHttp.PrintJson;
