@@ -204,11 +204,11 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 | Status | `type` | Meaning |
 |--------|--------|---------|
 | 200 | - | Printed |
-| 400 | `validation` | The payload is at fault; a retry fails again. A block fault reads `Block N (Type): reason`, N from 0. A body that does not bind starts with its JSON path (`$.content[0].type: ...`). |
+| 400 | `validation` | The payload is at fault; a retry fails again. A block fault reads `Block N (Type): reason`, N from 0. A block type number with no name reads `Block N (99): type is not supported`. A body that does not bind reads `<JSON path>: malformed JSON, wrong JSON type or unknown name` (path such as `$.content[0].type`); the text names no CLR type. |
 | 503 | `printer` | Printer fault, fixed text: `Printer not ready: <reason>`, `Printer unreachable` or `Print failed: internal error`. Details stay in the server log. |
 | 503 | `busy` | Too many image jobs wait for a decode. Header `Retry-After: 5`. The job is fine; send it again. |
 
-- 415: the `Content-Type` is not `application/json`. The body is a `PrintResponse` with type `validation` (`PrintResponseClientErrorFactory`).
+- 415: the `Content-Type` is not `application/json`. The body is a `PrintResponse` with type `validation` and the error `Content-Type must be application/json` (`PrintResponseClientErrorFactory`).
 - 413: the body is over the request body limit. Kestrel rejects it; the controller does not run and no test covers the body.
 - `GET /api/printer/status` answers a `PrinterStatus` body: with 200, or with 503 when the printer is unreachable.
 - `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
@@ -267,7 +267,7 @@ Over a limit the job gets a 400 (413 for the request body). The constants are th
 | `print` | `content` (needed), `options`, `source` |
 | `beep` | `count`, `duration` (1-9, default 1) |
 
-- Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`, and the answer shows a valid example call.
+- Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style. Keep it in line with the tool descriptions.
 
