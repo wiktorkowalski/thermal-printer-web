@@ -5,6 +5,10 @@
 export const TEXT_MAX_LENGTH = 10_000;
 export const TEXT_MAX_LINES = 500;
 
+// backend/Models/TextSize.cs: Min, Max (the width and the height multiplier of a text)
+export const TEXT_SIZE_MIN = 1;
+export const TEXT_SIZE_MAX = 8;
+
 // backend/Services/Printing/Handlers/SeparatorBlockHandler.cs: MaxLength
 export const SEPARATOR_MAX_LENGTH = 64;
 

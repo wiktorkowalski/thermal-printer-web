@@ -12,9 +12,9 @@ export function StaticBlock({ block }: { block: PrintContent }) {
   const align = (block.alignment ?? DEFAULT_ALIGNMENT).toLowerCase() as "left" | "center" | "right";
   switch (block.type) {
     case "Text":
-      return <PaperText text={block.content ?? ""} style={block.style} alignment={block.alignment} />;
+      return <PaperText text={block.content ?? ""} style={block.style} size={block.size} alignment={block.alignment} />;
     case "Separator":
-      return <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(block.separatorLength ?? 32)} style={block.style} alignment={block.alignment} />;
+      return <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(block.separatorLength ?? 32)} style={block.style} size={block.size} alignment={block.alignment} />;
     case "Image":
       // A job from the print journal: the server gives a hash in place of the picture.
       if (block.content?.startsWith(IMAGE_HASH_PREFIX)) {

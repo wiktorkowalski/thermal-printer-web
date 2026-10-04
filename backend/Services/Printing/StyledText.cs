@@ -7,11 +7,18 @@ namespace ThermalPrinterWeb.Services.Printing;
 // a trailing LF in reverse / upside-down toggles.
 internal static class StyledText
 {
-    public static List<byte[]> Build(BlockContext ctx, string text, List<Models.PrintStyle>? styles)
+    private const EscPrintStyle DoubleSize = EscPrintStyle.DoubleWidth | EscPrintStyle.DoubleHeight;
+
+    private static readonly TextScale NormalScale = new(1, 1);
+
+    public static List<byte[]> Build(BlockContext ctx, string text, List<Models.PrintStyle>? styles, Models.TextSize? size)
     {
         var e = ctx.Emitter;
+        // First: it rejects a size outside the range.
+        var scale = TextScale.Of(styles, size);
         var encoded = ctx.EncodeText(text);
-        ctx.AddPaper(PaperLength.TextDots(encoded, ctx.LineSpacing, styles));
+        var fontB = styles?.Contains(Models.PrintStyle.FontB) == true;
+        ctx.AddPaper(PaperLength.TextDots(encoded, ctx.LineSpacing, fontB, scale));
         List<byte[]> bytes = [];
         var hasReverse = styles?.Contains(Models.PrintStyle.ReverseMode) == true;
         var hasUpsideDown = styles?.Contains(Models.PrintStyle.UpsideDownMode) == true;
@@ -21,10 +28,20 @@ internal static class StyledText
         if (hasUpsideDown)
             bytes.Add(e.UpsideDownMode(true));
 
-        bytes.Add(e.SetStyles(MapPrintStyles(styles)));
+        // No size field: ESC ! n alone, with its two size bits. A block of an older caller keeps its bytes.
+        // With a size field: ESC ! n without the two size bits, then GS ! n. ESC ! sets the size too,
+        // so it must come first.
+        var sized = size is not null;
+        var escStyles = MapPrintStyles(styles);
+        bytes.Add(e.SetStyles(sized ? escStyles & ~DoubleSize : escStyles));
+        if (sized)
+            bytes.Add(scale.Command());
 
         bytes.Add([.. encoded, 0x0A]); // trailing LF
 
+        // The next block starts at 1 x 1: GS ! 0, and ESC ! 0 clears the size bits as well.
+        if (sized)
+            bytes.Add(NormalScale.Command());
         bytes.Add(e.SetStyles(EscPrintStyle.None));
 
         if (hasUpsideDown)

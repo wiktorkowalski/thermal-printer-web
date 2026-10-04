@@ -203,6 +203,13 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Text styles**: Bold, Italic, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode, UpsideDownMode
 
+**Text size**: `"size": { "width": 3, "height": 3 }` on a Text or Separator block. Each axis is a whole number from 1 to 8; an axis that is left out is 1.
+- A block with `size` ignores `DoubleWidth` and `DoubleHeight`: the size wins. `FontB` and the other styles still apply.
+- A block without `size` prints with the same bytes as before the field (`ESC ! n` only).
+- Bytes of a block with `size`: `ESC ! n` (styles without the two double bits), `GS ! n`, the text, `GS ! 0`, `ESC ! 0`. So the next block starts at 1 x 1.
+- The paper estimate counts the columns and the line height of the size (`PaperLength`, `TextScale`).
+- The editor stores a size up to 2 x 2 as the two styles and a larger one as `size` (`textSizePatch` in `editor/document.ts`).
+
 **Alignment**: Left, Center (default), Right
 
 **Barcode types** (JSON names): UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF, CODABAR, GS1_128, GS1_DATABAR_OMNIDIRECTIONAL
@@ -288,6 +295,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
 | `options.defaultLineSpacing`, `options.feedLinesAfterPrint` | 0-255 | `PrinterService.MaxLineSpacing`, `MaxFeedBeforeCut` |
 | Text block | 10,000 characters, 500 lines | `TextBlockHandler.MaxLength`, `MaxLines` |
+| Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
 | Barcode height | 1-255 dots | `BarcodeBlockHandler.MinHeightInDots`, `MaxHeightInDots` |
@@ -390,16 +398,18 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 **Paper**: 80mm thermal paper roll
 
-**Characters per line by style:**
-| Style | Chars/Line | Notes |
-|-------|------------|-------|
-| Normal (Font A) | 48 | Default font (tested) |
-| FontB | 64 | Smaller font, more chars |
-| DoubleWidth | 24 | Half the normal chars |
-| DoubleWidth + DoubleHeight | 24 | Large text |
-| FontB + DoubleWidth | 32 | |
+**Characters per line** = 576 dots / (cell width x width multiplier), rounded down. The Font A cell is 12 dots wide, the Font B cell 9. The height multiplier does not change the columns.
 
-Source of truth: `frontend/src/lib/printer-constants.ts`. The backend repeats 48 and 64 in `PaperLength.cs` and in the MCP texts.
+| Width multiplier | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|------------------|---|---|---|---|---|---|---|---|
+| Font A | 48 | 24 | 16 | 12 | 9 | 8 | 6 | 6 |
+| FontB | 64 | 32 | 21 | 16 | 12 | 10 | 9 | 8 |
+
+- Read from paper: Font A at 1, 2, 3, 4 and 8; Font B at 1 and 2. The other values are the same division.
+- `DoubleWidth` is width 2, `DoubleHeight` is height 2. A `size` gives 1 to 8 for each axis (`GS ! n`); width and height are independent. Polish letters are correct at 3 x 3 (read from paper).
+- Line pitch: 29 dots at height 1, plus 24 dots for each step of the height.
+
+Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 
 A longer line wraps in the middle of a word. Break lines in the content.
 

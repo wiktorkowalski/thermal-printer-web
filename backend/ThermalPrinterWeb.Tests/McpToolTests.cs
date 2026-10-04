@@ -98,7 +98,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         AssertEveryPropertyDescribed(block, "content[]");
         AssertEveryPropertyDescribed(properties.GetProperty("options"), "options");
         Assert.All(
-            ["qrCodeOptions", "barcodeOptions", "imageOptions"],
+            ["qrCodeOptions", "barcodeOptions", "imageOptions", "size"],
             options => AssertEveryPropertyDescribed(block.GetProperty("properties").GetProperty(options), options));
 
         // The numbers a caller needs to avoid a mid-word wrap.
@@ -135,6 +135,20 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.Contains($"at most {LineFeedBlockHandler.MaxLines}.", Description("lines"));
         Assert.Contains($"at most {SeparatorBlockHandler.MaxLength}.", Description("separatorLength"));
         Assert.Contains($"1 to {ImageBlockHandler.MaxPrintHeight}.", imageOptions.GetProperty("maxHeight").GetProperty("description").GetString());
+
+        // The size range, and the characters per line of every width.
+        var range = $"{TextSize.Min} to {TextSize.Max}";
+        var size = block.GetProperty("size").GetProperty("properties");
+        var width = size.GetProperty("width").GetProperty("description").GetString();
+        var widths = Enumerable.Range(TextSize.Min, TextSize.Max).ToList();
+        Assert.Contains($"multipliers of {range}", Description("size"));
+        Assert.Contains($"from {range}.", width);
+        Assert.Contains($"from {range}.", size.GetProperty("height").GetProperty("description").GetString());
+        Assert.Contains($"rounded down: {string.Join(", ", widths.Select(w => PaperLength.Columns(fontB: false, w)))} ", width);
+        Assert.Contains($"64 / width: {string.Join(", ", widths.Select(w => PaperLength.Columns(fontB: true, w)))})", width);
+        Assert.Contains($"a headline of {PaperLength.Columns(fontB: false, 3)} characters per line", Description("size"));
+        Assert.Contains($"with \"size\":{{\"width\":3,\"height\":3}} a headline holds {PaperLength.Columns(fontB: false, 3)})", tool.GetProperty("description").GetString());
+        Assert.Contains($"a size of {range})", PrinterTools.ServerInstructions);
     }
 
     [Theory]

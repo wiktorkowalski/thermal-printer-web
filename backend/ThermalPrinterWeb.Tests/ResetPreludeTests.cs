@@ -1,8 +1,8 @@
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services.Printing;
+using static ThermalPrinterWeb.Tests.Support.TestBlocks;
 
 namespace ThermalPrinterWeb.Tests;
 
@@ -12,12 +12,8 @@ public sealed class ResetPreludeTests
 {
     private const string Polish = "Zażółć gęślą jaźń";
 
-    private static readonly byte[] Reset = [0x1B, 0x40];
-    private static readonly byte[] SelectPc852 = [0x1B, 0x74, 18];
     private static readonly byte[] SelectPc437 = [0x1B, 0x74, 0];
     private static readonly byte[] ResetLineSpacing = [0x1B, 0x32];
-
-    private static PrintContent Text(string content = "ok") => new() { Type = ContentType.Text, Content = content };
 
     private static int Count(ReadOnlySpan<byte> bytes, ReadOnlySpan<byte> command) => bytes.Count(command);
 
@@ -33,8 +29,7 @@ public sealed class ResetPreludeTests
         Assert.Single(commands, command => command.AsSpan().SequenceEqual(Reset));
         Assert.Single(commands, IsCodePageCommand);
         // The text is in the code page that the prelude selects.
-        var polish = Encoding.GetEncoding(852).GetBytes(Polish);
-        Assert.Contains(commands, command => command.AsSpan().StartsWith(polish));
+        Assert.Contains(commands, command => command.AsSpan().StartsWith(Pc852Bytes(Polish)));
     }
 
     [Fact]
@@ -74,7 +69,7 @@ public sealed class ResetPreludeTests
         // The block switches the page between the two texts.
         var switchAt = commands.FindIndex(command => command.AsSpan().SequenceEqual(SelectPc437));
         Assert.True(commands.FindIndex(command => command.AsSpan().StartsWith("after"u8)) > switchAt);
-        Assert.True(commands.FindIndex(command => command.AsSpan().StartsWith(Encoding.GetEncoding(852).GetBytes(Polish))) < switchAt);
+        Assert.True(commands.FindIndex(command => command.AsSpan().StartsWith(Pc852Bytes(Polish))) < switchAt);
     }
 
     // The reset of the next job does what ESC 2 did at the end of this one.
@@ -115,17 +110,17 @@ public sealed class ResetPreludeTests
             options = new { codePage = "PC852", defaultLineSpacing = 40 }
         });
 
-        var (printStatus, printBody) = await client.SendJsonAsync(HttpMethod.Post, "/api/printer", json);
+        var (printStatus, printBody) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.PrintUrl, json);
         var first = await printer.NextJobAsync();
         var job = Assert.Single(await app.JournalRowsAsync());
-        var (reprintStatus, reprintBody) = await client.SendJsonAsync(HttpMethod.Post, $"/api/printer/jobs/{job.Id}/reprint");
+        var (reprintStatus, reprintBody) = await client.SendJsonAsync(HttpMethod.Post, $"{TestHttp.PrintUrl}/jobs/{job.Id}/reprint");
         var second = await printer.NextJobAsync();
 
         Assert.True(printStatus == HttpStatusCode.OK, printBody);
         Assert.True(reprintStatus == HttpStatusCode.OK, reprintBody);
         Assert.Equal(first, second);
         Assert.Equal(first, job.Payload.Bytes);
-        Assert.Equal([.. Reset, .. SelectPc852, 0x1B, 0x33, 40], first[..8]);
+        Assert.Equal([.. Prelude, 0x1B, 0x33, 40], first[..8]);
         Assert.Equal(1, Count(first, Reset));
         Assert.Equal(1, Count(second, Reset));
         Assert.Empty(printer.Jobs);
@@ -137,7 +132,7 @@ public sealed class ResetPreludeTests
     {
         var bytes = await TestBlocks.JobBytesAsync([], new PrintOptions { AutoCut = false });
 
-        Assert.Equal([.. Reset, .. SelectPc852], bytes);
+        Assert.Equal(Prelude, bytes);
     }
 
     [Fact]

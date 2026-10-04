@@ -8,7 +8,7 @@ namespace ThermalPrinterWeb.Tests.Support;
 internal sealed class WirePrinter : IAsyncDisposable
 {
     // Online, cover closed, paper present.
-    private const byte ReadyStatus = 0x12;
+    public const byte ReadyStatus = 0x12;
 
     // DLE EOT n: the first two bytes of a status query.
     private const byte Dle = 0x10;

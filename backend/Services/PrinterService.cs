@@ -211,8 +211,6 @@ internal sealed class PrinterService(
             ctx.Add(e.FullCutAfterFeed(feedLines));
         }
 
-        // No ESC 2 after a custom line spacing: the next job starts with ESC @.
-
         PrintJobTrace.Current?.PaperDots = ctx.PaperDots;
         return ctx.Output;
     }

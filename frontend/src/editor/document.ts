@@ -23,8 +23,10 @@ import {
   MAX_LINE_SPACING,
   MAX_PAPER_DOTS,
   MAX_REQUEST_BYTES,
+  TEXT_SIZE_MAX,
+  TEXT_SIZE_MIN,
 } from "@/lib/printer-limits";
-import { DOTS_PER_MM } from "@/lib/paper";
+import { DOTS_PER_MM, DOUBLE_STYLES, textScale } from "@/lib/paper";
 import {
   errorText,
   validateBarcode,
@@ -114,6 +116,19 @@ export function createBlock(type: ContentType): Block {
   }
 }
 
+/**
+ * The fields that give a block this text size. Up to 2x the size is the DoubleWidth and
+ * DoubleHeight styles, the form of every saved job from before the size field. Above 2x
+ * it is `size`, with the two styles removed: the printer takes the size alone.
+ */
+export function textSizePatch(block: PrintContent, width: number, height: number): Pick<PrintContent, "style" | "size"> {
+  const style = (block.style ?? []).filter((s) => !DOUBLE_STYLES.includes(s));
+  if (width > 2 || height > 2) return { style, size: { width, height } };
+  if (width === 2) style.push("DoubleWidth");
+  if (height === 2) style.push("DoubleHeight");
+  return { style, size: undefined };
+}
+
 export function noteDocument(): EditorDocument {
   return {
     settings: { ...DEFAULT_SETTINGS },
@@ -174,6 +189,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return withBlocks(
         blocks.map((b) => {
           if (b.id !== action.id) return b;
+          // The two double styles are the size of the text: the toggle sets its axis, whatever form holds the size.
+          if (DOUBLE_STYLES.includes(action.style)) {
+            const { width, height } = textScale(b.style, b.size);
+            return action.style === "DoubleWidth"
+              ? { ...b, ...textSizePatch(b, width > 1 ? 1 : 2, height) }
+              : { ...b, ...textSizePatch(b, width, height > 1 ? 1 : 2) };
+          }
           const style = b.style ?? [];
           return {
             ...b,
@@ -243,6 +265,15 @@ export function fromPrintContent(content: PrintContent[]): Block[] {
 
 const inRange = (value: number, min: number, max: number) => value >= min && value <= max;
 
+/** The backend takes whole numbers from TEXT_SIZE_MIN to TEXT_SIZE_MAX; an axis that is left out is 1. */
+function sizeError(size: PrintContent["size"]): string | null {
+  if (size == null) return null;
+  const valid = (value: unknown) => value === undefined || (Number.isInteger(value) && inRange(value as number, TEXT_SIZE_MIN, TEXT_SIZE_MAX));
+  return typeof size === "object" && valid(size.width) && valid(size.height)
+    ? null
+    : `Text size must be whole numbers between ${TEXT_SIZE_MIN} and ${TEXT_SIZE_MAX}`;
+}
+
 /**
  * Returns an error message for a block that would fail or print wrong, else null.
  * Values come from saved drafts and templates too, so any number can be out of range.
@@ -253,7 +284,7 @@ export function blockError(block: PrintContent): string | null {
   if (block.content != null && typeof block.content !== "string") return "Content must be text";
   switch (block.type) {
     case ContentType.Text:
-      return message(validateText(block.content ?? ""));
+      return sizeError(block.size) ?? message(validateText(block.content ?? ""));
     case ContentType.Barcode: {
       if (!block.content) return null;
       const height = block.barcodeOptions?.heightInDots;
@@ -275,7 +306,7 @@ export function blockError(block: PrintContent): string | null {
       return message(validateImageContent(block.content));
     }
     case ContentType.Separator:
-      return message(validateSeparator(block.separatorChar ?? "-", block.separatorLength ?? CHARS_PER_LINE.normal));
+      return sizeError(block.size) ?? message(validateSeparator(block.separatorChar ?? "-", block.separatorLength ?? CHARS_PER_LINE.normal));
     case ContentType.LineFeed:
       return (block.lines ?? 1) > LINE_FEED_MAX_LINES ? `Too many lines: ${block.lines}. Max ${LINE_FEED_MAX_LINES} per line feed` : null;
     default:
