@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Journal;
 using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Controllers;
@@ -13,6 +14,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     private const string BusyRetryAfterSeconds = "5";
 
     [HttpPost]
+    [Journaled(PrintJobLog.HttpTransport)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status415UnsupportedMediaType)]
@@ -38,7 +40,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         }
 
         var result = await printerService.PrintAsync(content, request.Options);
-        jobLog.Write(PrintJobLog.HttpTransport, request.Source, result);
+        jobLog.Write(PrintJobLog.HttpTransport, request.Source, result, content, request.Options);
 
         if (result.Success)
             return Ok(new PrintResponse(true));

@@ -29,7 +29,7 @@ public static class PrinterTools
         + """{"type":"QRCode","content":"https://example.com"}]}""";
 
     private const string SourceDescription =
-        "Optional. Short name of the caller, for example 'claude-code'. It goes to the server log only and is not printed.";
+        "Optional. Short name of the caller, for example 'claude-code'. It goes to the server log and the print journal; it is not printed.";
 
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =
@@ -71,8 +71,9 @@ public static class PrinterTools
             throw new ToolArgumentException(PrintNoteName, missing);
         }
 
-        var result = await printer.PrintAsync(SimpleNote.Build(title, message, imageBase64));
-        jobLog.Write(PrintJobLog.McpTransport(PrintNoteName), source, result);
+        var content = SimpleNote.Build(title, message, imageBase64);
+        var result = await printer.PrintAsync(content);
+        jobLog.Write(PrintJobLog.McpTransport(PrintNoteName), source, result, content);
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 
@@ -113,7 +114,7 @@ public static class PrinterTools
             throw new ToolArgumentException(PrintName, "'content' is missing");
 
         var result = await printer.PrintAsync(content, options);
-        jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result);
+        jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result, content, options);
         return result.Success ? "Printed." : $"Not printed: {result.Error}";
     }
 

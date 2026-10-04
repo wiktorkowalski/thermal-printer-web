@@ -482,3 +482,6 @@ $RECYCLE.BIN/
 *.swp
 
 backend/wwwroot
+
+# The print journal of a Development run: it holds what was printed.
+backend/data/

@@ -25,6 +25,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrinterOptions.cs   # Printer:Address, Printer:ConnectTimeout, startup validation
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
+│   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
 │   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, DecodeQueue, CodePages
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
@@ -83,6 +84,7 @@ Located in `backend/` directory.
 **Key Dependencies**:
 - `ESCPOS_NET` - ESC/POS thermal printer protocol implementation
 - `SixLabors.ImageSharp` - Image processing and format conversion
+- `Microsoft.EntityFrameworkCore.Sqlite` - The print journal
 
 Versions are pinned in `backend/ThermalPrinterWeb.Api.csproj`.
 
@@ -181,7 +183,7 @@ The `POST /api/printer` endpoint accepts print jobs in two modes:
 { "content": [...], "options": {...} }
 ```
 
-Both modes take an optional `source`: a short name of the caller, for the log only.
+Both modes take an optional `source`: a short name of the caller, for the log and the journal. It is not printed.
 
 **Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage
 
@@ -218,7 +220,7 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 - **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Every line ending becomes LF, the only control byte that passes. A character the code page lacks prints as `?` or as a best-fit letter.
 - **QR code**: the data is stored as UTF-8 bytes, whatever the code page. A control character rejects the block; `\n` and `\r\n` are line breaks.
 - **Barcode**: printable ASCII only (0x20-0x7E); any other character rejects the block. ESCPOS_NET checks length and characters per symbology.
-- **Image**: one decode runs at a time (`DecodeQueue`). The number of waiting jobs and the wait time have limits (`ImageBlockHandler.MaxDecodeWaiters`, `DecodeWaitTimeout`); past them the job gets 503 `busy`.
+- **Image**: one decode runs at a time (`DecodeQueue`). The number of waiting jobs and the wait time have limits (`ImageBlockHandler.MaxDecodeWaiters`, `DecodeWaitTimeout`); past them the job gets 503 `busy`. A JPEG must reach its EOI marker: a truncated JPEG is a 400. Bytes after EOI are ignored. A PNG without its IEND chunk still prints.
 
 ### Limits
 
@@ -255,6 +257,45 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 - `source` and `userAgent` are caller text: `LogSafeText.Clean` cuts and cleans them. Use it for any caller text in a log.
 - The reason of a failure is logged once, where it happens. Do not log block content: the endpoint is public.
 - The web editor sends `source` `web/note`, `web/template` or `web/receipt`.
+
+### Journal
+
+The print journal stores every print job in SQLite (`backend/Services/Journal/`, EF Core). It only writes: no HTTP endpoint and no MCP tool reads it (issues #51, #52). Read it with `sqlite3` on the host.
+
+**Settings** (`JournalOptions`):
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `Journal:DataPath` (env `Journal__DataPath`, or `DATA_PATH`) | `data` | Directory of `journal.db`. A relative path is under the content root: `/app/data` in the container, `backend/data` in Development (git-ignored). Empty turns the journal off. |
+| `Journal:MaxDatabaseBytes` | 1 GiB | The database with its write-ahead log. At this size the journal stops. |
+| `Journal:MinFreeBytes` | 512 MiB | Free space on the disk of the journal. Below it the journal stops. |
+| `Journal:WriteTimeout` | 10 s | One write. |
+
+**Rules**:
+- A journal fault never fails or delays a print. `PrintJournalMiddleware` copies the request after the response is complete. One background writer (`PrintJournal`) stores it. A failed write is one Warning.
+- A journal problem never stops the app. A bad setting or a path that cannot be made turns the journal off with one Warning.
+- No row is deleted. At a size limit the journal stops with one Warning (`Journal is full`); prints go on. It starts again when there is space.
+- At most 16 entries or 64 MiB wait for the writer (`PrintJournal.MaxPendingJobs`, `MaxPendingBytes`). Past that a new entry is dropped with a Warning.
+- Nothing from the journal goes to a log. The database file has mode 600; a directory the app creates has mode 700.
+- Startup logs one line: `Journal: <path>`, or the reason the journal is off. In a container, a directory that is not a volume also logs a Warning: the journal is lost when the container is replaced.
+
+**What is journaled**:
+- Every `POST /api/printer`, whatever the result: also a body that does not bind (400), a 415 and a 413 (no body stored for a 413).
+- Every MCP `print` and `print_note` call that reaches the tool body. An MCP call with wrong arguments is not a job.
+- Not journaled: beep, status, other MCP calls.
+
+**Schema** (migrations in `Services/Journal/Migrations`; table `__EFMigrationsHistory` is the schema version):
+- `PrintJobs`: the small facts. `Id` (GUID v7), `CreatedAt` (UTC), `DurationMs`, `Transport`, `Source`, `UserAgent`, `RemoteIp`, `Result`, `Error`, `HttpStatus`, `Title`, `BlockCount`, `ByteCount`, `PaperDots`, `PrinterStatus` (JSON), `RequestBytes`, `AppVersion`.
+- `PrintJobPayloads`: the large values, one row per job. `Request` (the body as it came), `Bytes` (the ESC/POS job), `Blocks` and `Options` (API JSON), `PlainText`, `Headers` (JSON), `Exception`, `Log` (the log lines of the request).
+- `Result` is the number of `JobResult`: 0 Printed, 1 Validation, 2 Printer, 3 Busy, 4 Fault. Keep the numbers; add new ones at the end.
+- `Blocks` holds `sha256:<hex>;chars=<n>` in place of an image: the hash of the base64 text. The picture is in `Request`.
+- `Headers` holds `[redacted]` for a header whose name has `auth`, `cookie`, `token`, `secret`, `password`, `key`, `jwt`, `session` or `signature` in it.
+- `RemoteIp` is the address of the connection, so behind a proxy it is the proxy. The caller address is in `Headers` (`CF-Connecting-IP`, `X-Forwarded-For`).
+- `AppVersion` ends with `+<commit>` in an image that CI built (`GIT_SHA` build argument).
+
+**To add a fact to the journal**: set it on `PrintJobTrace.Current` where the code knows it, map it in `PrintJobEntry.ToRow`, add the column with a new migration (the command is in `JournalDbContext.cs`).
+
+**Tests**: every test host gets its own journal directory under the temp directory (`TestApp.JournalDirectory`) and deletes it. `app.JournalRowsAsync()` waits for the writer and reads the rows.
 
 ## MCP
 

@@ -3,3 +3,5 @@
 .DS_Store
 *.suo
 *.user
+# The print journal of a Development run must not get into an image.
+backend/data

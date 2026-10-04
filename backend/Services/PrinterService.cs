@@ -5,6 +5,7 @@ using ESCPOS_NET.Emitters;
 using ESCPOS_NET.Utilities;
 using Microsoft.Extensions.Options;
 using ThermalPrinterWeb.Models;
+using ThermalPrinterWeb.Services.Journal;
 using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Services;
@@ -56,15 +57,20 @@ internal sealed class PrinterService(
 
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
+        // Null outside a journaled request. The journal stores what this method learns about the job.
+        var trace = PrintJobTrace.Current;
         try
         {
             // Build first: it needs no printer, so a bad payload is reported as such
             // even while the printer is off.
             var byteContent = await BuildDocumentAsync(content, options);
+            var job = ByteSplicer.Combine(byteContent.ToArray());
+            trace?.Bytes = job;
 
             // Fire-and-forget writes buffer even when the printer can't print (cover open,
             // paper out), so a job would falsely report success. Refuse instead of lying.
             var status = await GetStatusAsync();
+            trace?.Status = status;
             if (!status.Ready)
             {
                 // An unreachable printer is logged in GetStatusAsync, with the exception.
@@ -78,7 +84,6 @@ internal sealed class PrinterService(
                 return PrintResult.PrinterFault($"Printer not ready: {status.NotReadyReason}");
             }
 
-            var job = ByteSplicer.Combine(byteContent.ToArray());
             if (_endpoint is not { } endpoint)
             {
                 logger.LogInformation("No printer configured: print job of {ByteCount} bytes not sent", job.Length);
@@ -100,6 +105,7 @@ internal sealed class PrinterService(
             {
                 // The status read passed, then the connection for the job failed: the job is lost.
                 logger.LogError(ex, "Print failed: no connection to the printer at {Address}", endpoint);
+                trace?.Exception = ex;
                 return PrintResult.PrinterFault(UnreachableError);
             }
 
@@ -119,6 +125,7 @@ internal sealed class PrinterService(
         {
             // Not a printer fault and not the payload: a fault in this service.
             logger.LogError(ex, "Print failed");
+            trace?.Exception = ex;
             return PrintResult.PrinterFault(InternalError);
         }
     }
@@ -203,6 +210,7 @@ internal sealed class PrinterService(
         if (options?.DefaultLineSpacing != null)
             ctx.Add(e.ResetLineSpacing());
 
+        PrintJobTrace.Current?.PaperDots = ctx.PaperDots;
         return ctx.Output;
     }
 
