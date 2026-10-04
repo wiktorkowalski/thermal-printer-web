@@ -919,16 +919,19 @@ public sealed class McpJournalDeleteTests
         Assert.Equal((0, 0, 0), await app.RowCountsAsync());
     }
 
-    // A journal file from before the delete tools has no auto_vacuum mode. The first start writes it again in the mode
-    // "incremental" and keeps its rows.
+    // A journal file from before the delete tools has no auto_vacuum mode. The start of the app leaves it as it is.
+    // The first delete writes it again in the mode "incremental", makes it smaller and keeps the other rows.
     [Fact]
-    public async Task Open_FileWithoutTheAutoVacuumMode_GetsTheModeAndKeepsItsRows()
+    public async Task FileWithoutTheAutoVacuumMode_TheFirstDeleteGivesItTheModeAndKeepsTheOtherRows()
     {
         var directory = TestApp.NewJournalDirectory();
         Guid id;
+        Guid keptId;
         await using (var first = new App { JournalDirectory = directory })
         {
-            id = (await PrintAsync(first, first.CreateClient(), "Kept row")).Id;
+            var firstClient = first.CreateClient();
+            keptId = (await PrintAsync(first, firstClient, "Kept row")).Id;
+            id = (await PrintAsync(first, firstClient, string.Join('\n', Enumerable.Repeat(new string('x', 47), 400)))).Id;
             await using var db = first.JournalDb();
             await db.Database.OpenConnectionAsync();
             await db.Database.ExecuteSqlRawAsync("PRAGMA auto_vacuum=NONE;");
@@ -943,15 +946,31 @@ public sealed class McpJournalDeleteTests
         await using var app = new App { JournalDirectory = directory + "-copy" };
         var client = app.CreateClient();
 
-        Assert.Equal(id, Assert.Single(await app.JournalRowsAsync()).Id);
+        Assert.Equal(2, (await app.JournalRowsAsync()).Count);
+        var databasePath = Path.Combine(app.JournalDirectory, "journal.db");
+        var sizeBefore = new FileInfo(databasePath).Length;
+        await using (var db = app.JournalDb())
+        {
+            await db.Database.OpenConnectionAsync();
+            Assert.Equal(0L, await AutoVacuumAsync(db));
+        }
+
+        AssertCounts(await DeleteAsync(client, DeleteJob, Arguments(id: id)), jobs: 1, reprints: 0);
+
+        Assert.Equal(keptId, Assert.Single(await app.JournalRowsAsync()).Id);
         await using (var db = app.JournalDb())
         {
             await db.Database.OpenConnectionAsync();
             Assert.Equal(2L, await AutoVacuumAsync(db));
         }
 
+        Assert.InRange(new FileInfo(databasePath).Length, 1, sizeBefore - 1);
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Level >= LogLevel.Warning && entry.Category == JournalCategory);
-        AssertCounts(await DeleteAsync(client, DeleteJob, Arguments(id: id)), jobs: 1, reprints: 0);
+
+        // In the mode now: the next delete takes the free pages only.
+        AssertCounts(await DeleteAsync(client, DeleteJob, Arguments(id: keptId)), jobs: 1, reprints: 0);
+        Assert.Equal((0, 0, 0), await app.RowCountsAsync());
+        Assert.DoesNotContain(app.Logs.Entries, entry => entry.Level >= LogLevel.Warning && entry.Category == JournalCategory);
 
         static async Task<long> AutoVacuumAsync(JournalDbContext db)
         {

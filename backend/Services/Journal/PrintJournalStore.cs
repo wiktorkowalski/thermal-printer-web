@@ -40,8 +40,7 @@ internal interface IPrintJournalStore
 // Not a fault of the storage: a limit from JournalOptions is reached. The message names the limit and holds no job content.
 internal sealed class JournalFullException(string message) : Exception(message);
 
-internal sealed class SqlitePrintJournalStore(
-    JournalDatabase database, IOptions<JournalOptions> options, ILogger<SqlitePrintJournalStore> logger) : IPrintJournalStore
+internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions<JournalOptions> options) : IPrintJournalStore
 {
     private const string WriteAheadLogSuffix = "-wal";
     private const string CutWriteAheadLog = "PRAGMA wal_checkpoint(TRUNCATE);";
@@ -60,31 +59,14 @@ internal sealed class SqlitePrintJournalStore(
         CreateFile(path);
 
         await using var db = database.CreateContext();
-        // One connection for all of it: the auto_vacuum setting of a file with tables takes effect in the VACUUM of the same connection.
+        // One connection: the setting is of the connection until the first table is made.
         await db.Database.OpenConnectionAsync(cancellationToken);
         // Before the first table: a new file is made in this mode. It lets a delete give its pages back (CompactAsync).
+        // On a file with tables this does nothing: the first delete brings that file into the mode.
         await db.Database.ExecuteSqlRawAsync(SetIncrementalAutoVacuum, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         // Stays set in the database file. A reader over ssh does not block the writer.
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
-
-        try
-        {
-            // A file from before this mode: one VACUUM writes it again in the mode. Once per file.
-            // It needs free disk space of about the size of the file.
-            if (await AutoVacuumModeAsync(db, cancellationToken) != IncrementalAutoVacuum)
-            {
-                await db.Database.ExecuteSqlRawAsync(SetIncrementalAutoVacuum, cancellationToken);
-                await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
-                await db.Database.ExecuteSqlRawAsync(CutWriteAheadLog, cancellationToken);
-            }
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            // The journal works without the mode; the next start tries again.
-            logger.LogWarning(ex, "Journal: the database file did not get the auto_vacuum mode. A delete does not make the file smaller.");
-        }
-
         return path;
     }
 
@@ -125,10 +107,24 @@ internal sealed class SqlitePrintJournalStore(
 
     // A delete leaves free pages in the file; the file keeps its size. This takes the free pages off the end of the file:
     // the work is in proportion to the deleted rows, not to the database. The write-ahead log is cut after it.
+    // A file from before the auto_vacuum mode: one VACUUM writes it again in the mode, once per file. That one
+    // needs free disk space of about the size of the file. It is here and not at the start of the app:
+    // SQLite cannot stop a VACUUM, and the start has a time limit.
     public async Task CompactAsync(CancellationToken cancellationToken)
     {
         await using var db = database.CreateContext();
-        await db.Database.ExecuteSqlRawAsync("PRAGMA incremental_vacuum;", cancellationToken);
+        // One connection: the mode of a file with tables changes in the VACUUM of the connection that set it.
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        if (await AutoVacuumModeAsync(db, cancellationToken) == IncrementalAutoVacuum)
+        {
+            await db.Database.ExecuteSqlRawAsync("PRAGMA incremental_vacuum;", cancellationToken);
+        }
+        else
+        {
+            await db.Database.ExecuteSqlRawAsync(SetIncrementalAutoVacuum, cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("VACUUM;", cancellationToken);
+        }
+
         await db.Database.ExecuteSqlRawAsync(CutWriteAheadLog, cancellationToken);
     }
 
