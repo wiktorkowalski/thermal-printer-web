@@ -25,7 +25,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrinterOptions.cs   # Printer:Address, Printer:ConnectTimeout, startup validation
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, PaperLength, DecodeQueue, CodePages
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, DecodeQueue, CodePages
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -204,7 +204,7 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 | Status | `type` | Meaning |
 |--------|--------|---------|
 | 200 | - | Printed |
-| 400 | `validation` | The payload is at fault; a retry fails again. A block fault reads `Block N (Type): reason` or `Block N: reason`, N from 0. A block type number with no name reads `Block N (99): type is not supported`. A JSON value that does not parse or bind reads `<JSON path>: malformed JSON, wrong JSON type or unknown name` (path such as `$.content[0].type`); the text names no CLR type. |
+| 400 | `validation` | The payload is at fault; a retry fails again. A block fault reads `Block N (Type): reason` or `Block N: reason`, N from 0. A block type number with no name reads `Block N (99): type is not supported`. Any other enum number with no name reads `Block N (Type): alignment 99 is not a valid value; use Left, Center or Right` (`BlockEnums`). A JSON value that does not parse or bind reads `<JSON path>: malformed JSON, wrong JSON type or unknown name` (path such as `$.content[0].type`); the text names no CLR type. |
 | 503 | `printer` | Printer fault, fixed text: `Printer not ready: <reason>`, `Printer unreachable` or `Print failed: internal error`. Details stay in the server log. |
 | 503 | `busy` | Too many image jobs wait for a decode. Header `Retry-After: 5`. The job is fine; send it again. |
 
