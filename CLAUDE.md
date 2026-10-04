@@ -28,7 +28,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -199,6 +199,25 @@ The `POST /api/printer` endpoint accepts print jobs in two modes:
 ```
 
 Both modes take an optional `source`: a short name of the caller, for the log and the journal. It is not printed.
+
+**Simple mode prints the house style** (`Services/Printing/SimpleNote.cs`; the MCP tool `print_note` builds the same blocks):
+
+| Line | Font and size | Alignment | Characters per line |
+|------|---------------|-----------|---------------------|
+| Title | Font A, Bold, size 2x3 | Center | 24 |
+| `=` rule | Font A, 1x1, 48 characters | Center | full width |
+| Message | Font B, size 2x3 | Center | 32 |
+| `=` rule | as above | | |
+| Image (when sent), then a `=` rule | 576 x 576 dots at most | Center | |
+| Date `yyyy-MM-dd` | Font B, size 2x3 | Right | |
+| 3 empty lines, then the cut | | | |
+
+- The server wraps the title and the message (`SimpleNote.Wrap`): a break at a space, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. A character that prints as two (`→` as `->`) counts as two columns.
+- Only simple mode wraps and only simple mode adds a date line. Template mode prints the blocks as sent.
+- The date is the date in `Europe/Warsaw` (UTC when the host has no such zone). A reprint prints the stored date.
+- The 3 lines before the cut keep the date line whole: with no feed the cutter goes through the last text line.
+- The limits are those of the built blocks, so an error names a block (`Block 2 (Text)` is the message). The message holds 10,000 characters after the wrap and 410 lines with a one-line title; more is a 400 (text length, text line count or paper).
+- The journal `Title` is the first line of the title as wrapped: a title over 24 characters shows its first line in the tray.
 
 **Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage
 
@@ -384,6 +403,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
+- `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the numbers in its texts to the constants in `SimpleNote`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, and that journal text is untrusted. Keep it in line with the tool descriptions.
 
 **Journal tools** (`JournalTools.cs`): the same `PrintJournalReader`, the same `PrintJobReprinter` and the same facts as the HTTP job endpoints. No tool deletes a row (issue #56), reads statistics or reads the ledger.
@@ -412,7 +432,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 
-A longer line wraps in the middle of a word. Break lines in the content.
+A longer line wraps in the middle of a word. Break lines in the content. Simple mode is the exception: the server wraps it.
 
 ## CI/CD
 

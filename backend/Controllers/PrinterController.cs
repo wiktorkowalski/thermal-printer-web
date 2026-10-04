@@ -16,7 +16,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status415UnsupportedMediaType)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> Print([FromBody] PrintRequest request)
+    public async Task<IActionResult> Print([FromBody] PrintRequest request, [FromServices] TimeProvider clock)
     {
         List<PrintContent> content;
 
@@ -26,7 +26,7 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         }
         else if (!string.IsNullOrEmpty(request.Name) && !string.IsNullOrEmpty(request.Message))
         {
-            content = SimpleNote.Build(request.Name, request.Message, request.ImageBase64);
+            content = SimpleNote.Build(request.Name, request.Message, SimpleNote.Today(clock), request.ImageBase64);
         }
         else
         {
