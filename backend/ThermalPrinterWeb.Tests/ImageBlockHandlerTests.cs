@@ -439,6 +439,9 @@ public sealed class ImageBlockHandlerTests
             var stuffedByte = jpeg.AsSpan(firstScan).IndexOf<byte>([0xFF, 0x00]);
             Assert.True(stuffedByte >= 0);
 
+            data.Add($"{kind}: inside the tables", jpeg[..(firstScan / 2)]);
+            data.Add($"{kind}: before the first scan", jpeg[..firstScan]);
+            data.Add($"{kind}: 5 bytes before the end", jpeg[..^5]);
             data.Add($"{kind}: 1% of the picture data", jpeg[..(firstScan + (jpeg.Length - firstScan) / 100 + 16)]);
             data.Add($"{kind}: half of the bytes", jpeg[..(jpeg.Length / 2)]);
             data.Add($"{kind}: half of the last scan", jpeg[..(lastScan + (jpeg.Length - lastScan) / 2)]);
@@ -521,6 +524,8 @@ public sealed class ImageBlockHandlerTests
     [InlineData("FFD8 FFFFFF D9", true)]                                      // fill bytes before a marker
     [InlineData("FFD8 FF01 FFD9", true)]                                      // TEM has no length
     [InlineData("FFD8 0011 FFD9", true)]                                      // junk between segments: the decoders skip it
+    [InlineData("FFD8 FF02FFFF FFBF0000 FFD9", true)]                         // reserved codes 02-BF start no segment
+    [InlineData("FFD8 FFC00004AABB FFFE0004AABB FFD9", true)]                 // SOF0 and COM carry a length
     [InlineData("FFD8 FFD9 FFD8 FF", true)]                                   // nothing after EOI is read
     [InlineData("FFD8 FFE00004FFD9 FFD9", true)]                              // EOI bytes inside a segment, then the real EOI
     // Cut off.

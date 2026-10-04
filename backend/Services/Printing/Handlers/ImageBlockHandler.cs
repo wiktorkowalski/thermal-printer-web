@@ -176,6 +176,8 @@ internal sealed class ImageBlockHandler : IBlockHandler
     {
         const byte MarkerPrefix = 0xFF;
         const byte EndOfImage = 0xD9;
+        // SOF0. The markers that carry a length start here.
+        const byte FirstSegmentMarker = 0xC0;
 
         // After SOI (FF D8).
         var position = 2;
@@ -200,8 +202,9 @@ internal sealed class ImageBlockHandler : IBlockHandler
             if (marker == EndOfImage)
                 return true;
 
-            // No length field: FF 00 is a data byte FF, 01 is TEM, D0-D7 are restart markers, D8 is SOI.
-            if (marker is 0x00 or 0x01 or (>= 0xD0 and <= 0xD8))
+            // No length field: FF 00 is a data byte FF, D0-D7 are restart markers, D8 is SOI.
+            // 01-BF are TEM and reserved codes: no real segment, so a stray FF in junk bytes does not start one.
+            if (marker < FirstSegmentMarker || marker is >= 0xD0 and <= 0xD8)
                 continue;
 
             // Every other marker starts a segment: two bytes of length, which count themselves.
