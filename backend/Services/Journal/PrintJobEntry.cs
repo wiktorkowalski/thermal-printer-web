@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -13,6 +14,7 @@ internal sealed record PrintJobEntry
 {
     internal const int MaxTitleLength = 100;
     internal const string ImageHashPrefix = "sha256:";
+    private const string ImageHashLengthMarker = ";chars=";
 
     private const int HashChunkBytes = 4096;
 
@@ -66,6 +68,9 @@ internal sealed record PrintJobEntry
         var outcome = Trace.Outcome;
         var content = outcome?.Content;
         var plainText = content is null ? null : PlainText(content);
+        // A reprint row is a reference to the first job plus the small facts. It holds no second copy of the blocks,
+        // the text or the printer data: a caller that repeats a reprint must not fill the journal.
+        var isReprint = Trace.ReprintOf is not null;
 
         return new PrintJob
         {
@@ -87,14 +92,15 @@ internal sealed record PrintJobEntry
             PrinterStatus = Trace.Status is null ? null : JsonSerializer.Serialize(Trace.Status, ApiJson),
             RequestBytes = Request?.Length ?? 0,
             AppVersion = AppVersion,
+            ReprintOf = Trace.ReprintOf,
             Payload = new PrintJobPayload
             {
                 JobId = Trace.Id,
                 Request = Request,
-                Bytes = Trace.Bytes,
-                Blocks = content is null ? null : BlocksJson(content),
-                Options = outcome?.Options is null ? null : JsonSerializer.Serialize(outcome.Options, ApiJson),
-                PlainText = plainText,
+                Bytes = isReprint ? null : Trace.Bytes,
+                Blocks = content is null || isReprint ? null : BlocksJson(content),
+                Options = outcome?.Options is null || isReprint ? null : JsonSerializer.Serialize(outcome.Options, ApiJson),
+                PlainText = isReprint ? null : plainText,
                 Headers = JsonSerializer.Serialize(Headers, ApiJson),
                 Exception = Trace.Exception?.ToString(),
                 Log = Trace.LogLines() is { Length: > 0 } lines ? string.Join('\n', lines) : null
@@ -132,7 +138,25 @@ internal sealed record PrintJobEntry
             text = text[charsUsed..];
         }
 
-        return $"{ImageHashPrefix}{Convert.ToHexStringLower(hash.GetHashAndReset())};chars={base64.Length}";
+        return ImageHash(hash.GetHashAndReset(), base64.Length);
+    }
+
+    // The same hash from the UTF-8 bytes of the text, as they are in a stored request: no copy of the text.
+    internal static string ImageHashOfUtf8(ReadOnlySpan<byte> utf8Text)
+        => ImageHash(SHA256.HashData(utf8Text), Encoding.UTF8.GetCharCount(utf8Text));
+
+    private static string ImageHash(byte[] sha256, int textLength)
+        => $"{ImageHashPrefix}{Convert.ToHexStringLower(sha256)}{ImageHashLengthMarker}{textLength}";
+
+    // The length of the base64 text that an image hash stands for. Null: the text is not an image hash.
+    internal static int? ImageTextLength(string imageHash)
+    {
+        var at = imageHash.LastIndexOf(ImageHashLengthMarker, StringComparison.Ordinal);
+        return imageHash.StartsWith(ImageHashPrefix, StringComparison.Ordinal)
+            && at > 0
+            && int.TryParse(imageHash.AsSpan(at + ImageHashLengthMarker.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var length)
+                ? length
+                : null;
     }
 
     private static string? PlainText(List<PrintContent> content)

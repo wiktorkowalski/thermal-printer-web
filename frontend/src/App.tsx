@@ -38,10 +38,11 @@ function Shell() {
         label={status.label}
         detail={status.detail}
         onBeep={() => void beep()}
-        trayCount={tray.length}
+        trayCount={tray.jobs.length}
+        trayHasMore={tray.hasMore}
         onOpenTray={() => setTrayOpen(true)}
       />
-      <TrayDrawer open={trayOpen} onClose={closeTray} printer={printer} />
+      <TrayDrawer open={trayOpen} onClose={closeTray} printer={printer} tray={tray} />
       {beepError && (
         <div role="alert" className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 lg:bottom-10 rounded-xl bg-danger px-4 py-3 text-sm text-white shadow-lg">
           Beep failed. {beepError}

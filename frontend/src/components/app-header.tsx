@@ -22,7 +22,10 @@ interface AppHeaderProps {
   label: string;
   detail: string;
   onBeep: () => void;
+  /** Prints on the tray pages read so far. */
   trayCount: number;
+  /** The server has older prints than the pages read so far. */
+  trayHasMore: boolean;
   onOpenTray: () => void;
 }
 
@@ -48,7 +51,8 @@ export function ModeSwitch({ className }: { className?: string }) {
   );
 }
 
-export function AppHeader({ tone, label, detail, onBeep, trayCount, onOpenTray }: AppHeaderProps) {
+export function AppHeader({ tone, label, detail, onBeep, trayCount, trayHasMore, onOpenTray }: AppHeaderProps) {
+  const trayLabel = `${trayCount}${trayHasMore ? "+" : ""}`;
   const { theme, setTheme } = useTheme();
   const isDark =
     theme === "dark" || (theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -78,14 +82,14 @@ export function AppHeader({ tone, label, detail, onBeep, trayCount, onOpenTray }
           <button
             type="button"
             onClick={onOpenTray}
-            aria-label={`Open tray, ${trayCount} ${trayCount === 1 ? "print" : "prints"}`}
+            aria-label={`Open tray, ${trayLabel} ${trayCount === 1 && !trayHasMore ? "print" : "prints"}`}
             title="Tray: recent prints"
             className="relative flex size-11 items-center justify-center rounded-full border border-line hover:bg-well"
           >
             <Inbox className="size-[18px]" aria-hidden="true" />
             {trayCount > 0 && (
               <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 font-mono text-[10px] text-on-accent" aria-hidden="true">
-                {trayCount}
+                {trayLabel}
               </span>
             )}
           </button>

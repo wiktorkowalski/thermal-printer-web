@@ -9,6 +9,7 @@ namespace ThermalPrinterWeb.Services;
 public sealed class PrintJobLog(ILogger<PrintJobLog> logger, IHttpContextAccessor httpContext)
 {
     internal const string HttpTransport = "http";
+    internal const string ReprintTransport = "http:reprint";
 
     internal const int MaxSourceLength = 64;
     internal const int MaxUserAgentLength = 256;

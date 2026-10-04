@@ -29,6 +29,9 @@ internal sealed class PrintJobTrace
 
     public PrintJobOutcome? Outcome { get; set; }
 
+    // Set by the reprint endpoint: the job that was first sent.
+    public Guid? ReprintOf { get; set; }
+
     // Set by PrinterService.
     public byte[]? Bytes { get; set; }
     public int? PaperDots { get; set; }

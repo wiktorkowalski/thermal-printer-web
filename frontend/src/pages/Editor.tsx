@@ -52,12 +52,6 @@ function isTyping(target: EventTarget | null): boolean {
 
 const contentKey = (doc: EditorDocument) => JSON.stringify(toPrintContent(doc.blocks));
 
-/** First line of the first non-empty text block, for the tray. */
-function titleOf(doc: EditorDocument, fallback: string): string {
-  const text = doc.blocks.find((b) => b.type === ContentType.Text && (b.content ?? "").trim());
-  return text?.content?.trim().split("\n")[0].slice(0, 40) || fallback;
-}
-
 export default function Editor({ mode, printer }: { mode: EditorMode; printer: PrinterStatusState }) {
   const navigate = useNavigate();
   const [initial] = useState(() => initialState(mode));
@@ -137,9 +131,8 @@ export default function Editor({ mode, printer }: { mode: EditorMode; printer: P
     const invalid = contentError(printable, options, paperDots, locate);
     if (invalid) return notify(invalid, "error");
     if (printable.length === 0) return notify("Nothing to print yet. Write something on the paper.", "error");
-    const title = mode === "template" ? name.trim() || titleOf(doc, "Template") : titleOf(doc, "Note");
-    await sendJob({ content: printable, options, source: `web/${mode}` }, title, mode, locate);
-  }, [doc, printable, options, paperDots, printing, mode, name, notify, sendJob]);
+    await sendJob({ content: printable, options, source: `web/${mode}` }, locate);
+  }, [doc, printable, options, paperDots, printing, mode, notify, sendJob]);
 
   const saveHint = mode === "note" ? "Save as template" : null;
 

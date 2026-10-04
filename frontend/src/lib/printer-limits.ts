@@ -44,11 +44,14 @@ export const QR_MIN_MODULES = 21;
 export const QR_MAX_MODULES = 177;
 export const QR_MODULES_PER_BYTE = 25;
 
-// backend/Controllers/PrinterController.cs: BusyRetryAfterSeconds (the Retry-After of a busy answer)
+// backend/Controllers/PrintResultResponse.cs: BusyRetryAfterSeconds (the Retry-After of a busy answer)
 export const BUSY_RETRY_AFTER_SECONDS = 5;
 
+// backend/Services/Journal/PrintJobEntry.cs: ImageHashPrefix. A stored image block holds a hash that starts with it.
+export const IMAGE_HASH_PREFIX = "sha256:";
+
 // Stricter in the editor on purpose. The backend takes more, the editor does not offer it.
-// A file over this does not fit the draft and the tray in localStorage.
+// A file over this does not fit the draft in localStorage.
 export const EDITOR_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const EDITOR_IMAGE_MAX_MB = EDITOR_IMAGE_MAX_BYTES / 1024 / 1024;
 export const EDITOR_LINE_FEED_MAX_LINES = 20;

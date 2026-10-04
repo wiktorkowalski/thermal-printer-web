@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -198,8 +200,9 @@ public sealed class PrintJournalTests
         await app.JournalRowsAsync();
 
         await using var db = app.JournalDb();
-        var migrations = await db.Database.GetAppliedMigrationsAsync();
-        Assert.EndsWith("_InitialJournal", Assert.Single(migrations));
+        var migrations = (await db.Database.GetAppliedMigrationsAsync()).ToList();
+        Assert.EndsWith("_InitialJournal", migrations[0]);
+        Assert.Equal(db.Database.GetMigrations(), migrations);
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
         await db.Database.OpenConnectionAsync();
         await using var pragma = db.Database.GetDbConnection().CreateCommand();
@@ -245,7 +248,45 @@ public sealed class PrintJournalTests
             var rows = await second.JournalRowsAsync();
             Assert.Equal(["first", "second"], rows.Select(row => row.Title));
             await using var db = second.JournalDb();
-            Assert.Single(await db.Database.GetAppliedMigrationsAsync());
+            Assert.Equal(db.Database.GetMigrations(), await db.Database.GetAppliedMigrationsAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    // A database from before a migration: the app adds the new column and keeps the rows.
+    [Fact]
+    public async Task Start_DatabaseWithTheFirstSchema_KeepsItsRows()
+    {
+        const string OldId = "01999999-0000-7000-8000-000000000001";
+        var directory = TestApp.NewJournalDirectory();
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var options = new DbContextOptionsBuilder<JournalDbContext>()
+                .UseSqlite(JournalDbContext.ConnectionString(Path.Combine(directory, JournalOptions.DatabaseFileName)))
+                .Options;
+            await using (var old = new JournalDbContext(options))
+            {
+                await old.GetService<IMigrator>().MigrateAsync("InitialJournal");
+                await old.Database.ExecuteSqlAsync(
+                    $"INSERT INTO PrintJobs (Id, CreatedAt, DurationMs, Transport, Result, HttpStatus, Title, RequestBytes, AppVersion) VALUES ({OldId}, '2026-10-01 12:00:00', 1, 'http', 0, 200, 'old', 0, 'test')");
+                await old.Database.ExecuteSqlAsync($"INSERT INTO PrintJobPayloads (JobId, Headers) VALUES ({OldId}, {"{}"})");
+            }
+
+            await using var app = new App(null, ("Journal:DataPath", directory));
+            await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, PrintJson);
+
+            var rows = await app.JournalRowsAsync();
+            Assert.Equal(2, rows.Count);
+            Assert.Equal(Guid.Parse(OldId), rows[0].Id);
+            Assert.Equal("old", rows[0].Title);
+            Assert.Null(rows[0].ReprintOf);
+            await using var db = app.JournalDb();
+            Assert.Empty(await db.Database.GetPendingMigrationsAsync());
         }
         finally
         {

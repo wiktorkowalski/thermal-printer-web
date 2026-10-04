@@ -196,6 +196,9 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     [InlineData("beep", """{"count":99999999999}""", "an argument has the wrong JSON type")]
     public async Task ToolsCall_WrongShape_AnswersWithTheCorrectShape(string tool, string? arguments, string expectedProblem)
     {
+        // The host is shared: on a slow disk the rows of the tests before can still wait for the journal writer,
+        // and a full queue logs a Warning ("Journal is behind") in this test.
+        await app.JournalIdleAsync();
         app.Printer.Jobs.Clear();
         app.Logs.Entries.Clear();
 

@@ -9,6 +9,9 @@ namespace ThermalPrinterWeb.Services.Journal;
 internal sealed class JournaledAttribute : Attribute
 {
     public bool JobsOnly { get; init; }
+
+    // The endpoint takes no body (reprint): what a caller sends there is not stored.
+    public bool NoBody { get; init; }
 }
 
 // Collects one journal entry per request, around the endpoint: the request as it came,
@@ -36,7 +39,7 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
         var createdAt = DateTime.UtcNow;
         var started = Stopwatch.GetTimestamp();
         var trace = PrintJobTrace.Begin();
-        var buffered = TryBufferBody(context.Request, trace);
+        var buffered = !journaled.NoBody && TryBufferBody(context.Request, trace);
 
         Exception? fault = null;
         try

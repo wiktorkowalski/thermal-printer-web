@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { PrintContent } from "@/types/printer";
+import { IMAGE_HASH_PREFIX } from "@/lib/printer-limits";
 import { cn } from "@/lib/utils";
 import { DEFAULT_ALIGNMENT } from "@/lib/paper";
 import { PaperText } from "./paper-text";
@@ -15,6 +16,14 @@ export function StaticBlock({ block }: { block: PrintContent }) {
     case "Separator":
       return <PaperText text={(block.separatorChar || "=").slice(0, 1).repeat(block.separatorLength ?? 32)} style={block.style} alignment={block.alignment} />;
     case "Image":
+      // A job from the print journal: the server gives a hash in place of the picture.
+      if (block.content?.startsWith(IMAGE_HASH_PREFIX)) {
+        return (
+          <div style={{ textAlign: align }}>
+            <span className="text-paper-faint">[image]</span>
+          </div>
+        );
+      }
       return block.content ? (
         <div style={{ textAlign: align }}>
           <DitheredImage base64={block.content} options={block.imageOptions} />

@@ -72,6 +72,8 @@ builder.Services.AddSingleton<ContainerLayerCheck>(PrintJournal.IsInContainerLay
 builder.Services.AddSingleton<PrintJournal>();
 builder.Services.AddHostedService(services => services.GetRequiredService<PrintJournal>());
 builder.Services.AddSingleton<ILoggerProvider, PrintJobTraceLoggerProvider>();
+builder.Services.AddSingleton(services => new PrintJournalReader(
+    services.GetRequiredService<JournalDatabase>(), services.GetRequiredService<PrintJournal>()));
 
 // MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
 builder.Services.AddMcpServer(options => options.ServerInstructions = PrinterTools.ServerInstructions)

@@ -1,5 +1,5 @@
 import axios, { AxiosError } from "axios";
-import type { PrintRequest, PrintContent, PrintOptions, PrintResponse } from "../types/printer";
+import type { PrintRequest, PrintContent, PrintOptions, PrintResponse, PrintJobList, PrintJobDetail } from "../types/printer";
 import { BUSY_RETRY_AFTER_SECONDS } from "./printer-limits";
 
 const API_BASE_URL = "/api";
@@ -14,7 +14,7 @@ const api = axios.create({
 
 export interface PrintError {
   message: string;
-  type: "network" | "printer" | "validation" | "busy" | "timeout" | "unknown";
+  type: "network" | "printer" | "validation" | "busy" | "journal" | "journal-off" | "timeout" | "unknown";
   canRetry: boolean;
   details?: string;
   /** Set when the backend names the block: its index in the sent content (from 0) and the reason alone. */
@@ -82,13 +82,23 @@ function parseError(error: unknown): PrintError {
       };
     }
 
-    // The image decode queue is full. Nothing is wrong with the printer or the job.
+    // The print journal is off, or cannot be read at the moment: the tray and the reprint do not work. Not a printer fault.
+    if (data?.type === "journal-off" || data?.type === "journal") {
+      return {
+        message: "[ERROR] No print history",
+        type: data.type,
+        canRetry: false,
+        details: data.type === "journal-off" ? "The server keeps no print history." : "The server cannot read its print history at the moment. Try again in a moment.",
+      };
+    }
+
+    // The image decode queue is full, or another reprint runs. Nothing is wrong with the printer or the job.
     if (data?.type === "busy") {
       return {
         message: "[ERROR] Server busy",
         type: "busy",
         canRetry: true,
-        details: "Other image jobs are in the queue. Print again in a few seconds.",
+        details: "Other jobs are in the queue. Print again in a few seconds.",
         retryAfterMs: retryAfterMs(axiosError.response.headers["retry-after"]),
       };
     }
@@ -201,6 +211,35 @@ export const printerApi = {
    */
   async print(request: PrintRequest): Promise<void> {
     await withRetry(() => api.post("/printer", request));
+  },
+
+  /** One page of the print journal, newest first: the jobs that printed. `before` is `next` of the page before. */
+  async listJobs(before?: string | null): Promise<PrintJobList> {
+    try {
+      const response = await api.get<PrintJobList>("/printer/jobs", {
+        params: { printed: true, before: before ?? undefined },
+        timeout: 10000,
+      });
+      if (!Array.isArray(response.data?.jobs)) throw new Error("Unexpected job list response");
+      return response.data;
+    } catch (error) {
+      throw parseError(error);
+    }
+  },
+
+  /** One job with its blocks, for the thumbnail. */
+  async getJob(id: string): Promise<PrintJobDetail> {
+    try {
+      const response = await api.get<PrintJobDetail>(`/printer/jobs/${encodeURIComponent(id)}`, { timeout: 10000 });
+      return response.data;
+    } catch (error) {
+      throw parseError(error);
+    }
+  },
+
+  /** Prints a stored job again. The server builds it from the journal; one call is one print. */
+  async reprint(id: string): Promise<void> {
+    await withRetry(() => api.post(`/printer/jobs/${encodeURIComponent(id)}/reprint`, null, { params: { source: "web/tray" } }));
   },
 
   /**
