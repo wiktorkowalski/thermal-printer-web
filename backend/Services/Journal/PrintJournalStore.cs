@@ -53,7 +53,7 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
 
     public async Task AddAsync(PrintJob job, CancellationToken cancellationToken)
     {
-        CheckSpace(job);
+        CheckSpace();
 
         await using var db = database.CreateContext();
         db.PrintJobs.Add(job);
@@ -85,21 +85,22 @@ internal sealed class SqlitePrintJournalStore(JournalDatabase database, IOptions
         }
     }
 
-    private void CheckSpace(PrintJob job)
+    // The size of the new row is not counted: a small job after a large one must not turn "full" off and on.
+    // So the database can pass its limit by one row, at most the request body limit plus the printer data limit.
+    private void CheckSpace()
     {
         var path = database.Path;
         var limits = options.Value;
 
-        var rowBytes = PrintJournal.PayloadBytes(job);
         var databaseBytes = FileLength(path) + FileLength(path + WriteAheadLogSuffix);
-        if (databaseBytes + rowBytes > limits.MaxDatabaseBytes)
+        if (databaseBytes >= limits.MaxDatabaseBytes)
         {
             throw new JournalFullException(
                 $"the database is {databaseBytes} bytes, the limit Journal:MaxDatabaseBytes is {limits.MaxDatabaseBytes}");
         }
 
         var freeBytes = new DriveInfo(path).AvailableFreeSpace;
-        if (freeBytes - rowBytes < limits.MinFreeBytes)
+        if (freeBytes < limits.MinFreeBytes)
         {
             throw new JournalFullException(
                 $"the disk has {freeBytes} bytes free, the limit Journal:MinFreeBytes is {limits.MinFreeBytes}");

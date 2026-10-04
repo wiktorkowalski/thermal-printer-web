@@ -14,6 +14,8 @@ internal sealed class JournalOptions
     public const long DefaultMaxDatabaseBytes = 1024L * 1024 * 1024;
     public const long DefaultMinFreeBytes = 512L * 1024 * 1024;
 
+    // A write of a photo job takes well under a second on a local disk.
+    private static readonly TimeSpan DefaultWriteTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MaxWriteTimeout = TimeSpan.FromMinutes(1);
 
     // A directory. Relative: under the content root (/app in the container). Empty: the journal is off.
@@ -26,7 +28,7 @@ internal sealed class JournalOptions
     public long MinFreeBytes { get; set; } = DefaultMinFreeBytes;
 
     // One write. A write that takes longer is given up.
-    public TimeSpan WriteTimeout { get; set; } = TimeSpan.FromSeconds(10);
+    public TimeSpan WriteTimeout { get; set; } = DefaultWriteTimeout;
 
     public bool IsOff => string.IsNullOrWhiteSpace(DataPath);
 

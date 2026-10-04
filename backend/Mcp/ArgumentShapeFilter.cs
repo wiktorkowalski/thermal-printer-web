@@ -2,6 +2,9 @@ using System.Globalization;
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using ThermalPrinterWeb.Models;
+using ThermalPrinterWeb.Services;
+using ThermalPrinterWeb.Services.Journal;
 
 namespace ThermalPrinterWeb.Mcp;
 
@@ -99,11 +102,25 @@ internal static class ArgumentShapeFilter
         _ => false
     };
 
+    private static string? SourceArgument(RequestContext<CallToolRequestParams> context)
+        => context.Params?.Arguments is { } arguments
+            && arguments.TryGetValue("source", out var source)
+            && source.ValueKind == JsonValueKind.String
+                ? source.GetString()
+                : null;
+
     private static CallToolResult Reject(RequestContext<CallToolRequestParams> context, string tool, string problem)
     {
         // The caller's mistake, not a fault: Information. No caller content.
         context.Services?.GetService<ILoggerFactory>()?.CreateLogger(typeof(ArgumentShapeFilter))
             .LogInformation("Rejected MCP call to {Tool}: {Problem}", tool, problem);
+
+        // A print call with the wrong shape is a refused job: the journal stores the request. No "Print job:" line.
+        if (tool is PrinterTools.PrintName or PrinterTools.PrintNoteName)
+        {
+            PrintJobTrace.Current?.Outcome = new PrintJobOutcome(
+                PrintJobLog.McpTransport(tool), SourceArgument(context), PrintResult.Invalid(problem), Content: null, Options: null);
+        }
 
         return new CallToolResult
         {

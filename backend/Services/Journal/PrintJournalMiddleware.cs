@@ -18,7 +18,7 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
     internal const string Redacted = "[redacted]";
 
     // A header with one of these in its name holds a credential: the journal keeps the name and drops the value.
-    private static readonly string[] CredentialNameParts = ["auth", "cookie", "token", "secret", "password", "key", "jwt", "session", "signature"];
+    private static readonly string[] CredentialNameParts = ["auth", "cookie", "token", "secret", "passw", "key", "jwt", "session", "signature", "credential", "bearer", "dpop", "otp"];
 
     // The endpoint read the body, so this is a copy in memory. The time limit is for a body the endpoint did not read.
     private static readonly TimeSpan BodyReadTimeout = TimeSpan.FromSeconds(2);
@@ -84,7 +84,15 @@ internal sealed class PrintJournalMiddleware(RequestDelegate next, PrintJournal 
             // The caller gets the whole response before the body is copied.
             if (fault is null)
                 await context.Response.CompleteAsync();
+        }
+        catch (Exception ex)
+        {
+            // The caller went away. The job ran, so its row is still stored.
+            logger.LogDebug(ex, "Journal: the response of job {JobId} did not complete", trace.Id);
+        }
 
+        try
+        {
             // The row is built here, after the response: it holds a hash for each picture, so the
             // queue of the writer keeps no block content alive.
             var entry = new PrintJobEntry

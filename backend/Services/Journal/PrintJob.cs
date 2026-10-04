@@ -73,4 +73,8 @@ internal sealed class PrintJobPayload
 
     // The server log lines of the request.
     public string? Log { get; set; }
+
+    // What the row holds in memory while it waits for the writer, and what it adds to the database.
+    // The text values are small: Blocks holds a hash in place of each picture.
+    public long LargeBytes() => (Request?.Length ?? 0L) + (Bytes?.Length ?? 0L);
 }

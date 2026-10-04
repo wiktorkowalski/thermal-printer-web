@@ -23,7 +23,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── IPrinterService.cs
 │   │   ├── PrinterService.cs   # Builds the ESC/POS bytes, talks to the printer, document limits
 │   │   ├── PrinterOptions.cs   # Printer:Address, Printer:ConnectTimeout, startup validation
-│   │   ├── PrintJobLog.cs      # The one "Print job:" log line
+│   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
 │   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, DecodeQueue, CodePages
@@ -269,7 +269,9 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 | `Journal:DataPath` (env `Journal__DataPath`, or `DATA_PATH`) | `data` | Directory of `journal.db`. A relative path is under the content root: `/app/data` in the container, `backend/data` in Development (git-ignored). Empty turns the journal off. |
 | `Journal:MaxDatabaseBytes` | 1 GiB | The database with its write-ahead log. At this size the journal stops. |
 | `Journal:MinFreeBytes` | 512 MiB | Free space on the disk of the journal. Below it the journal stops. |
-| `Journal:WriteTimeout` | 10 s | One write. |
+| `Journal:WriteTimeout` | 10 s | One write. Form `hh:mm:ss`, at most 1 min. |
+
+`Journal:DataPath` wins over `DATA_PATH`.
 
 **Rules**:
 - A journal fault never fails or delays a print. `PrintJournalMiddleware` copies the request after the response is complete. One background writer (`PrintJournal`) stores it. A failed write is one Warning.
@@ -281,16 +283,20 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 **What is journaled**:
 - Every `POST /api/printer`, whatever the result: also a body that does not bind (400), a 415 and a 413 (no body stored for a 413).
-- Every MCP `print` and `print_note` call that reaches the tool body. An MCP call with wrong arguments is not a job.
+- Every MCP `print` and `print_note` call. A call with wrong or missing arguments is a rejected job with no blocks (`ArgumentShapeFilter`); it has no `Print job:` log line.
 - Not journaled: beep, status, other MCP calls.
 
 **Schema** (migrations in `Services/Journal/Migrations`; table `__EFMigrationsHistory` is the schema version):
 - `PrintJobs`: the small facts. `Id` (GUID v7), `CreatedAt` (UTC), `DurationMs`, `Transport`, `Source`, `UserAgent`, `RemoteIp`, `Result`, `Error`, `HttpStatus`, `Title`, `BlockCount`, `ByteCount`, `PaperDots`, `PrinterStatus` (JSON), `RequestBytes`, `AppVersion`.
 - `PrintJobPayloads`: the large values, one row per job. `Request` (the body as it came), `Bytes` (the ESC/POS job), `Blocks` and `Options` (API JSON), `PlainText`, `Headers` (JSON), `Exception`, `Log` (the log lines of the request).
 - `Result` is the number of `JobResult`: 0 Printed, 1 Validation, 2 Printer, 3 Busy, 4 Fault. Keep the numbers; add new ones at the end.
+- `Blocks` and `Options` are the API JSON, so an enum is its API name (`"type":"Text"`). The API name is the contract: a rename breaks callers and old rows alike. `Options` is what the caller sent; no defaults are filled in.
+- The database can pass `MaxDatabaseBytes` by one row: the check does not count the new row.
 - `Blocks` holds `sha256:<hex>;chars=<n>` in place of an image: the hash of the base64 text. The picture is in `Request`.
-- `Headers` holds `[redacted]` for a header whose name has `auth`, `cookie`, `token`, `secret`, `password`, `key`, `jwt`, `session` or `signature` in it.
+- `Headers` holds `[redacted]` for a header whose name has one of the parts in `PrintJournalMiddleware.CredentialNameParts` in it (`auth`, `cookie`, `token`, `secret`, `key`, ...).
+- The rows hold caller text as it came (`Title`, `Source`, `UserAgent`, `Headers`, `Request`), stack traces and the printer address (`Exception`, `Log`). A read path must encode its output and must not serve `RemoteIp`, `Headers`, `Exception` or `Log` to the public.
 - `RemoteIp` is the address of the connection, so behind a proxy it is the proxy. The caller address is in `Headers` (`CF-Connecting-IP`, `X-Forwarded-For`).
+- `Title` is the first Text line, cut at 100 characters. `Log` holds at most 200 lines of 4000 characters (`PrintJobTrace.MaxLogLines`, `MaxLogLineLength`).
 - `AppVersion` ends with `+<commit>` in an image that CI built (`GIT_SHA` build argument).
 
 **To add a fact to the journal**: set it on `PrintJobTrace.Current` where the code knows it, map it in `PrintJobEntry.ToRow`, add the column with a new migration (the command is in `JournalDbContext.cs`).

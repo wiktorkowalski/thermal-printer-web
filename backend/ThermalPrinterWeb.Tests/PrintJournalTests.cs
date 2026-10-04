@@ -352,15 +352,37 @@ public sealed class PrintJournalTests
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Message.Contains(Secret));
     }
 
-    // Not print jobs: a wrong-shaped call, the buzzer, the status, the tool list.
+    // A print call with the wrong shape is a refused job: missing arguments, or a value the SDK cannot bind.
+    [Theory]
+    [InlineData("print", """{"source":"claude-code"}""", "'content' is missing")]
+    [InlineData("print_note", """{"title":"SECRET-CALLER-CONTENT","source":"claude-code"}""", "'message' is missing")]
+    [InlineData("print", """{"content":"SECRET-CALLER-CONTENT","source":"claude-code"}""", "'content' has the wrong JSON type")]
+    public async Task McpPrint_WrongShape_StoresTheRequestAsARejectedJob(string tool, string arguments, string problem)
+    {
+        await using var app = new App();
+
+        var (isError, _) = await app.CreateClient().CallToolAsync(tool, arguments);
+
+        Assert.True(isError);
+        var job = Assert.Single(await app.JournalRowsAsync());
+        Assert.Equal($"mcp:{tool}", job.Transport);
+        Assert.Equal("claude-code", job.Source);
+        Assert.Equal(JobResult.Validation, job.Result);
+        Assert.Equal(problem, job.Error);
+        Assert.Contains(arguments, Text(job.Payload.Request));
+        Assert.Null(job.Payload.Blocks);
+        Assert.Empty(app.Printer.Jobs);
+        Assert.DoesNotContain(app.Logs.Entries, entry => entry.Message.Contains(Secret));
+    }
+
+    // Not print jobs: the buzzer (also with the wrong shape), the status, the tool list.
     [Fact]
     public async Task OtherRequests_StoreNoRow()
     {
         await using var app = new NoPrinterApp();
         var client = app.CreateClient();
 
-        await client.CallToolAsync("print", """{"source":"claude-code"}""");
-        await client.CallToolAsync("print_note", """{"title":"only a title"}""");
+        await client.CallToolAsync("beep", """{"count":"many"}""");
         await client.CallToolAsync("beep", "{}");
         await client.CallToolAsync("get_status", "{}");
         await client.McpAsync("tools/list");
@@ -426,6 +448,13 @@ public sealed class PrintJournalTests
     [InlineData("CF-Access-Client-Secret", true)]
     [InlineData("Mcp-Session-Id", true)]
     [InlineData("X-Hub-Signature-256", true)]
+    [InlineData("Passwd", true)]
+    [InlineData("X-Credential", true)]
+    [InlineData("X-Upstream-Bearer", true)]
+    [InlineData("DPoP", true)]
+    [InlineData("X-OTP", true)]
+    [InlineData("Referer", false)]
+    [InlineData("Accept-Encoding", false)]
     [InlineData("User-Agent", false)]
     [InlineData("CF-Connecting-IP", false)]
     [InlineData("X-Forwarded-For", false)]
@@ -622,7 +651,7 @@ public sealed class PrintJournalTests
         var logs = app.JournalLogs();
         Assert.Equal([LogLevel.Information, LogLevel.Warning], logs.Select(entry => entry.Level));
         Assert.Equal(
-            $"Journal directory {app.JournalDirectory} is not a volume: the journal is lost when the container is replaced. Mount a volume at {app.JournalDirectory}.",
+            $"Journal directory {app.JournalDirectory} is not a volume: the journal is lost when the container is replaced. Mount a volume there.",
             logs[1].Message);
     }
 

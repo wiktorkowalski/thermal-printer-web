@@ -37,16 +37,12 @@ internal sealed class PrintJournal(
     // True from the start: a job that comes before the database is open waits in the queue.
     public bool IsOn => !_off;
 
-    // The large values of a row: what it holds in memory while it waits, and what it adds to the database.
-    // The row holds no picture as text: PrintJobEntry.ToRow stores a hash in its place.
-    internal static long PayloadBytes(PrintJob job) => (job.Payload.Request?.Length ?? 0L) + (job.Payload.Bytes?.Length ?? 0L);
-
     public void Add(PrintJob job)
     {
         if (_off)
             return;
 
-        var bytes = PayloadBytes(job);
+        var bytes = job.Payload.LargeBytes();
         lock (_pendingLock)
         {
             // One entry always fits: a photo job alone can be over half the byte limit.
@@ -96,7 +92,7 @@ internal sealed class PrintJournal(
             {
                 if (!_off)
                     await WriteAsync(job);
-                Release(PayloadBytes(job));
+                Release(job.Payload.LargeBytes());
             }
 
             work.Barrier?.SetResult();
@@ -129,8 +125,8 @@ internal sealed class PrintJournal(
             if (isInContainerLayer(directory))
             {
                 logger.LogWarning(
-                    "Journal directory {Directory} is not a volume: the journal is lost when the container is replaced. Mount a volume at {Directory}.",
-                    directory, directory);
+                    "Journal directory {Directory} is not a volume: the journal is lost when the container is replaced. Mount a volume there.",
+                    directory);
             }
 
             return true;
