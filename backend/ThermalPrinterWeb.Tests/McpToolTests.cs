@@ -182,6 +182,9 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.Contains(PrinterTools.SignalRule, PrinterTools.ServerInstructions);
         Assert.Contains("add a Signal block only when the user asks for a sound or a light", block.GetProperty("signalOptions").GetProperty("description").GetString());
         Assert.Contains("add it only when the user asks for a sound or a light", block.GetProperty("type").GetProperty("description").GetString());
+        // No text offers the signal as a way to get attention: that invites a beep nobody asked for.
+        Assert.DoesNotContain("attention", (await ToolAsync("beep")).GetProperty("description").GetString());
+        Assert.DoesNotContain("attention", PrinterTools.ServerInstructions);
         // The examples and the note tool offer no signal.
         Assert.DoesNotContain("Signal", PrinterTools.PrintExample);
         Assert.DoesNotContain("ignal", (await ToolAsync("print_note")).GetProperty("description").GetString());
