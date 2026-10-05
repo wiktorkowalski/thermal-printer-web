@@ -15,6 +15,10 @@ export const SEPARATOR_MAX_LENGTH = 64;
 // backend/Services/Printing/Handlers/LineFeedBlockHandler.cs: MaxLines
 export const LINE_FEED_MAX_LINES = 100;
 
+// backend/Services/Printing/SignalCommand.cs: Min, Max (the count and the duration of a Signal block and of the beep call)
+export const SIGNAL_MIN = 1;
+export const SIGNAL_MAX = 9;
+
 // backend/Services/Printing/Handlers/BarcodeBlockHandler.cs: MinHeightInDots, MaxHeightInDots
 export const BARCODE_MIN_HEIGHT_DOTS = 1;
 export const BARCODE_MAX_HEIGHT_DOTS = 255;
@@ -34,9 +38,10 @@ export const IMAGE_MAX_PIXELS = 8192 * 6144;
 // Same file, PrintLimit: maxWidth and maxHeight below 1 are rejected.
 export const IMAGE_MIN_PRINT_SIZE = 1;
 
-// backend/Services/PrinterService.cs: MaxBlocks, MaxImageBlocks, MaxFeedBeforeCut, MaxLineSpacing, MaxRequestBodyBytes
+// backend/Services/PrinterService.cs: MaxBlocks, MaxImageBlocks, MaxSignalBlocks, MaxFeedBeforeCut, MaxLineSpacing, MaxRequestBodyBytes
 export const MAX_BLOCKS = 500;
 export const MAX_IMAGE_BLOCKS = 20;
+export const MAX_SIGNAL_BLOCKS = 3;
 export const MAX_FEED_BEFORE_CUT = 255;
 export const MAX_LINE_SPACING = 255;
 export const MAX_REQUEST_BYTES = 30_000_000;

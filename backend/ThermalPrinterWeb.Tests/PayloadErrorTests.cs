@@ -89,6 +89,13 @@ public sealed class PayloadErrorTests
         { new PrintContent { Type = ContentType.QRCode, Content = Secret, QRCodeOptions = new QRCodeOptions { Model = (QRCodeModel)3 } }, NotAValidValue(1, "QRCode", "qrCodeOptions.model", "3", QRCodeModelNames) },
         { new PrintContent { Type = ContentType.QRCode, Content = Secret, QRCodeOptions = new QRCodeOptions { Size = (QRCodeSize)3 } }, NotAValidValue(1, "QRCode", "qrCodeOptions.size", "3", QRCodeSizeNames) },
         { new PrintContent { Type = ContentType.QRCode, Content = Secret, QRCodeOptions = new QRCodeOptions { CorrectionLevel = (QRCodeCorrectionLevel)4 } }, NotAValidValue(1, "QRCode", "qrCodeOptions.correctionLevel", "4", QRCodeCorrectionLevelNames) },
+        { TestBlocks.Signal(count: 0), "Block 1 (Signal): signalOptions.count 0 is outside the range 1 to 9" },
+        { TestBlocks.Signal(count: 10), "Block 1 (Signal): signalOptions.count 10 is outside the range 1 to 9" },
+        { TestBlocks.Signal(duration: 0), "Block 1 (Signal): signalOptions.duration 0 is outside the range 1 to 9" },
+        { TestBlocks.Signal(duration: int.MaxValue), "Block 1 (Signal): signalOptions.duration 2147483647 is outside the range 1 to 9" },
+        // 0 is the default of the enum and has no name.
+        { TestBlocks.Signal(mode: 0), NotAValidValue(1, "Signal", "signalOptions.mode", "0", SignalModeNames) },
+        { TestBlocks.Signal(mode: (SignalMode)4), NotAValidValue(1, "Signal", "signalOptions.mode", "4", SignalModeNames) },
         // A block with no content prints nothing; its enum values are still checked.
         { new PrintContent { Type = ContentType.QRCode, QRCodeOptions = new QRCodeOptions { Size = (QRCodeSize)(-1) } }, NotAValidValue(1, "QRCode", "qrCodeOptions.size", "-1", QRCodeSizeNames) },
         // Also in an options object that the block type does not read.
@@ -106,6 +113,7 @@ public sealed class PayloadErrorTests
     internal const string QRCodeModelNames = "Model1, Model2 or Micro";
     internal const string QRCodeSizeNames = "Normal, Large or ExtraLarge";
     internal const string QRCodeCorrectionLevelNames = "Percent7, Percent15, Percent25 or Percent30";
+    internal const string SignalModeNames = "Sound, Light or SoundAndLight";
 
     internal static string NotAValidValue(int block, string blockType, string field, string number, string validNames)
         => $"Block {block} ({blockType}): {field} {number} is not a valid value; use {validNames}";
@@ -143,12 +151,16 @@ public sealed class PayloadErrorTests
             data.Add(new PrintContent { Type = ContentType.QRCode, Content = "x", QRCodeOptions = new QRCodeOptions { Size = size } });
         foreach (var level in Enum.GetValues<QRCodeCorrectionLevel>())
             data.Add(new PrintContent { Type = ContentType.QRCode, Content = "x", QRCodeOptions = new QRCodeOptions { CorrectionLevel = level } });
+        foreach (var mode in Enum.GetValues<SignalMode>())
+            data.Add(TestBlocks.Signal(mode));
         // No content: the symbology rules for the data are not the subject here.
         foreach (var type in Enum.GetValues<BarcodeType>())
             data.Add(new PrintContent { Type = ContentType.Barcode, BarcodeOptions = new BarcodeOptions { Type = type } });
         // Fields the JSON left out or set to null.
         data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-0007", BarcodeOptions = new BarcodeOptions { Width = null, LabelPosition = null } });
         data.Add(new PrintContent { Type = ContentType.Text, Content = "x", Style = [] });
+        data.Add(new PrintContent { Type = ContentType.Signal });
+        data.Add(TestBlocks.Signal());
         return data;
     }
 
@@ -164,7 +176,7 @@ public sealed class PayloadErrorTests
     public async Task BuildDocumentAsync_EveryEnumPropertyOfABlock_RejectsANumberWithNoName()
     {
         var checkedProperties = 0;
-        foreach (var owner in new[] { typeof(PrintContent), typeof(BarcodeOptions), typeof(QRCodeOptions), typeof(ImageOptions) })
+        foreach (var owner in new[] { typeof(PrintContent), typeof(BarcodeOptions), typeof(QRCodeOptions), typeof(ImageOptions), typeof(SignalOptions) })
         {
             foreach (var property in owner.GetProperties())
             {
@@ -172,7 +184,7 @@ public sealed class PayloadErrorTests
                 if (property == typeof(PrintContent).GetProperty(nameof(PrintContent.Type)) || UndefinedEnumValue(property.PropertyType) is not { } value)
                     continue;
 
-                var block = new PrintContent { Type = ContentType.Text, Content = "x", BarcodeOptions = new BarcodeOptions(), QRCodeOptions = new QRCodeOptions(), ImageOptions = new ImageOptions() };
+                var block = new PrintContent { Type = ContentType.Text, Content = "x", BarcodeOptions = new BarcodeOptions(), QRCodeOptions = new QRCodeOptions(), ImageOptions = new ImageOptions(), SignalOptions = new SignalOptions() };
                 var target = owner == typeof(PrintContent)
                     ? block
                     : typeof(PrintContent).GetProperties().Single(options => options.PropertyType == owner).GetValue(block);
@@ -187,7 +199,7 @@ public sealed class PayloadErrorTests
             }
         }
 
-        Assert.Equal(8, checkedProperties);
+        Assert.Equal(9, checkedProperties);
         // The job options are not part of a block: an enum there needs its own check.
         Assert.DoesNotContain(typeof(PrintOptions).GetProperties(), property => UndefinedEnumValue(property.PropertyType) is not null);
     }
@@ -606,7 +618,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     // The closed loopback port answers 503 for a job that passes validation: a 400 shows that nothing went to the printer.
     [Theory]
     [InlineData("""{"content":[{"type":99}]}""", "Block 0 (99): type is not supported")]
-    [InlineData("""{"content":[{"type":"Text","content":"x"},{"type":8,"content":"SECRET"}]}""", "Block 1 (8): type is not supported")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"},{"type":9,"content":"SECRET"}]}""", "Block 1 (9): type is not supported")]
     [InlineData("""{"content":[{"type":-1}]}""", "Block 0 (-1): type is not supported")]
     // The enum converter reads a number in a string as the number.
     [InlineData("""{"content":[{"type":"99"}]}""", "Block 0 (99): type is not supported")]

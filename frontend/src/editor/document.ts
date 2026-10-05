@@ -23,6 +23,9 @@ import {
   MAX_LINE_SPACING,
   MAX_PAPER_DOTS,
   MAX_REQUEST_BYTES,
+  MAX_SIGNAL_BLOCKS,
+  SIGNAL_MAX,
+  SIGNAL_MIN,
   TEXT_SIZE_MAX,
   TEXT_SIZE_MIN,
 } from "@/lib/printer-limits";
@@ -76,6 +79,7 @@ export const BLOCK_LABELS: Record<ContentType, string> = {
   LineFeed: "Line feed",
   Cut: "Cut",
   CodePage: "Code page",
+  Signal: "Signal",
 };
 
 let counter = 0;
@@ -309,6 +313,12 @@ export function blockError(block: PrintContent): string | null {
       return sizeError(block.size) ?? message(validateSeparator(block.separatorChar ?? "-", block.separatorLength ?? CHARS_PER_LINE.normal));
     case ContentType.LineFeed:
       return (block.lines ?? 1) > LINE_FEED_MAX_LINES ? `Too many lines: ${block.lines}. Max ${LINE_FEED_MAX_LINES} per line feed` : null;
+    // The editor does not make this block; an imported template can hold one.
+    case ContentType.Signal: {
+      const { count, duration } = block.signalOptions ?? {};
+      const valid = (value: unknown) => value == null || (Number.isInteger(value) && inRange(value as number, SIGNAL_MIN, SIGNAL_MAX));
+      return valid(count) && valid(duration) ? null : `Signal count and duration must be whole numbers between ${SIGNAL_MIN} and ${SIGNAL_MAX}`;
+    }
     default:
       return null;
   }
@@ -323,6 +333,9 @@ export function documentError(content: PrintContent[], options: PrintOptions, pa
 
   const images = content.filter((b) => b.type === ContentType.Image && b.content).length;
   if (images > MAX_IMAGE_BLOCKS) return `Too many images: ${images}. Max ${MAX_IMAGE_BLOCKS} per print`;
+
+  const signals = content.filter((b) => b.type === ContentType.Signal).length;
+  if (signals > MAX_SIGNAL_BLOCKS) return `Too many signals: ${signals}. Max ${MAX_SIGNAL_BLOCKS} per print`;
 
   if (!inRange(options.feedLinesAfterPrint ?? 0, 0, MAX_FEED_BEFORE_CUT)) return `Feed before cut must be between 0 and ${MAX_FEED_BEFORE_CUT}`;
   if (!inRange(options.defaultLineSpacing ?? 0, 0, MAX_LINE_SPACING)) return `Line spacing must be between 0 and ${MAX_LINE_SPACING}`;

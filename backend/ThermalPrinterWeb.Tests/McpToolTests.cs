@@ -67,7 +67,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     [InlineData("reprint_job", "id,source")]
     [InlineData("print", "content,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]
-    [InlineData("beep", "count,duration")]
+    [InlineData("beep", "count,duration,mode")]
     [InlineData("get_status", "")]
     public async Task ToolsList_EveryTool_HasOnlyOptionalDescribedArguments(string tool, string expectedArguments)
     {
@@ -95,7 +95,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         AssertEveryPropertyDescribed(block, "content[]");
         AssertEveryPropertyDescribed(properties.GetProperty("options"), "options");
         Assert.All(
-            ["qrCodeOptions", "barcodeOptions", "imageOptions", "size"],
+            ["qrCodeOptions", "barcodeOptions", "imageOptions", "size", "signalOptions"],
             options => AssertEveryPropertyDescribed(block.GetProperty("properties").GetProperty(options), options));
 
         // The numbers a caller needs to avoid a mid-word wrap.
@@ -133,6 +133,26 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.Contains($"at most {SeparatorBlockHandler.MaxLength}.", Description("separatorLength"));
         Assert.Contains($"1 to {ImageBlockHandler.MaxPrintHeight}.", imageOptions.GetProperty("maxHeight").GetProperty("description").GetString());
 
+        // The Signal block and the beep tool: the same ranges.
+        var signal = block.GetProperty("signalOptions").GetProperty("properties");
+        var beep = await ToolAsync("beep");
+        var beepArguments = beep.GetProperty("inputSchema").GetProperty("properties");
+        var signalRange = $"{SignalCommand.Min} to {SignalCommand.Max}";
+        var beepRange = $"{SignalCommand.Min}-{SignalCommand.Max}";
+        Assert.Contains($", {signalRange}.", signal.GetProperty("count").GetProperty("description").GetString());
+        Assert.Contains($", {signalRange}; one step is about {SignalCommand.DurationStepMs} ms.", signal.GetProperty("duration").GetProperty("description").GetString());
+        Assert.All(Enum.GetNames<SignalMode>(), name => Assert.Contains(name, signal.GetProperty("mode").GetProperty("description").GetString()));
+        Assert.Contains(SignalCommand.ModeNames, beepArguments.GetProperty("mode").GetProperty("description").GetString());
+        Assert.Contains($"One document holds at most {PrinterService.MaxSignalBlocks} Signal blocks.", Description("signalOptions"));
+        Assert.Contains(
+            $"(signalOptions: mode, count {signalRange}, duration {signalRange}); one document holds at most {PrinterService.MaxSignalBlocks}.",
+            tool.GetProperty("description").GetString());
+        Assert.Contains($"({beepRange})", beep.GetProperty("description").GetString());
+        Assert.Contains($", {beepRange}.", beepArguments.GetProperty("count").GetProperty("description").GetString());
+        Assert.Contains(
+            $", {beepRange}; one step is about {SignalCommand.DurationStepMs} ms.",
+            beepArguments.GetProperty("duration").GetProperty("description").GetString());
+
         // The size range, and the characters per line of every width.
         var range = $"{TextSize.Min} to {TextSize.Max}";
         var size = block.GetProperty("size").GetProperty("properties");
@@ -146,6 +166,28 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         Assert.Contains($"a headline of {PaperLength.Columns(fontB: false, 3)} characters per line", Description("size"));
         Assert.Contains($"with \"size\":{{\"width\":3,\"height\":3}} a headline holds {PaperLength.Columns(fontB: false, 3)})", tool.GetProperty("description").GetString());
         Assert.Contains($"a size of {range})", PrinterTools.ServerInstructions);
+    }
+
+    // Nothing beeps or lights by itself (#48): every text that offers the signal says when to use it.
+    [Fact]
+    public async Task ToolsList_EveryTextThatOffersASignal_SaysOnlyWhenTheUserAsks()
+    {
+        const string rule = "Nothing beeps or lights by itself. Send a sound or a light only when the user asks for one";
+        Assert.StartsWith(rule, PrinterTools.SignalRule);
+        var print = await ToolAsync("print");
+        var block = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties");
+
+        Assert.Contains(PrinterTools.SignalRule, (await ToolAsync("beep")).GetProperty("description").GetString());
+        Assert.Contains(PrinterTools.SignalRule, print.GetProperty("description").GetString());
+        Assert.Contains(PrinterTools.SignalRule, PrinterTools.ServerInstructions);
+        Assert.Contains("add a Signal block only when the user asks for a sound or a light", block.GetProperty("signalOptions").GetProperty("description").GetString());
+        Assert.Contains("add it only when the user asks for a sound or a light", block.GetProperty("type").GetProperty("description").GetString());
+        // No text offers the signal as a way to get attention: that invites a beep nobody asked for.
+        Assert.DoesNotContain("attention", (await ToolAsync("beep")).GetProperty("description").GetString());
+        Assert.DoesNotContain("attention", PrinterTools.ServerInstructions);
+        // The examples and the note tool offer no signal.
+        Assert.DoesNotContain("Signal", PrinterTools.PrintExample);
+        Assert.DoesNotContain("ignal", (await ToolAsync("print_note")).GetProperty("description").GetString());
     }
 
     [Theory]

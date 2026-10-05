@@ -64,9 +64,9 @@ internal sealed class PrinterService(
     internal const int MaxLineSpacing = 255;
     internal const int MaxFeedBeforeCut = 255;
 
-    // ESC B n t (1B 42): buzzer - n beeps each of length t. Both clamp to 1..9.
-    private const int BuzzerMin = 1;
-    private const int BuzzerMax = 9;
+    // One Signal block at its limits is 9 beeps of 9 x 50 ms: about 4 s of sound, about 8 s with pauses of the same length.
+    // So one job holds at most about 12 s of sound (about 24 s with the pauses).
+    internal const int MaxSignalBlocks = 3;
 
     public async Task<PrintResult> PrintAsync(List<PrintContent> content, PrintOptions? options = null)
     {
@@ -160,6 +160,13 @@ internal sealed class PrinterService(
         {
             logger.LogWarning("Rejected print: the document has {ImageBlockCount} image blocks, the limit is {MaxImageBlocks}", imageBlocks, MaxImageBlocks);
             throw PrintContentException.OverLimit("image block count", imageBlocks, MaxImageBlocks);
+        }
+
+        var signalBlocks = content.Count(block => block is { Type: ContentType.Signal });
+        if (signalBlocks > MaxSignalBlocks)
+        {
+            logger.LogWarning("Rejected print: the document has {SignalBlockCount} signal blocks, the limit is {MaxSignalBlocks}", signalBlocks, MaxSignalBlocks);
+            throw PrintContentException.OverLimit("signal block count", signalBlocks, MaxSignalBlocks);
         }
 
         if (options is not null)
@@ -350,14 +357,15 @@ internal sealed class PrinterService(
         }
     }
 
-    public async Task<bool> BeepAsync(int count, int duration)
+    // No reset prelude: the command stands alone and changes no printer setting.
+    public async Task<bool> BeepAsync(int count, int duration, SignalMode mode = SignalMode.Sound)
     {
-        var n = Math.Clamp(count, BuzzerMin, BuzzerMax);
-        var t = Math.Clamp(duration, BuzzerMin, BuzzerMax);
-        byte[] command = [0x1B, 0x42, (byte)n, (byte)t]; // ESC B n t
+        var n = Math.Clamp(count, SignalCommand.Min, SignalCommand.Max);
+        var t = Math.Clamp(duration, SignalCommand.Min, SignalCommand.Max);
+        var command = SignalCommand.Build(mode, n, t);
         if (_endpoint is not { } endpoint)
         {
-            logger.LogInformation("No printer configured: buzzer command of {ByteCount} bytes not sent", command.Length);
+            logger.LogInformation("No printer configured: signal command of {ByteCount} bytes not sent", command.Length);
             return true;
         }
 
@@ -368,12 +376,12 @@ internal sealed class PrinterService(
             await client.ConnectAsync(endpoint.Host, endpoint.Port, connectCts.Token);
             using var stream = client.GetStream();
             await stream.WriteAsync(command);
-            logger.LogInformation("Buzzer beeped {Count} time(s), duration {Duration}", n, t);
+            logger.LogInformation("Signal sent: mode {Mode}, {Count} time(s), duration {Duration}", mode, n, t);
             return true;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Buzzer beep failed ({Address})", endpoint);
+            logger.LogWarning(ex, "Signal failed: mode {Mode} ({Address})", mode, endpoint);
             return false;
         }
     }

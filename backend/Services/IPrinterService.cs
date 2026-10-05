@@ -8,5 +8,6 @@ public interface IPrinterService
 
     Task<PrinterStatus> GetStatusAsync();
 
-    Task<bool> BeepAsync(int count, int duration);
+    // Sound: the buzzer, as before the mode came. Light and SoundAndLight use the error light.
+    Task<bool> BeepAsync(int count, int duration, SignalMode mode = SignalMode.Sound);
 }

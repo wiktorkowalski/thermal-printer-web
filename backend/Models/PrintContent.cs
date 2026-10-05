@@ -4,9 +4,9 @@ namespace ThermalPrinterWeb.Models;
 
 public class PrintContent
 {
-    [Description("Block type. Text, Separator, LineFeed and Cut need no options; Barcode, QRCode and Image read 'content' plus their options object; CodePage switches to the code page named in 'content'.")]
+    [Description("Block type. Text, Separator, LineFeed and Cut need no options; Barcode, QRCode and Image read 'content' plus their options object; CodePage switches to the code page named in 'content'; Signal sounds the buzzer or flashes the error light and prints nothing: add it only when the user asks for a sound or a light.")]
     public ContentType Type { get; set; }
-    [Description("Text: the text to print, 48 characters per line (24 with DoubleWidth, 64 with FontB, 48 / size.width with 'size'); a longer line wraps in the middle of a word, \\n starts a new line (CR and CRLF count as \\n), a tab prints as a space, other control characters print as '?'; at most 10000 characters and 500 lines in one block. QRCode: the data, stored as UTF-8; \\n is a line break (CRLF counts as \\n), any other control character (tab and a CR with no \\n included) rejects the block. Barcode: the data, printable ASCII only; any other character rejects the block. Image: base64 PNG or JPEG, at most 16 MB, 16384 pixels per side and 50 megapixels (8192 x 6144 passes). CodePage: the code page name, for example PC852. Not used by LineFeed, Cut and Separator.")]
+    [Description("Text: the text to print, 48 characters per line (24 with DoubleWidth, 64 with FontB, 48 / size.width with 'size'); a longer line wraps in the middle of a word, \\n starts a new line (CR and CRLF count as \\n), a tab prints as a space, other control characters print as '?'; at most 10000 characters and 500 lines in one block. QRCode: the data, stored as UTF-8; \\n is a line break (CRLF counts as \\n), any other control character (tab and a CR with no \\n included) rejects the block. Barcode: the data, printable ASCII only; any other character rejects the block. Image: base64 PNG or JPEG, at most 16 MB, 16384 pixels per side and 50 megapixels (8192 x 6144 passes). CodePage: the code page name, for example PC852. Not used by LineFeed, Cut, Separator and Signal.")]
     public string? Content { get; set; }
     [Description("Horizontal position of the block. Default Center.")]
     public Alignment Alignment { get; set; } = Alignment.Center;
@@ -28,4 +28,6 @@ public class PrintContent
     public string? SeparatorChar { get; set; } = "=";
     [Description("Separator blocks only: how many characters to print. 48 fills one line. Default 32, at most 64.")]
     public int? SeparatorLength { get; set; } = 32;
+    [Description("Signal blocks only: the buzzer or the error light at this place in the document. Default: Sound, 1 beep, duration 1. One document holds at most 3 Signal blocks. Nothing beeps or lights by itself: add a Signal block only when the user asks for a sound or a light.")]
+    public SignalOptions? SignalOptions { get; set; }
 }

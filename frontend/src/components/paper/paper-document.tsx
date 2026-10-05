@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { PrintContent } from "@/types/printer";
 import { IMAGE_HASH_PREFIX } from "@/lib/printer-limits";
 import { cn } from "@/lib/utils";
-import { DEFAULT_ALIGNMENT } from "@/lib/paper";
+import { DEFAULT_ALIGNMENT, signalLabel } from "@/lib/paper";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView } from "./graphic-views";
 import { CutRow, FeedSpace, PaperRow, TearEdge } from "./paper-strip";
@@ -43,6 +43,12 @@ export function StaticBlock({ block }: { block: PrintContent }) {
       ) : null;
     case "LineFeed":
       return <FeedSpace lines={block.lines ?? 1} />;
+    case "Signal":
+      return (
+        <div style={{ textAlign: align }}>
+          <span className="text-paper-faint">{signalLabel(block.signalOptions)}</span>
+        </div>
+      );
     default:
       return null;
   }
