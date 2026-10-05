@@ -17,6 +17,7 @@ internal static class BlockHandlerServiceCollectionExtensions
         services.AddSingleton<IBlockHandler, CutBlockHandler>();
         services.AddSingleton<IBlockHandler, SeparatorBlockHandler>();
         services.AddSingleton<IBlockHandler, CodePageBlockHandler>();
+        services.AddSingleton<IBlockHandler, SignalBlockHandler>();
         return services;
     }
 }

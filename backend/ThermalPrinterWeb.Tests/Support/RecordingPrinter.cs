@@ -17,5 +17,11 @@ public sealed class RecordingPrinter : IPrinterService
     }
 
     public Task<PrinterStatus> GetStatusAsync() => throw new NotSupportedException();
-    public Task<bool> BeepAsync(int count, int duration) => Task.FromResult(true);
+    public ConcurrentQueue<(int Count, int Duration, SignalMode Mode)> Beeps { get; } = [];
+
+    public Task<bool> BeepAsync(int count, int duration, SignalMode mode = SignalMode.Sound)
+    {
+        Beeps.Enqueue((count, duration, mode));
+        return Task.FromResult(true);
+    }
 }

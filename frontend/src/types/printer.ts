@@ -9,6 +9,7 @@ export const ContentType = {
   Cut: "Cut",
   Separator: "Separator",
   CodePage: "CodePage",
+  Signal: "Signal",
 } as const;
 export type ContentType = (typeof ContentType)[keyof typeof ContentType];
 
@@ -83,6 +84,14 @@ export const QRCodeCorrectionLevel = {
 } as const;
 export type QRCodeCorrectionLevel = (typeof QRCodeCorrectionLevel)[keyof typeof QRCodeCorrectionLevel];
 
+/** What a Signal block or a beep call does: the buzzer, the error light, or both. */
+export const SignalMode = {
+  Sound: "Sound",
+  Light: "Light",
+  SoundAndLight: "SoundAndLight",
+} as const;
+export type SignalMode = (typeof SignalMode)[keyof typeof SignalMode];
+
 export interface BarcodeOptions {
   type: BarcodeType;
   heightInDots?: number;
@@ -102,6 +111,13 @@ export interface ImageOptions {
   maxHeight?: number;
   preserveAspectRatio?: boolean;
   useLegacyMode?: boolean;
+}
+
+/** Signal block. Count and duration are 1 to 9 each (lib/printer-limits.ts); a field that is left out is Sound, 1 and 1. */
+export interface SignalOptions {
+  mode?: SignalMode | null;
+  count?: number | null;
+  duration?: number | null;
 }
 
 /** Character size as multipliers, 1 to 8 each. An axis that is left out is 1. */
@@ -124,6 +140,8 @@ export interface PrintContent {
   partialCut?: boolean;
   separatorChar?: string;
   separatorLength?: number;
+  /** Signal only. The web UI never adds a Signal block by itself: it shows one that a stored job or an imported template holds. */
+  signalOptions?: SignalOptions | null;
 }
 
 export interface PrintOptions {

@@ -10,6 +10,8 @@ namespace ThermalPrinterWeb.Controllers;
 [Route("api/[controller]")]
 public class PrinterController(IPrinterService printerService, PrintJobLog jobLog) : ControllerBase
 {
+    internal static readonly string InvalidModeError = $"mode must be {SignalCommand.ModeNames}";
+
     [HttpPost]
     [Journaled]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
@@ -55,9 +57,13 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> Beep([FromQuery] int count = 1, [FromQuery] int duration = 1)
+    public async Task<IActionResult> Beep([FromQuery] int count = 1, [FromQuery] int duration = 1, [FromQuery] string? mode = null)
     {
-        var ok = await printerService.BeepAsync(count, duration);
+        // Text, not the enum: the enum binder takes a number with no name and its error repeats the value.
+        if (!SignalCommand.TryParseMode(mode, out var signalMode))
+            return BadRequest(new PrintResponse(false, InvalidModeError, PrintResponse.ValidationType));
+
+        var ok = await printerService.BeepAsync(count, duration, signalMode);
         return ok
             ? Ok(new PrintResponse(true))
             : StatusCode(503, new PrintResponse(false, "Printer unreachable", PrintResponse.PrinterType));

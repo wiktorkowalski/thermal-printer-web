@@ -12,5 +12,6 @@ public enum ContentType
     LineFeed,
     Cut,
     Separator,
-    CodePage
+    CodePage,
+    Signal
 }

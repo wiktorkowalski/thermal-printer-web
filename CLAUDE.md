@@ -28,11 +28,11 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, SignalCommand
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
-│   │   ├── Options/            # BarcodeOptions, QRCodeOptions, ImageOptions
+│   │   ├── Options/            # BarcodeOptions, QRCodeOptions, ImageOptions, SignalOptions
 │   │   ├── PrintContent.cs     # Its [Description] texts are the MCP schema
 │   │   ├── TextSize.cs         # The size field of a Text or Separator block, and its range
 │   │   ├── PrintRequest.cs
@@ -68,7 +68,7 @@ Located in `backend/` directory.
 - `backend/Controllers/PrinterController.cs` - REST API:
   - `POST /api/printer` - Handles both simple printing (name + message) and template printing (content array)
   - `GET /api/printer/status` - Printer readiness
-  - `POST /api/printer/beep` - Sounds the buzzer
+  - `POST /api/printer/beep` - Sounds the buzzer or flashes the error light (see Signals)
 - `backend/Controllers/PrintJobsController.cs` - the print journal over HTTP (see Journal):
   - `GET /api/printer/jobs` - Job list, newest first, in pages
   - `GET /api/printer/jobs/{id}` - One job with its blocks
@@ -220,7 +220,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - A title or message over 10,000 characters is not wrapped (`SimpleNote.Wrap` returns it as it is): the Text block rejects it for its length before any work on the text. So the wrap reads at most 10,000 characters, in one pass.
 - The journal `Title` is the first line of the title as wrapped: a title over 24 characters shows its first line in the tray.
 
-**Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage
+**Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage, Signal
 
 **Text styles**: Bold, Italic, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode, UpsideDownMode
 
@@ -240,6 +240,29 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 **Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots).
 
 **Options**: CodePage selection (default PC852), line spacing, auto-cut behavior
+
+### Signals (buzzer and error light)
+
+**Rule: nothing beeps or lights by itself.** A signal goes out only when the caller asks for it: a beep call, or a Signal block that the caller put in the document.
+- No code path adds a signal: not simple mode, not `print_note`, not a print error, not the web UI. A reprint sends the stored blocks, so it repeats a Signal block of the first job and adds none.
+- The MCP texts tell a model the same: use a signal only when the user asks for a sound or a light (`PrinterTools.SignalRule`, in the `beep` and `print` descriptions and in `ServerInstructions`; the `[Description]` of `type` and `signalOptions`). `McpToolTests` and `SignalTests` pin the rule.
+- Do not add an automatic signal. A change to this rule needs the owner.
+
+**Modes** (`SignalMode`, the JSON names; the number is the `n` byte of `ESC C`):
+
+| Mode | Bytes | Effect |
+|------|-------|--------|
+| `Sound` (default) | `ESC B n t` (`1B 42 n t`) | The buzzer: n beeps of length t. |
+| `Light` | `ESC C m t 2` (`1B 43 m t 02`) | The error light flashes m times, no sound. |
+| `SoundAndLight` | `ESC C m t 3` (`1B 43 m t 03`) | Both. |
+
+- `SignalCommand.Build` makes the bytes for the beep call and for the block. Count and duration are 1 to 9 each; one step of the duration is about 50 ms (from the manual, not measured).
+- **Beep call**: `POST /api/printer/beep?count=&duration=&mode=`. `count` and `duration` are clamped to 1-9. `mode` is a name, letter case aside; no `mode` is `Sound`. Any other text is a 400 `validation` with the fixed error `mode must be Sound, Light or SoundAndLight`. A call with no `mode` sends the same bytes as before the mode (`SignalTests` pins them). The call sends the command alone: no reset prelude, no status read. It is not journaled.
+- **Signal block**: `{ "type": "Signal", "signalOptions": { "mode": "Light", "count": 2, "duration": 3 } }` in a template-mode document or an MCP `print` call. A field that is left out is `Sound`, 1 and 1. A count or a duration outside 1-9 is a 400 (the block does not clamp). The block sends its command at its place in the job, adds no paper and prints nothing; it does not read `content`.
+- One document holds at most 3 Signal blocks (`PrinterService.MaxSignalBlocks`). Worst case for one job: 3 x 9 x 9 x 50 ms = about 12 s of signal; the pause between two beeps is not measured (about 24 s if it has the length of a beep).
+- The reset prelude `ESC @` does not matter for a signal: `ESC B` and `ESC C` set no printer state, and a Signal block comes after the prelude of its job.
+- The web UI has one beep button (header, mode `Sound`). The editor does not offer the Signal block. A Signal block in a stored job or an imported template shows as a small marker (`signalLabel` in `lib/paper.ts`: tray thumbnail, `PaperDocument`, editor) and is sent as it is; the editor checks its ranges and the count per document.
+- Hardware (owner at the printer, 2026-10-05): `ESC C m t n` works in the order of the Xprinter 80XX manual (m count, t time x 50 ms, n mode 1 buzzer, 2 light, 3 both). `1B 43 04 08 02` flashed the error light with no sound. The buzzer modes of `ESC C` (1 and 3) sounded; they were not timed. The manual allows 1-20 for m and t; the service keeps 1-9 for both commands.
 
 ### Responses
 
@@ -280,7 +303,7 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 - Query 3 with no answer (`n3=?` in `raw`) or with a byte that is not a status frame (`n3=xx!`; a frame has bits 1 and 4 set, bits 0 and 7 clear): the error status is unknown, every error flag is false, the other queries decide `ready`. No log line. A silent query 3 adds 2 s to each status read and each print. Query 3 is not sent after a query with no answer (`n3=?`): a late answer would be read as the error status.
 - A status read logs at Debug only (the web UI polls it); an unreachable printer is one Warning. The controller logs nothing.
 - The web UI shows one cause (`printerFault` in `hooks/use-printer-status.ts`): header label, light label on the drawn printer (`lib/printer-light.ts`), steps above the paper (`PrinterAlert`).
-- `POST /api/printer/beep?count=&duration=` clamps both values to 1-9.
+- `POST /api/printer/beep?count=&duration=&mode=` clamps `count` and `duration` to 1-9 (see Signals).
 
 ### Job endpoints (the journal over HTTP)
 
@@ -337,6 +360,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Request body | 30,000,000 bytes | `PrinterService.MaxRequestBodyBytes` |
 | Blocks per document | 500 | `PrinterService.MaxBlocks` |
 | Image blocks per document | 20 | `PrinterService.MaxImageBlocks` |
+| Signal blocks per document | 3 | `PrinterService.MaxSignalBlocks` |
 | Printer data per document | 2 MiB | `PrinterService.MaxOutputBytes` |
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
 | `options.defaultLineSpacing`, `options.feedLinesAfterPrint` | 0-255 | `PrinterService.MaxLineSpacing`, `MaxFeedBeforeCut` |
@@ -344,6 +368,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
+| Signal count and duration (block: a 400 outside the range; beep call: clamped) | 1-9 each | `SignalCommand.Min`, `Max` |
 | Barcode height | 1-255 dots | `BarcodeBlockHandler.MinHeightInDots`, `MaxHeightInDots` |
 | Barcode data | per symbology; CODE128 holds 253 characters, `{` counts as 2 | no constant: ESCPOS_NET validates, `BarcodeBlockHandler.BuildCommand` checks the length byte |
 | QR data (UTF-8 bytes) | Model2 2953, Model1 707, Micro 21 | `QRCodeBlockHandler.Model2MaxBytes`, `Model1MaxBytes`, `MicroMaxBytes` |
@@ -422,13 +447,14 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 | `get_status` | none |
 | `print_note` | `title`, `message` (both needed), `imageBase64`, `source` |
 | `print` | `content` (needed), `options`, `source` |
-| `beep` | `count`, `duration` (1-9, default 1) |
+| `beep` | `count`, `duration` (1-9, default 1), `mode` (`Sound`, `Light` or `SoundAndLight`; default `Sound`) |
 | `list_jobs` | `limit` (1-20, default 10), `before`, `query` (2-100 characters: search) |
 | `get_job` | `id` (needed) |
 | `reprint_job` | `id` (needed), `source` |
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
+- `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.`; a `mode` that is not a name is a wrong-arguments answer that lists the names.
 - `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, and that journal text is untrusted. Keep it in line with the tool descriptions.
 
@@ -459,6 +485,8 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 
 A longer line wraps in the middle of a word. Break lines in the content. Simple mode is the exception: the server wraps it.
+
+**Buzzer and error light**: `ESC B n t` sounds the buzzer; `ESC C m t n` sounds the buzzer (n = 1), flashes the error light (n = 2) or does both (n = 3). Confirmed at the printer 2026-10-05. Nothing uses them without a request of the caller (see Signals).
 
 ## CI/CD
 
