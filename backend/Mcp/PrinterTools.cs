@@ -96,7 +96,7 @@ public static class PrinterTools
 
     [McpServerTool(Name = BeepName)]
     [Description(
-        "Sound the printer's buzzer without printing - an audible way to get Wiktor's attention. count = number of beeps (1-9), duration = length of each (1-9). "
+        "Sound the printer's buzzer or flash its error light, without printing. count = number of beeps or flashes (1-9), duration = length of each (1-9). "
         + "mode picks the signal: Sound (default), Light (the error light flashes, no sound) or SoundAndLight. "
         + SignalRule + " "
         + "Example: " + BeepExample)]
@@ -113,11 +113,13 @@ public static class PrinterTools
         if (!ok)
             return "Beep failed: printer unreachable.";
 
+        // The count that went out: the service clamps it.
+        var sent = Math.Clamp(count, SignalCommand.Min, SignalCommand.Max);
         return signalMode switch
         {
-            SignalMode.Light => $"Light flashed {count}x.",
-            SignalMode.SoundAndLight => $"Beeped and flashed {count}x.",
-            _ => $"Beeped {count}x."
+            SignalMode.Light => $"Light flashed {sent}x.",
+            SignalMode.SoundAndLight => $"Beeped and flashed {sent}x.",
+            _ => $"Beeped {sent}x."
         };
     }
 
@@ -133,7 +135,7 @@ public static class PrinterTools
         + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks (CRLF counts as \\n). "
         + "Image content is base64 PNG or JPEG; other formats are rejected. "
         + "One document holds at most 500 blocks, 20 of them images, and prints at most 4 m of paper. "
-        + "A Signal block sounds the buzzer or flashes the error light at its place in the document (signalOptions: mode, count 1 to 9, duration 1 to 9); one document holds at most 3. "
+        + "A Signal block sounds the buzzer or flashes the error light at its place in the document (signalOptions: mode, count 1 to 9, duration 1 to 9); one document holds at most 3. A Signal block prints nothing, but the document still feeds and cuts paper unless options.autoCut is false: for a signal with no paper call " + BeepName + ". "
         + "No other block and no option makes a sound. " + SignalRule + " "
         + "Example: " + PrintExample)]
     public static async Task<string> PrintAsync(

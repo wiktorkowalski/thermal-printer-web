@@ -316,9 +316,8 @@ export function blockError(block: PrintContent): string | null {
     // The editor does not make this block; an imported template can hold one.
     case ContentType.Signal: {
       const { count, duration } = block.signalOptions ?? {};
-      return inRange(count ?? SIGNAL_MIN, SIGNAL_MIN, SIGNAL_MAX) && inRange(duration ?? SIGNAL_MIN, SIGNAL_MIN, SIGNAL_MAX)
-        ? null
-        : `Signal count and duration must be between ${SIGNAL_MIN} and ${SIGNAL_MAX}`;
+      const valid = (value: unknown) => value == null || (Number.isInteger(value) && inRange(value as number, SIGNAL_MIN, SIGNAL_MAX));
+      return valid(count) && valid(duration) ? null : `Signal count and duration must be whole numbers between ${SIGNAL_MIN} and ${SIGNAL_MAX}`;
     }
     default:
       return null;

@@ -142,14 +142,19 @@ export function estimatePaperDots(content: PrintContent[], options: JobOptions, 
   return dots;
 }
 
-const SIGNAL_MODE_TEXT: Record<string, string> = { Sound: "sound", Light: "light", SoundAndLight: "sound + light" };
+// A Map: a stored mode such as "constructor" finds nothing.
+const SIGNAL_MODE_TEXT = new Map([
+  ["Sound", "sound"],
+  ["Light", "light"],
+  ["SoundAndLight", "sound + light"],
+]);
 
 /**
  * The read-only marker of a Signal block: it prints nothing and takes no paper.
  * The values can come from a stored job or an imported template, so they are shown as text, whatever they hold.
  */
 export function signalLabel(options: PrintContent["signalOptions"]): string {
-  const mode = SIGNAL_MODE_TEXT[String(options?.mode ?? "Sound")] ?? "?";
+  const mode = SIGNAL_MODE_TEXT.get(String(options?.mode ?? "Sound")) ?? "?";
   return `[signal · ${mode} × ${String(options?.count ?? 1)}]`;
 }
 

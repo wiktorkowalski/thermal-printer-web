@@ -114,6 +114,9 @@ public sealed class SignalTests(FakePrinterApp app) : IClassFixture<FakePrinterA
     [InlineData("""{"count":3,"duration":2,"mode":"Light"}""", "Light flashed 3x.", SignalMode.Light)]
     [InlineData("""{"mode":"SoundAndLight"}""", "Beeped and flashed 1x.", SignalMode.SoundAndLight)]
     [InlineData("""{"mode":null}""", "Beeped 1x.", SignalMode.Sound)]
+    // The answer holds the count that went out.
+    [InlineData("""{"count":99,"mode":"Light"}""", "Light flashed 9x.", SignalMode.Light)]
+    [InlineData("""{"count":0}""", "Beeped 1x.", SignalMode.Sound)]
     public async Task McpBeep_Mode_GoesToThePrinter(string? arguments, string expectedAnswer, SignalMode expectedMode)
     {
         app.Printer.Beeps.Clear();
@@ -128,14 +131,16 @@ public sealed class SignalTests(FakePrinterApp app) : IClassFixture<FakePrinterA
     [Theory]
     [InlineData($$$"""{"mode":"{{{TestBlocks.Secret}}}"}""")]
     [InlineData("""{"mode":"3"}""")]
-    public async Task McpBeep_UnknownMode_AnswersWithTheValidNamesAndSendsNothing(string arguments)
+    // A number: the SDK rejects it before the tool body.
+    [InlineData("""{"mode":2}""", "'mode' has the wrong JSON type")]
+    public async Task McpBeep_UnknownMode_AnswersWithTheValidNamesAndSendsNothing(string arguments, string problem = "'mode' must be Sound, Light or SoundAndLight")
     {
         app.Printer.Beeps.Clear();
 
         var (isError, text) = await _client.CallToolAsync("beep", arguments);
 
         Assert.True(isError);
-        Assert.StartsWith("Wrong arguments for 'beep': 'mode' must be Sound, Light or SoundAndLight. Example of a valid call: {", text);
+        Assert.StartsWith($"Wrong arguments for 'beep': {problem}. Example of a valid call: {{", text);
         Assert.DoesNotContain(TestBlocks.Secret, text);
         Assert.Empty(app.Printer.Beeps);
     }

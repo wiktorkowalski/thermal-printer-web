@@ -248,7 +248,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - The MCP texts tell a model the same: use a signal only when the user asks for a sound or a light (`PrinterTools.SignalRule`, in the `beep` and `print` descriptions and in `ServerInstructions`; the `[Description]` of `type` and `signalOptions`). `McpToolTests` and `SignalTests` pin the rule.
 - Do not add an automatic signal. A change to this rule needs the owner.
 
-**Modes** (`SignalMode`, the JSON names; the number is the `n` byte of `ESC C`):
+**Modes** (`SignalMode`, the JSON names; the numbers 1, 2, 3 are the `n` values of `ESC C`, and `Sound` is sent as `ESC B`):
 
 | Mode | Bytes | Effect |
 |------|-------|--------|
@@ -258,7 +258,9 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 - `SignalCommand.Build` makes the bytes for the beep call and for the block. Count and duration are 1 to 9 each; one step of the duration is about 50 ms (from the manual, not measured).
 - **Beep call**: `POST /api/printer/beep?count=&duration=&mode=`. `count` and `duration` are clamped to 1-9. `mode` is a name, letter case aside; no `mode` is `Sound`. Any other text is a 400 `validation` with the fixed error `mode must be Sound, Light or SoundAndLight`. A call with no `mode` sends the same bytes as before the mode (`SignalTests` pins them). The call sends the command alone: no reset prelude, no status read. It is not journaled.
-- **Signal block**: `{ "type": "Signal", "signalOptions": { "mode": "Light", "count": 2, "duration": 3 } }` in a template-mode document or an MCP `print` call. A field that is left out is `Sound`, 1 and 1. A count or a duration outside 1-9 is a 400 (the block does not clamp). The block sends its command at its place in the job, adds no paper and prints nothing; it does not read `content`.
+- **Signal block**: `{ "type": "Signal", "signalOptions": { "mode": "Light", "count": 2, "duration": 3 } }` in a template-mode document or an MCP `print` call. A field that is left out is `Sound`, 1 and 1. A count or a duration outside 1-9 is a 400 (the block does not clamp). The block sends its command at its place in the job (after the alignment command that every block gets), adds no paper and prints nothing; it does not read `content`.
+- A document of Signal blocks only still feeds and cuts paper unless `options.autoCut` is false: the auto-cut does not look at the block types. For a signal with no paper, use the beep call. The `print` tool description says so.
+- A print is refused while the printer is not ready, so a Signal block sends nothing then. The beep call reads no status and still goes out.
 - One document holds at most 3 Signal blocks (`PrinterService.MaxSignalBlocks`). Worst case for one job: 3 x 9 x 9 x 50 ms = about 12 s of signal; the pause between two beeps is not measured (about 24 s if it has the length of a beep).
 - The reset prelude `ESC @` does not matter for a signal: `ESC B` and `ESC C` set no printer state, and a Signal block comes after the prelude of its job.
 - The web UI has one beep button (header, mode `Sound`). The editor does not offer the Signal block. A Signal block in a stored job or an imported template shows as a small marker (`signalLabel` in `lib/paper.ts`: tray thumbnail, `PaperDocument`, editor) and is sent as it is; the editor checks its ranges and the count per document.
@@ -454,7 +456,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
-- `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.`; a `mode` that is not a name is a wrong-arguments answer that lists the names.
+- `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.` (N is the count after the clamp); a `mode` that is not a name is a wrong-arguments answer that lists the names.
 - `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, and that journal text is untrusted. Keep it in line with the tool descriptions.
 
