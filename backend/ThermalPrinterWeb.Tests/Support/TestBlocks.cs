@@ -26,6 +26,10 @@ internal static class TestBlocks
     public static PrintContent Text(string content = "ok", params PrintStyle[] style)
         => new() { Type = ContentType.Text, Content = content, Style = style.Length == 0 ? null : [.. style] };
 
+    // No argument: a block with an empty options object, so every default applies.
+    public static PrintContent Signal(SignalMode? mode = null, int? count = null, int? duration = null)
+        => new() { Type = ContentType.Signal, SignalOptions = new SignalOptions { Mode = mode, Count = count, Duration = duration } };
+
     // Text as the printer gets it in the default code page.
     public static byte[] Pc852Bytes(string text) => CodePages.GetEncoding(Pc852).GetBytes(text);
 

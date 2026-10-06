@@ -31,6 +31,9 @@ internal static class BlockEnums
             Check<QRCodeSize>("qrCodeOptions.size", qrCode.Size);
             Check<QRCodeCorrectionLevel>("qrCodeOptions.correctionLevel", qrCode.CorrectionLevel);
         }
+
+        if (item.SignalOptions is { } signal)
+            Check("signalOptions.mode", signal.Mode);
     }
 
     private static void Check<T>(string field, T? value) where T : struct, Enum
@@ -39,8 +42,13 @@ internal static class BlockEnums
             return;
 
         // The number is the only caller content in the text.
+        throw new PrintContentException($"{field} {number:D} is not a valid value; use {Names<T>()}");
+    }
+
+    // "A, B or C": the names of an enum for an error text.
+    internal static string Names<T>() where T : struct, Enum
+    {
         var names = Enum.GetNames<T>();
-        throw new PrintContentException(
-            $"{field} {number:D} is not a valid value; use {string.Join(", ", names[..^1])} or {names[^1]}");
+        return $"{string.Join(", ", names[..^1])} or {names[^1]}";
     }
 }

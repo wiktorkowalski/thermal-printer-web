@@ -84,7 +84,7 @@ public sealed class PrinterAddressTests
         var dropped = app.InformationLogs("No printer configured");
         Assert.Equal(2, dropped.Count);
         Assert.Matches(@"^No printer configured: print job of \d+ bytes not sent$", dropped[0]);
-        Assert.Equal("No printer configured: buzzer command of 4 bytes not sent", dropped[1]);
+        Assert.Equal("No printer configured: signal command of 4 bytes not sent", dropped[1]);
         // No connection attempt: a failed one logs a warning.
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Level >= LogLevel.Warning && entry.Category == typeof(PrinterService).FullName);
     }

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
 import { EDITOR_IMAGE_MAX_MB } from "@/lib/printer-limits";
 import { IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
-import { DEFAULT_ALIGNMENT, DOUBLE_STYLES, HEAD_DOTS, countPrintedLines, longestLine, textMetrics, textScale } from "@/lib/paper";
+import { DEFAULT_ALIGNMENT, DOUBLE_STYLES, HEAD_DOTS, countPrintedLines, longestLine, signalLabel, textMetrics, textScale } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView, type BarcodeRender } from "./graphic-views";
@@ -200,6 +200,9 @@ export function BlockView(props: BlockViewProps) {
     case "LineFeed":
       content = <FeedSpace lines={block.lines ?? 1} />;
       right = <span>× {block.lines ?? 1}</span>;
+      break;
+    case "Signal":
+      content = <span className="text-paper-faint">{signalLabel(block.signalOptions)}</span>;
       break;
     default:
       content = <span className="text-paper-faint">[{block.type}]</span>;
