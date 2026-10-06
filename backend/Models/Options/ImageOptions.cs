@@ -15,6 +15,6 @@ public class ImageOptions
     public bool UseLegacyMode { get; set; } = true;
 
     // Maps to ESCPOS PrintImage isHiDPI. In legacy mode the bytes are the same for both values (OldFieldTests).
-    [Description("Only read when useLegacyMode is false: full dot density. No effect in legacy mode, the default. Leave it out. Default true.")]
+    [Description("Only read when useLegacyMode is false: it picks the dot density command of that mode. No effect in legacy mode, the default. Leave it out. Default true.")]
     public bool HighDensity { get; set; } = true;
 }
