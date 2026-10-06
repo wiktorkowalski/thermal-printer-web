@@ -136,6 +136,7 @@ public static class PrinterTools
         + "so keep each line within the limit (one Text block per line, or \\n inside content) "
         + "or set \"wrap\":true on the Text block: then the server breaks each longer line at a space (a longer word breaks at the limit) and keeps each \\n. "
         + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
+        + "The cut alone goes through the last printed line: set options.feedLinesAfterPrint to 3 for three empty lines before it. "
         + "Polish letters print; emoji print as '?'. "
         + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks (CRLF counts as \\n). "
         + "Image content is base64 PNG or JPEG; other formats are rejected. "
@@ -147,7 +148,7 @@ public static class PrinterTools
         IPrinterService printer,
         PrintJobLog jobLog,
         [Description("Needed. Ordered content blocks to print, top to bottom.")] List<PrintContent>? content = null,
-        [Description("Optional print options: code page, line spacing, auto-cut.")] PrintOptions? options = null,
+        [Description("Optional print options: code page, line spacing, auto-cut, empty lines before a cut.")] PrintOptions? options = null,
         [Description(SourceDescription)] string? source = null)
     {
         if (content is null)

@@ -60,9 +60,14 @@ internal sealed class PrinterService(
     // Printer data for one job. A full-width image 4096 dots tall is 295 KB; text is 1 byte per character.
     internal const int MaxOutputBytes = 2 * 1024 * 1024;
 
-    // ESC 3 n and GS V m n take one byte each.
+    // ESC 3 n takes one byte.
     internal const int MaxLineSpacing = 255;
+
+    // options.feedLinesAfterPrint, in lines (CutFeed). The range of the time when the value was the one byte of GS V m n:
+    // a smaller range would reject a job that passes today. The paper limit stops a feed that is too long.
     internal const int MaxFeedBeforeCut = 255;
+
+    private const string FeedLinesField = "options.feedLinesAfterPrint";
 
     // One Signal block at its limits is 9 beeps of 9 x 50 ms: about 4 s of sound, about 8 s with pauses of the same length.
     // So one job holds at most about 12 s of sound (about 24 s with the pauses).
@@ -172,7 +177,7 @@ internal sealed class PrinterService(
         if (options is not null)
         {
             CheckOptionRange("options.defaultLineSpacing", options.DefaultLineSpacing, MaxLineSpacing);
-            CheckOptionRange("options.feedLinesAfterPrint", options.FeedLinesAfterPrint, MaxFeedBeforeCut);
+            CheckOptionRange(FeedLinesField, options.FeedLinesAfterPrint, MaxFeedBeforeCut);
         }
 
         var e = new EPSON();
@@ -226,13 +231,28 @@ internal sealed class PrinterService(
 
         if (options?.AutoCut != false && !ctx.HasCut)
         {
-            // Not counted as paper: one cut, under 5 cm.
-            var feedLines = options?.FeedLinesAfterPrint ?? 3;
-            ctx.Add(e.FullCutAfterFeed(feedLines));
+            AddFeedBeforeAutoCut(ctx);
+            // The cut command is not counted as paper: one cut, under 2 cm.
+            ctx.Add(e.FullCutAfterFeed(CutFeed.MotionUnits));
         }
 
         PrintJobTrace.Current?.PaperDots = ctx.PaperDots;
         return ctx.Output;
+    }
+
+    // The feed lines count as paper: 255 lines are 92 cm, and 8 m at the largest line spacing.
+    private void AddFeedBeforeAutoCut(BlockContext ctx)
+    {
+        try
+        {
+            CutFeed.AddLines(ctx);
+        }
+        catch (PrintContentException ex)
+        {
+            // No block is at fault, so AddBlockAsync does not log it.
+            logger.LogWarning("Rejected print: {Field} before the auto-cut: {Reason}", FeedLinesField, ex.Message);
+            throw new PrintContentException($"{FeedLinesField}: {ex.Message}");
+        }
     }
 
     private void CheckOptionRange(string field, int? value, int max)

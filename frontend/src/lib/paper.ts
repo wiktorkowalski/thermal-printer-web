@@ -102,9 +102,10 @@ function qrModules(content: string): number {
 }
 
 /**
- * Rough paper length for the whole job, in dots. Counts like the backend (PaperLength.cs)
- * except the cut: the feed and the cutter offset count as drawn on screen, so this is
- * about 26 mm above the backend for one auto-cut.
+ * Rough paper length for the whole job, in dots. Counts like the backend (PaperLength.cs).
+ * The feed before a cut is `feedLinesAfterPrint` lines of LINE_DOTS, as in the backend
+ * (backend/Services/Printing/CutFeed.cs). The cutter offset differs: it counts once here, as drawn
+ * on screen; the backend counts it (plus 3 dots of the cut command) at each Cut block and not at the auto-cut.
  */
 export function estimatePaperDots(content: PrintContent[], options: JobOptions, imageDots = 0): number {
   let dots = imageDots;

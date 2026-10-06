@@ -249,13 +249,24 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots).
 
-**Options**: CodePage selection (default PC852), line spacing, auto-cut behavior
+**Options**: CodePage selection (default PC852), line spacing, auto-cut behavior, feed before a cut
+
+**Feed before a cut**: `options.feedLinesAfterPrint` is a number of empty lines, 0 to 255 (issue #44, owner decision of 2026-10-06). `CutFeed` builds it.
+- Bytes: n times LF (the bytes of a LineFeed block), then the cut command. The cut command is the same in every job: `GS V 65 3` (`GS V 66 3` for `partialCut`); its 3 is `CutFeed.MotionUnits`, a feed of under 1 mm.
+- The field is not sent (or is `null`): no LF, the cut command alone. These are the bytes from before the change; `FeedLinesTests` pins them. So the model default is `null`, not a number.
+- With the cut command alone the cutter goes through the last printed line (issue #31, row F1). A caller sends 3 to keep that line whole, or ends the content with a LineFeed block. The house style does the second.
+- One line is the line of the job: 29 dots, or `options.defaultLineSpacing` when it is set. Each block sets the text size back to 1 x 1, so the size of the last block does not change the feed.
+- The feed is before each cut: every Cut block and the auto-cut. A job with no cut (`autoCut: false`, no Cut block) feeds nothing.
+- Why LF and not the n of `GS V`: n is one byte of motion units (255 dots, under 9 lines), and LF is the feed that is read from paper on this printer. `ESC d n` is not verified on it.
+- Paper: the lines count (n x `PaperLength.LineDots`). A Cut block also counts 127 dots (the cut command and the way to the cutter); the auto-cut counts its lines only. The largest value, 255, passes at the default line spacing (7395 dots, 92 cm). With `defaultLineSpacing: 255` an empty document takes 125 lines at most. Over the paper limit at the auto-cut the 400 reads `options.feedLinesAfterPrint: the document is over the limit ...`, with one Warning.
+- The web editor always sends the field (default 3), and its paper shows the same lines (`lib/paper.ts`).
+- Journal rows: a reprint reads the stored number as lines. A row from before the change that set the field now feeds lines (it fed motion units). Such a row also holds `"feedLinesAfterPrint":3` when its caller sent an `options` object without the field (the model default of that time): its reprint feeds 3 lines. A row with no `options` (simple mode, `print_note`) keeps its bytes.
 
 **Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).
 - No caller text offers them: `HiddenPrintFields` removes `partialCut` from the MCP schema of `print`, the code page texts do not name the two pages, the editor has no control for them.
 - The server still binds them and sends the same bytes as before: callers and journal rows hold them. `OldFieldTests` pins this. Do not remove them from the models or from `CodePages`.
 - `imageOptions.highDensity` is read only when `useLegacyMode` is false. In legacy mode, the default, both values give the same bytes. It stays in the schema; its text says so.
-- `options.feedLinesAfterPrint` is not lines: `GS V n` reads motion units of at most 0.125 mm. The MCP text says so. The name and the bytes stay.
+- `options.feedLinesAfterPrint` is not in this list any more: it feeds lines (see Feed before a cut). `OldFieldTests` pins the new end of the old job: 5 LF, then `GS V 66 3`.
 - The binder skips a JSON property that no model has: an unknown property is never a 400.
 
 ### Signals (buzzer and error light)
@@ -355,7 +366,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
 
-**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job.
+**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job. So a reprint follows the rules of today: a stored `feedLinesAfterPrint` feeds lines, also in a row from before that rule (see Feed before a cut).
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
 - No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
@@ -382,7 +393,8 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Signal blocks per document | 3 | `PrinterService.MaxSignalBlocks` |
 | Printer data per document | 2 MiB | `PrinterService.MaxOutputBytes` |
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
-| `options.defaultLineSpacing`, `options.feedLinesAfterPrint` | 0-255 | `PrinterService.MaxLineSpacing`, `MaxFeedBeforeCut` |
+| `options.defaultLineSpacing` | 0-255 dots | `PrinterService.MaxLineSpacing` |
+| `options.feedLinesAfterPrint` | 0-255 lines; the paper limit counts them | `PrinterService.MaxFeedBeforeCut` |
 | Text block | 10,000 characters, 500 lines; with `wrap` both count the text after the wrap | `TextBlockHandler.MaxLength`, `MaxLines` |
 | Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
@@ -462,7 +474,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 - `PrintJobTexts`: `JobId`, `Text`: the first 10,000 characters of `PlainText`, for the search and the ledger. It is a second copy on purpose: in `PrintJobPayloads` the text sits behind values of up to 30 MB, so a scan there reads the whole database. A job with no text and a reprint row have no row here. The migration `JobText` fills it for the rows from before.
 - A row delete in `PrintJobs` takes its `PrintJobPayloads` and `PrintJobTexts` rows with it (cascade).
 - `Result` is the number of `JobResult`: 0 Printed, 1 Validation, 2 Printer, 3 Busy, 4 Fault. Keep the numbers; add new ones at the end.
-- `Blocks` and `Options` are the API JSON, so an enum is its API name (`"type":"Text"`). The API name is the contract: a rename breaks callers and old rows alike. `Options` is what the caller sent; no defaults are filled in.
+- `Blocks` and `Options` are the API JSON, so an enum is its API name (`"type":"Text"`). The API name is the contract: a rename breaks callers and old rows alike. `Options` is the options model as JSON: a property that the caller did not send holds the model default (`null` for `feedLinesAfterPrint`; 3 in a row from before the feed fed lines). A job with no `options` object stores no `Options`.
 - The database can pass `MaxDatabaseBytes` by one row: the check does not count the new row.
 - `Blocks` holds `sha256:<hex>;chars=<n>` in place of an image: the hash of the base64 text. The picture is in `Request`.
 - `Headers` holds `[redacted]` for a header whose name has one of the parts in `PrintJournalMiddleware.CredentialNameParts` in it (`auth`, `cookie`, `token`, `secret`, `key`, ...).
@@ -540,6 +552,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 - Read from paper: Font A at 1, 2, 3, 4 and 8; Font B at 1 and 2. The other values are the same division.
 - `DoubleWidth` is width 2, `DoubleHeight` is height 2. A `size` gives 1 to 8 for each axis (`GS ! n`); width and height are independent. Polish letters are correct at 3 x 3 (read from paper).
 - Line pitch: 29 dots at height 1, plus 24 dots for each step of the height.
+- Cut: `GS V 65 n` feeds n motion units (at most 1 dot each, so 255 is under 9 lines), then cuts. The cutter is 124 dots past the head. With n = 3 and no empty line before it the cutter goes through the last printed line; 3 LF before the cut keep it whole (`options.feedLinesAfterPrint`, `SimpleNote.FeedLines`).
 
 Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 

@@ -154,6 +154,7 @@ export interface PrintOptions {
   codePage?: string;
   defaultLineSpacing?: number;
   autoCut?: boolean;
+  /** Empty lines before each cut. Left out: the cut command alone (backend/Services/Printing/CutFeed.cs). */
   feedLinesAfterPrint?: number;
 }
 

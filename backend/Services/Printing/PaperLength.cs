@@ -60,8 +60,9 @@ internal static class PaperLength
         return lines * LineDots(lineSpacing, scale.Height);
     }
 
-    // GS V n feeds n motion units; one unit is at most one dot.
-    public static int CutDots(int feed) => feed + CutterOffsetDots;
+    // The cut command alone: GS V m n feeds n motion units, and one unit is at most one dot.
+    // The lines of options.feedLinesAfterPrint are counted apart (CutFeed).
+    public static int CutDots(int motionUnits) => motionUnits + CutterOffsetDots;
 
     // The size the printer gives an image: it only scales down, to fit inside the limits.
     public static int ImageDots(int width, int height, int maxWidth, int maxHeight, bool preserveAspectRatio)

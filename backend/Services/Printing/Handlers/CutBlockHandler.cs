@@ -9,11 +9,11 @@ internal sealed class CutBlockHandler : IBlockHandler
     public Task HandleAsync(PrintContent item, BlockContext ctx)
     {
         ctx.HasCut = true;
-        var feedLines = ctx.Options?.FeedLinesAfterPrint ?? 3;
-        ctx.AddPaper(PaperLength.CutDots(feedLines));
+        CutFeed.AddLines(ctx);
+        ctx.AddPaper(PaperLength.CutDots(CutFeed.MotionUnits));
         ctx.Add(item.PartialCut == true
-            ? ctx.Emitter.PartialCutAfterFeed(feedLines)
-            : ctx.Emitter.FullCutAfterFeed(feedLines));
+            ? ctx.Emitter.PartialCutAfterFeed(CutFeed.MotionUnits)
+            : ctx.Emitter.FullCutAfterFeed(CutFeed.MotionUnits));
         return Task.CompletedTask;
     }
 }
