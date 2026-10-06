@@ -10,7 +10,7 @@ public class PrintOptions
     public int? DefaultLineSpacing { get; set; }
     [Description("Cut the paper after the last block when the content has no Cut block. Default true.")]
     public bool AutoCut { get; set; } = true;
-    // Null: the caller did not send it. Such a job has the bytes from before the field fed lines (issue #44): the cut command alone (CutFeed).
-    [Description("Empty lines before each cut (a Cut block or the auto-cut), 0 to 255. One line is 29 dots (3.6 mm), or defaultLineSpacing dots when that is set. The lines count as paper. Left out: no empty line, and the cut goes through the last printed line; send 3 to keep that line whole.")]
+    // Null: the caller did not send it. The server then keeps CutFeed.DefaultLines empty lines before each cut (issue #44). A test pins the 3 of the text.
+    [Description("Empty lines before each cut (a Cut block or the auto-cut), 0 to 255. One line is 29 dots (3.6 mm), or defaultLineSpacing dots when that is set. The lines count as paper. Left out: the server keeps 3 empty lines before the cut, and the lines of a LineFeed block right before the cut count toward the 3. A number is added as sent, whatever the content; 0 adds no line, and with no empty line the cut goes through the last printed line.")]
     public int? FeedLinesAfterPrint { get; set; }
 }

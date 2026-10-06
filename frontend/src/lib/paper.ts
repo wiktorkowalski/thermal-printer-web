@@ -1,6 +1,6 @@
 import type { PrintContent, PrintStyle, TextSize } from "@/types/printer";
 import { columnsPerLine, CHARS_PER_LINE } from "@/lib/printer-constants";
-import { QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
+import { DEFAULT_FEED_BEFORE_CUT, QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
 import { qrDataBytes } from "@/lib/validation";
 
 // Vretti V330M geometry. The head is 576 dots wide (72 mm printable on 80 mm
@@ -102,9 +102,40 @@ function qrModules(content: string): number {
 }
 
 /**
+ * The lines that the server adds before the last cut of a job with no `feedLinesAfterPrint`
+ * (backend/Services/Printing/CutFeed.cs): what the LineFeed blocks right before that cut lack for
+ * DEFAULT_FEED_BEFORE_CUT empty lines. A Signal and a CodePage block move no paper and keep the count;
+ * an empty line inside a Text block does not count. The last cut is the last Cut block, or the end of the content.
+ * The editor holds one number for every cut, so it takes this one for a file with no such field:
+ * an earlier cut of that file can get other lines from the server.
+ */
+export function defaultFeedBeforeCut(content: readonly (PrintContent | null | undefined)[]): number {
+  let end = content.length;
+  for (let i = content.length - 1; i >= 0; i--) {
+    if (content[i]?.type === "Cut") {
+      end = i;
+      break;
+    }
+  }
+
+  let trailing = 0;
+  for (let i = end - 1; i >= 0; i--) {
+    const block = content[i];
+    if (block?.type === "LineFeed") {
+      const lines = block.lines ?? 1;
+      // The file is not checked yet: only a whole number counts, so the result is a whole number.
+      trailing += Number.isInteger(lines) && lines > 0 ? lines : 0;
+    } else if (block?.type !== "Signal" && block?.type !== "CodePage") {
+      break;
+    }
+  }
+  return Math.max(0, DEFAULT_FEED_BEFORE_CUT - trailing);
+}
+
+/**
  * Rough paper length for the whole job, in dots. Counts like the backend (PaperLength.cs).
- * The feed before a cut is `feedLinesAfterPrint` lines of LINE_DOTS, as in the backend
- * (backend/Services/Printing/CutFeed.cs). The cutter offset differs: it counts once here, as drawn
+ * The feed before a cut is `feedLinesAfterPrint` lines of LINE_DOTS, as in the backend for a job that sends the field
+ * (backend/Services/Printing/CutFeed.cs); the editor and the receipt always send it. The cutter offset differs: it counts once here, as drawn
  * on screen; the backend counts it (plus 3 dots of the cut command) at each Cut block and not at the auto-cut.
  */
 export function estimatePaperDots(content: PrintContent[], options: JobOptions, imageDots = 0): number {

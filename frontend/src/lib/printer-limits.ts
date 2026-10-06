@@ -45,6 +45,10 @@ export const MAX_IMAGE_BLOCKS = 20;
 export const MAX_SIGNAL_BLOCKS = 3;
 // MaxFeedBeforeCut is a number of lines (the feed is built in backend/Services/Printing/CutFeed.cs): one line is 29 dots, LINE_DOTS in lib/paper.ts.
 export const MAX_FEED_BEFORE_CUT = 255;
+// backend/Services/Printing/CutFeed.cs: DefaultLines. The empty lines that the server keeps before a cut of a job with no feedLinesAfterPrint;
+// the lines of the LineFeed blocks right before the cut count toward them (defaultFeedBeforeCut in lib/paper.ts).
+// The editor always sends a number, so this is its start value and the value of an imported file with no such field.
+export const DEFAULT_FEED_BEFORE_CUT = 3;
 export const MAX_LINE_SPACING = 255;
 export const MAX_REQUEST_BYTES = 30_000_000;
 

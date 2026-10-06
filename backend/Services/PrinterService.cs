@@ -69,6 +69,9 @@ internal sealed class PrinterService(
 
     private const string FeedLinesField = "options.feedLinesAfterPrint";
 
+    // In the 400 of a job that is over the paper limit only with the default lines before its auto-cut.
+    internal const string DefaultFeedCause = "the empty lines before the cut";
+
     // One Signal block at its limits is 9 beeps of 9 x 50 ms: about 4 s of sound, about 8 s with pauses of the same length.
     // So one job holds at most about 12 s of sound (about 24 s with the pauses).
     internal const int MaxSignalBlocks = 3;
@@ -249,9 +252,12 @@ internal sealed class PrinterService(
         }
         catch (PrintContentException ex)
         {
+            // A job that did not send the field gets the default lines: the answer does not name a field that the caller did not use.
+            var cause = ctx.Options?.FeedLinesAfterPrint is null ? DefaultFeedCause : FeedLinesField;
+
             // No block is at fault, so AddBlockAsync does not log it.
-            logger.LogWarning("Rejected print: {Field} before the auto-cut: {Reason}", FeedLinesField, ex.Message);
-            throw new PrintContentException($"{FeedLinesField}: {ex.Message}");
+            logger.LogWarning("Rejected print: {Cause} before the auto-cut: {Reason}", cause, ex.Message);
+            throw new PrintContentException($"{cause}: {ex.Message}");
         }
     }
 
@@ -294,6 +300,9 @@ internal sealed class PrinterService(
             });
 
             await handler.HandleAsync(item, ctx);
+
+            // After the handler: a Cut block reads the lines before it, then starts a new strip.
+            ctx.TrailingFeedLines = CutFeed.TrailingLinesAfter(item, ctx.TrailingFeedLines);
         }
         // Busy is server load, not the payload: it must not turn into a 400.
         catch (Exception ex) when (ex is not PrintBusyException)

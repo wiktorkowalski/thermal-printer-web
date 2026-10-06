@@ -23,8 +23,8 @@ internal static class SimpleNote
     internal static readonly int SeparatorLength = PaperLength.Columns(fontB: false, widthMultiplier: 1);
 
     // The cut command alone cuts through the last text line: it is about one line short (issue #31, row F1).
-    // Three lines: the one that is needed plus two of margin.
-    internal const int FeedLines = 3;
+    // The note ends with the default gap as a LineFeed block, so its Cut block adds no line (CutFeed).
+    internal const int FeedLines = CutFeed.DefaultLines;
 
     // The date on the strip is the date at the printer, not the UTC date of the container.
     private static readonly TimeZoneInfo StripZone =

@@ -48,6 +48,10 @@ public sealed class PayloadErrorTests
     internal static readonly string OverPaperAtAutoCut =
         $"options.feedLinesAfterPrint: the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)";
 
+    // The same for a job with no feed field: the default lines pass the limit, so the text names no field.
+    internal static readonly string OverPaperAtDefaultFeed =
+        $"{PrinterService.DefaultFeedCause}: the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)";
+
     internal static string QRCodeControl(int codePoint, int index)
         => $"content holds the control character U+{codePoint:X4} at index {index}; a QR code takes no control character but a line break (\\n or \\r\\n)";
 
@@ -401,23 +405,29 @@ public sealed class PayloadErrorTests
             { [doubleHeight, doubleHeight], null, OverPaper(1, ContentType.Text) },
             // A long line wraps: 10,000 characters are 417 DoubleWidth lines.
             { [.. Enumerable.Repeat(new PrintContent { Type = ContentType.Text, Content = new string('x', 10_000), Style = [PrintStyle.DoubleWidth] }, 3)], null, OverPaper(2, ContentType.Text) },
-            // Line spacing 255: 125 lines are 31,875 dots.
-            { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255 }, null },
+            // Line spacing 255: 125 lines are 31,875 dots. A feed of 0: the limit of the block alone.
+            { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 0 }, null },
             { [Text(new string('\n', 125))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaper(0, ContentType.Text) },
+            // No feed field: the 3 default lines before the auto-cut count, here 3 x 255 dots. No block and no field is at fault.
+            { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaperAtDefaultFeed },
             // Each cut feeds 255 lines of 29 dots, the 3 units of the cut command and the 124 dots to the cutter: 7522.
             { [.. Enumerable.Repeat(cut, 4)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
             { [.. Enumerable.Repeat(cut, 5)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(4, ContentType.Cut) },
-            // A feed of 0, or no feed field, still moves the paper to the cutter: 127 dots.
+            // A feed of 0 still moves the paper to the cutter: 127 dots.
             { [.. Enumerable.Repeat(cut, 251)], new PrintOptions { FeedLinesAfterPrint = 0 }, null },
             { [.. Enumerable.Repeat(cut, 252)], new PrintOptions { FeedLinesAfterPrint = 0 }, OverPaper(251, ContentType.Cut) },
-            { [.. Enumerable.Repeat(cut, 252)], null, OverPaper(251, ContentType.Cut) },
+            // No feed field: each cut with no LineFeed block before it also feeds the 3 default lines. 3 x 29 + 127 = 214 dots.
+            { [.. Enumerable.Repeat(cut, 149)], null, null },
+            { [.. Enumerable.Repeat(cut, 150)], null, OverPaper(149, ContentType.Cut) },
+            // A LineFeed block of 3 lines before each cut: the same 214 dots, the cut adds no line.
+            { [.. Enumerable.Repeat<PrintContent[]>([LineFeed(3), cut], 149).SelectMany(pair => pair)], null, null },
             // The auto-cut counts its feed lines, not its cut command: 255 lines of 29 dots are 7395 dots.
             { [], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
             // A line of the feed has the line spacing of the job: 125 lines of 255 dots are 31,875 dots.
             { [], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 125 }, null },
             { [], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 126 }, OverPaperAtAutoCut },
             { [Text()], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 125 }, OverPaperAtAutoCut },
-            // No feed field: the auto-cut adds no paper, so a document at the limit still passes.
+            // No feed field and 3 empty lines at the end: the auto-cut adds no paper, so a document at the limit still passes.
             { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(3)], new PrintOptions(), null },
             // The printer wraps on bytes. KATAKANA has no .NET encoding, so the text goes out as UTF-8: 3 bytes for one euro sign.
             { [.. Enumerable.Repeat(Text(new string('€', 10_000)), 2)], new PrintOptions { CodePage = "KATAKANA" }, OverPaper(1, ContentType.Text) },
@@ -429,8 +439,11 @@ public sealed class PayloadErrorTests
             // 255 dots + one line = 284 dots.
             { [.. Enumerable.Repeat(Barcode(255), 112)], null, null },
             { [.. Enumerable.Repeat(Barcode(255), 113)], null, OverPaper(112, ContentType.Barcode) },
-            // A caption above and below: 255 dots + two lines = 313 dots.
-            { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 102)], null, null },
+            // A caption above and below: 255 dots + two lines = 313 dots. 102 are 31,926 dots: with a feed of 0 they pass,
+            // with no feed field the 3 default lines (87 dots) are over the limit.
+            { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 102)], new PrintOptions { FeedLinesAfterPrint = 0 }, null },
+            { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 102)], null, OverPaperAtDefaultFeed },
+            { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 101)], null, null },
             { [.. Enumerable.Repeat(Barcode(255, BarLabelPosition.Both), 103)], null, OverPaper(102, ContentType.Barcode) }
         };
     }

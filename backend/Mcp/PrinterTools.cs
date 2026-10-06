@@ -35,10 +35,11 @@ public static class PrinterTools
     internal const string SignalRule =
         "Nothing beeps or lights by itself. Send a sound or a light only when the user asks for one, never on your own for a print, an error or a finished task.";
 
-    // In ServerInstructions and in the print description. The 3 is SimpleNote.FeedLines: a test pins it.
+    // In ServerInstructions and in the print description. The 3 is CutFeed.DefaultLines: a test pins it.
     internal const string CutFeedRule =
-        "With no empty line before it the cut of a " + PrintName + " document goes through the last printed line, so set options.feedLinesAfterPrint to 3 "
-        + "or end the content with a LineFeed block of 3 lines, not both.";
+        "The server keeps 3 empty lines before each cut of a " + PrintName + " document, so the cut does not go through the last printed line: "
+        + "the lines of a LineFeed block right before the cut count toward the 3, so add no LineFeed block for the cut. "
+        + "Set options.feedLinesAfterPrint only for another gap: that number of lines is added as sent, 0 adds none.";
 
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =

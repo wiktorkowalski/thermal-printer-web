@@ -11,6 +11,8 @@ internal static class PaperLength
     // One job: 32,000 dots = 4 m. The longest Text block at 2x (500 DoubleHeight lines, 3.3 m)
     // and 20 images of the default height (1.4 m) pass; a receipt is under 1 m.
     // Taller text reaches the limit sooner: 162 lines at height 8.
+    // The lines before a cut count too (CutFeed), also the 3 default lines of a job with no feed field:
+    // such a job has up to 87 dots less for its blocks: 29 for each of the 3 lines that it lacks at its end.
     internal const int MaxDots = 32_000;
 
     // Measured line pitch: 11 lines = 40 mm. Same value as frontend/src/lib/paper.ts.
@@ -61,7 +63,7 @@ internal static class PaperLength
     }
 
     // The cut command alone: GS V m n feeds n motion units, and one unit is at most one dot.
-    // The lines of options.feedLinesAfterPrint are counted apart (CutFeed). The parameter stays: SimpleNoteTests calls it with its own 3.
+    // The lines before the cut are counted apart (CutFeed). The parameter stays: SimpleNoteTests calls it with its own 3.
     public static int CutDots(int motionUnits) => motionUnits + CutterOffsetDots;
 
     // The size the printer gives an image: it only scales down, to fit inside the limits.
