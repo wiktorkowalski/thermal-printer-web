@@ -178,7 +178,7 @@ public sealed class SimpleNoteTests
     [InlineData("ab 😀 cd", 7, "ab 😀\ncd")]
     public void Wrap_Text_BreaksAtSpacesAndKeepsTheLineBreaks(string text, int columns, string expected)
     {
-        Assert.Equal(expected, SimpleNote.Wrap(text, columns));
+        Assert.Equal(expected, WordWrap.Wrap(text, columns));
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public sealed class SimpleNoteTests
         var text = string.Concat(Enumerable.Repeat(unit, TextBlockHandler.MaxLength / unitLength));
         var clock = Stopwatch.StartNew();
 
-        var wrapped = SimpleNote.Wrap(text, SimpleNote.BodyColumns);
+        var wrapped = WordWrap.Wrap(text, SimpleNote.BodyColumns);
 
         Assert.Equal(TextBlockHandler.MaxLength, text.Length);
         Assert.InRange(wrapped.Length, 0, 2 * text.Length);

@@ -143,6 +143,11 @@ export interface PrintContent {
   separatorLength?: number;
   /** Signal only. The web UI never adds a Signal block by itself: it shows one that a stored job or an imported template holds. */
   signalOptions?: SignalOptions | null;
+  /**
+   * Text only. True: the server breaks the lines at spaces. The web UI never sets it; it keeps the flag of a stored job
+   * or an imported template, and the paper shows such a text with the breaks of the printer (in the middle of a word).
+   */
+  wrap?: boolean | null;
 }
 
 export interface PrintOptions {

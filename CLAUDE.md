@@ -28,7 +28,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, SignalCommand
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -212,12 +212,12 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 | Date `yyyy-MM-dd` | Font B, size 2x3 | Right | |
 | 3 empty lines, then the cut | | | |
 
-- The server wraps the title and the message (`SimpleNote.Wrap`): a break at a space or a tab, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. Spaces at a break are not printed. A character that prints as two (`→` as `->`) counts as two columns.
-- Only simple mode wraps and only simple mode adds a date line. Template mode prints the blocks as sent.
+- The server wraps the title and the message (`WordWrap.Wrap`): a break at a space or a tab, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. Spaces at a break are not printed. A character that prints as two (`→` as `->`) counts as two columns.
+- Simple mode always wraps, and only simple mode adds a date line. Template mode prints the blocks as sent; a Text block wraps only with `"wrap": true` (see Text wrap).
 - The date is the date in `Europe/Warsaw` (UTC when the host has no such zone). A reprint prints the stored date.
 - The 3 lines before the cut keep the date line whole: with no feed the cutter goes through the last text line.
 - The limits are those of the built blocks, so an error names a block (`Block 0 (Text)` is the title, `Block 2 (Text)` the message). The message holds 10,000 characters after the wrap and 410 lines with a one-line title; more is a 400 (text length, text line count or paper). The 500-line limit counts the lines after the wrap.
-- A title or message over 10,000 characters is not wrapped (`SimpleNote.Wrap` returns it as it is): the Text block rejects it for its length before any work on the text. So the wrap reads at most 10,000 characters, in one pass.
+- A title or message over 10,000 characters is not wrapped (`WordWrap.Wrap` returns it as it is): the Text block rejects it for its length before any work on the text. So the wrap reads at most 10,000 characters, in one pass.
 - The journal `Title` is the first line of the title as wrapped: a title over 24 characters shows its first line in the tray.
 
 **Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage, Signal
@@ -230,6 +230,16 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - Bytes of a block with `size`: `ESC ! n` (styles without the two double bits), `GS ! n`, the text, `GS ! 0`, `ESC ! 0`. So the next block starts at 1 x 1.
 - The paper estimate counts the columns and the line height of the size (`PaperLength`, `TextScale`).
 - The editor stores a size up to 2 x 2 as the two styles and a larger one as `size` (`textSizePatch` in `editor/document.ts`).
+
+**Text wrap**: `"wrap": true` on a Text block (issue #55). The server breaks the lines of the block with `WordWrap.Wrap`, the wrap of simple mode: same rules.
+- Opt-in. A block without the flag (or with `false` or `null`) sends the bytes from before the field: the printer wraps it in the middle of a word. `TextWrapTests` pins these bytes.
+- The column limit comes from the block: `PaperLength.Columns(styles, size)`, from the font (`FontB` or Font A) and the width of `TextScale.Of` (`size.width`, else 2 for `DoubleWidth`, else 1). See the table in Printer Hardware Constraints.
+- The columns are those of the default code page (PC852). A job with another code page can get a line over the limit.
+- One block stays one block: the server adds LF inside the text. Block numbers in errors and `BlockCount` do not change.
+- Limits (`TextBlockHandler`): a text over 10,000 characters is rejected before the wrap reads it. Then the 10,000 characters, the 500 lines and the paper estimate count the text after the wrap. A break inside a long word adds one character: 10,000 characters with no space are over the limit. These two errors read `text length after the wrap N ...` and `text line count after the wrap N ...`: N is not the number that the caller sent.
+- Only a Text block reads the flag. A Separator does not wrap.
+- Journal: `Blocks` holds the block as sent (the flag, the text with no break of the server), so a reprint wraps again. `PlainText`, `Title` and the search text are the text as sent too. Simple mode is different: its blocks are built wrapped, so its stored text is the text on the paper.
+- The web editor has no control for the flag. It keeps the flag of an imported template; the paper and a tray thumbnail show such a text with a break in the middle of a word, and the inspector says "The printer breaks the line mid-word". The checks of the editor count the text as sent, so such a block near a limit can pass the editor and get a 400 from the server.
 
 **Alignment**: Left, Center (default), Right
 
@@ -355,7 +365,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 ### Content rules
 
-- **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Every line ending becomes LF, the only control byte that passes. A character the code page lacks prints as `?` or as a best-fit letter.
+- **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Every line ending becomes LF, the only control byte that passes. A character the code page lacks prints as `?` or as a best-fit letter. With `"wrap": true` the server breaks the lines first (see Text wrap).
 - **QR code**: the data is stored as UTF-8 bytes, whatever the code page. A control character rejects the block; `\n` and `\r\n` are line breaks.
 - **Barcode**: printable ASCII only (0x20-0x7E); any other character rejects the block. ESCPOS_NET checks length and characters per symbology.
 - **Image**: one decode runs at a time (`DecodeQueue`). The number of waiting jobs and the wait time have limits (`ImageBlockHandler.MaxDecodeWaiters`, `DecodeWaitTimeout`); past them the job gets 503 `busy`. A JPEG must reach its EOI marker: a truncated JPEG is a 400. Bytes after EOI are ignored. A PNG without its IEND chunk still prints.
@@ -373,7 +383,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Printer data per document | 2 MiB | `PrinterService.MaxOutputBytes` |
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
 | `options.defaultLineSpacing`, `options.feedLinesAfterPrint` | 0-255 | `PrinterService.MaxLineSpacing`, `MaxFeedBeforeCut` |
-| Text block | 10,000 characters, 500 lines | `TextBlockHandler.MaxLength`, `MaxLines` |
+| Text block | 10,000 characters, 500 lines; with `wrap` both count the text after the wrap | `TextBlockHandler.MaxLength`, `MaxLines` |
 | Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
@@ -494,6 +504,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
+- A Text block of `print` takes `"wrap": true` (see Text wrap). The `print` description and `ServerInstructions` say both things: without the flag a longer line wraps in the middle of a word, with the flag the server breaks the lines.
 - `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.` (N is the count after the clamp); a `mode` that is not a name is a wrong-arguments answer that lists the names.
 - `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, the signal rule, that journal text is untrusted, and that a delete is for good. Keep it in line with the tool descriptions.
@@ -532,7 +543,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 
 Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 
-A longer line wraps in the middle of a word. Break lines in the content. Simple mode is the exception: the server wraps it.
+A longer line wraps in the middle of a word. Break lines in the content, or set `"wrap": true` on the Text block: then the server breaks them. Simple mode always wraps on the server.
 
 **Buzzer and error light**: `ESC B n t` sounds the buzzer; `ESC C m t n` sounds the buzzer (n = 1), flashes the error light (n = 2) or does both (n = 3). Confirmed at the printer 2026-10-05. Nothing uses them without a request of the caller (see Signals).
 

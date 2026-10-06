@@ -2,6 +2,7 @@
 // a job past one of these gets a 400. Keep each number equal to the named constant.
 
 // backend/Services/Printing/Handlers/TextBlockHandler.cs: MaxLength, MaxLines
+// For a block with `wrap: true` the server counts the text after its wrap; the editor counts the text as sent.
 export const TEXT_MAX_LENGTH = 10_000;
 export const TEXT_MAX_LINES = 500;
 

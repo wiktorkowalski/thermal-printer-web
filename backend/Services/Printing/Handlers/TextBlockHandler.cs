@@ -16,10 +16,21 @@ internal sealed class TextBlockHandler : IBlockHandler
         if (text.Length > MaxLength)
             throw PrintContentException.OverLimit("text length", text.Length, MaxLength);
 
+        // Only "wrap": true breaks the lines. Without it the text goes to the printer as sent: callers and stored jobs rely on these bytes.
+        // The wrap reads at most MaxLength characters, and the limits below count the text after it.
+        var wrap = item.Wrap == true;
+        if (wrap)
+        {
+            text = WordWrap.Wrap(text, PaperLength.Columns(item.Style, item.Size));
+            // A break inside a long word adds one character. The number is not the length that the caller sent: the error says so.
+            if (text.Length > MaxLength)
+                throw PrintContentException.OverLimit("text length after the wrap", text.Length, MaxLength);
+        }
+
         // Same line breaks as the encoder: it turns CR, FF, NEL, LS and PS into LF.
         var lines = text.ReplaceLineEndings("\n").AsSpan().Count('\n') + 1;
         if (lines > MaxLines)
-            throw PrintContentException.OverLimit("text line count", lines, MaxLines);
+            throw PrintContentException.OverLimit(wrap ? "text line count after the wrap" : "text line count", lines, MaxLines);
 
         ctx.AddRange(StyledText.Build(ctx, text, item.Style, item.Size));
         return Task.CompletedTask;

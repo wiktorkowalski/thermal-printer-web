@@ -38,7 +38,8 @@ public static class PrinterTools
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =
         "80 mm thermal receipt printer: one line holds 48 characters (24 with DoubleWidth, 64 with FontB, 48 / width with a size of 1 to 8) "
-        + "and a longer line wraps in the middle of a word, so break lines yourself. "
+        + "and a longer line wraps in the middle of a word, so break lines yourself "
+        + $"or set \"wrap\":true on a Text block of {PrintName}: then the server breaks the lines at spaces. "
         + $"For a quick note call {PrintNoteName} with {{\"title\":\"...\",\"message\":\"...\"}}; "
         + $"for styled text, barcodes, QR codes or images call {PrintName} with {{\"content\":[{{\"type\":\"Text\",\"content\":\"...\"}}]}}. "
         + "House style: headline Bold with size 2x3 (24 characters per line), body FontB with size 2x3 (32 characters per line), "
@@ -132,7 +133,8 @@ public static class PrinterTools
         + "Use for full control over styling, barcodes, QR codes and images; for a plain note use " + PrintNoteName + ". "
         + "content is needed. Each block is an object with a type; a Text block is {\"type\":\"Text\",\"content\":\"...\"}. "
         + "One line holds 48 characters (24 with DoubleWidth, 64 with FontB, 32 with both; with \"size\":{\"width\":3,\"height\":3} a headline holds 16); longer lines wrap in the middle of a word, "
-        + "so keep each line within the limit (one Text block per line, or \\n inside content). "
+        + "so keep each line within the limit (one Text block per line, or \\n inside content) "
+        + "or set \"wrap\":true on the Text block: then the server breaks each longer line at a space (a longer word breaks at the limit) and keeps each \\n. "
         + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
         + "Polish letters print; emoji print as '?'. "
         + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks (CRLF counts as \\n). "
