@@ -35,10 +35,11 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         // After BuildCommand: the content is valid for the type, so the width counts what goes out.
         // The numbers are the only caller content in the text.
         var moduleDots = BarcodeWidth.ModuleDots(opts.Width);
-        if (BarcodeWidth.Dots(opts.Type, item.Content, moduleDots ?? ctx.BarModuleDots ?? BarcodeWidth.UnsetDots) is { } dots && dots > BarcodeWidth.MaxDots)
+        var countedDots = moduleDots ?? ctx.BarModuleDots ?? BarcodeWidth.UnsetDots;
+        if (BarcodeWidth.Dots(opts.Type, item.Content, countedDots) is { } dots && dots > BarcodeWidth.MaxDots)
         {
-            // Thin is the narrowest width that the API has.
-            var fix = opts.Width is Models.BarWidth.Default or Models.BarWidth.Thick
+            // Thin is the narrowest width that the API has. It also helps a block with no width that got a wider module from the block before it.
+            var fix = countedDots > BarcodeWidth.ThinDots
                 ? "use barcodeOptions.width Thin or shorter content"
                 : "use shorter content";
             throw new PrintContentException(

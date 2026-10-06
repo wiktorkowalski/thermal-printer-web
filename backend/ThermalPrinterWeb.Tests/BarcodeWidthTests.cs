@@ -246,6 +246,6 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
         var afterThick = await Record.ExceptionAsync(() => TestBlocks.NewService().BuildDocumentAsync([thick, unset], null));
 
         Assert.Null(alone);
-        Assert.Equal($"Block 1 (Barcode): {TooWide(615, offerThin: false)}", afterThick?.Message);
+        Assert.Equal($"Block 1 (Barcode): {TooWide(615)}", afterThick?.Message);
     }
 }
