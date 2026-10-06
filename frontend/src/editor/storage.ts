@@ -43,7 +43,8 @@ export function requestToDocument(request: PrintRequest): EditorDocument {
   return {
     blocks: fromPrintContent(request.content ?? []),
     settings: {
-      codePage: request.options?.codePage ?? DEFAULT_SETTINGS.codePage,
+      // An imported file can hold any JSON value here; the code page list renders it.
+      codePage: typeof request.options?.codePage === "string" ? request.options.codePage : DEFAULT_SETTINGS.codePage,
       autoCut: request.options?.autoCut ?? DEFAULT_SETTINGS.autoCut,
       feedLinesAfterPrint: request.options?.feedLinesAfterPrint ?? DEFAULT_SETTINGS.feedLinesAfterPrint,
     },

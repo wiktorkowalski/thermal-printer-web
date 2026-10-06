@@ -384,7 +384,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
     case "Cut":
       // No cut type control: the cutter of this printer makes a partial cut only (issue #44).
       body = (
-        <p className="text-[13px] text-ink-2">The printer feeds the job's “feed before cut” lines, then cuts. Every cut leaves a small bridge.</p>
+        <p className="text-[13px] text-ink-2">The printer feeds the job's “feed before cut” value, then cuts. Every cut leaves a small bridge.</p>
       );
       break;
   }

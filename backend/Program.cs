@@ -111,7 +111,7 @@ if (builder.Environment.IsDevelopment())
 var app = builder.Build();
 
 // Once, before the first tools/list: the tool object is shared by every request.
-HiddenPrintFields.RemoveFrom(app.Services.GetServices<McpServerTool>().Single(tool => tool.ProtocolTool.Name == PrinterTools.PrintName).ProtocolTool);
+HiddenPrintFields.RemoveFrom(app.Services.GetServices<McpServerTool>());
 
 PrinterOptions printerOptions;
 try

@@ -14,8 +14,7 @@ public class ImageOptions
     [Description("Use the older raster image command. Default true.")]
     public bool UseLegacyMode { get; set; } = true;
 
-    // Maps to ESCPOS PrintImage isHiDPI. Not in the MCP schema (HiddenPrintFields): in legacy mode, the default,
-    // the bytes are the same for both values. Still bound and sent as before.
-    [Description("No effect in legacy mode, and legacy mode is the default.")]
+    // Maps to ESCPOS PrintImage isHiDPI. In legacy mode the bytes are the same for both values (OldFieldTests).
+    [Description("Only read when useLegacyMode is false: full dot density. No effect in legacy mode, the default. Leave it out. Default true.")]
     public bool HighDensity { get; set; } = true;
 }

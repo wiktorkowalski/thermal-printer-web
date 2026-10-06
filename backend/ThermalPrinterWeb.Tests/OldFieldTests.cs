@@ -46,6 +46,9 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
     // ESC ! n with the Bold bit (8) and the Italic bit (64).
     private static readonly byte[] BoldItalic = [0x1B, 0x21, 0x48];
 
+    private static readonly byte[] FullDensity = [0x30, 0x31, 0x33, 0x33];
+    private static readonly byte[] HalfDensity = [0x30, 0x31, 0x32, 0x32];
+
     // "Zażółć" and LF.
     private static readonly byte[] TextInWindows1250 = [(byte)'Z', (byte)'a', 0xBF, 0xF3, 0xB3, 0xE6, 0x0A];
 
@@ -119,6 +122,38 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         Assert.Equal(fresh, reprinted);
     }
 
+    // highDensity on an Image block, where the handler reads it: legacy mode sends the same bytes for both values,
+    // the other mode sends the density of the value. So the field stays bound, and the MCP text says when it is read.
+    [Fact]
+    public async Task PostPrinter_ImageWithHighDensity_ChangesTheBytesOnlyOutsideLegacyMode()
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+        var client = wired.CreateClient();
+        var picture = TestImages.PngBase64();
+
+        async Task<byte[]> JobAsync(string imageOptions)
+        {
+            var json = $$"""{"content":[{"type":"Image","content":"{{picture}}","imageOptions":{{imageOptions}}}]}""";
+            var (status, body) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.PrintUrl, json);
+            Assert.True(status == HttpStatusCode.OK, body);
+            return await printer.NextJobAsync();
+        }
+
+        var legacy = await JobAsync("""{"highDensity":true}""");
+        var legacyLow = await JobAsync("""{"highDensity":false}""");
+        var modern = await JobAsync("""{"useLegacyMode":false,"highDensity":true}""");
+        var modernLow = await JobAsync("""{"useLegacyMode":false,"highDensity":false}""");
+
+        Assert.Equal(legacy, await JobAsync("{}"));
+        Assert.Equal(legacy, legacyLow);
+        Assert.NotEqual(legacy, modern);
+        Assert.NotEqual(modern, modernLow);
+        // GS ( L, function 49: the density of the picture, 51 for full and 50 for half.
+        Assert.Equal(1, modern.AsSpan().Count(FullDensity));
+        Assert.Equal(1, modernLow.AsSpan().Count(HalfDensity));
+    }
+
     // The binder skips a property that it does not know: a field that leaves the models later is no new 400.
     [Fact]
     public async Task PostPrinter_PropertiesThatNoModelHas_PrintsTheSameBytes()
@@ -170,14 +205,27 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         var tools = (await _client.McpAsync("tools/list")).GetRawText();
 
         Assert.All(
-            [HiddenPrintFields.PartialCut, HiddenPrintFields.HighDensity, "WPC1250", "ISO8859_2", "1250", "8859"],
+            [HiddenPrintFields.PartialCut, "partial", "WPC1250", "ISO8859_2", "1250", "8859"],
             name => Assert.DoesNotContain(name, tools, StringComparison.OrdinalIgnoreCase));
         Assert.All(
-            [HiddenPrintFields.PartialCut, HiddenPrintFields.HighDensity, "WPC1250", "ISO8859_2"],
+            [HiddenPrintFields.PartialCut, "highDensity", "WPC1250", "ISO8859_2"],
             name => Assert.DoesNotContain(name, PrinterTools.ServerInstructions, StringComparison.OrdinalIgnoreCase));
         // The pruned schema is still the schema of the print tool.
         Assert.Contains("\"useLegacyMode\"", tools);
         Assert.Contains("\"separatorLength\"", tools);
+    }
+
+    // highDensity stays in the schema: it is read outside legacy mode. The text says that it does nothing in the default mode.
+    [Fact]
+    public async Task ToolsList_HighDensity_SaysWhenItIsRead()
+    {
+        var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
+        var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == PrinterTools.PrintName);
+        var density = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties")
+            .GetProperty("imageOptions").GetProperty("properties").GetProperty("highDensity").GetProperty("description").GetString();
+
+        Assert.StartsWith("Only read when useLegacyMode is false", density);
+        Assert.Contains("No effect in legacy mode, the default.", density);
     }
 
     // feedLinesAfterPrint stays: it feeds, but not lines. The text says so.

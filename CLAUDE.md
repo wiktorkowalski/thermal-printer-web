@@ -241,9 +241,10 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Options**: CodePage selection (default PC852), line spacing, auto-cut behavior
 
-**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only), `imageOptions.highDensity` (same bytes in legacy mode, the default) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).
-- No caller text offers them: `HiddenPrintFields` removes the two fields from the MCP schema of `print`, the code page texts do not name the two pages, the editor has no control for them.
+**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).
+- No caller text offers them: `HiddenPrintFields` removes `partialCut` from the MCP schema of `print`, the code page texts do not name the two pages, the editor has no control for them.
 - The server still binds them and sends the same bytes as before: callers and journal rows hold them. `OldFieldTests` pins this. Do not remove them from the models or from `CodePages`.
+- `imageOptions.highDensity` is read only when `useLegacyMode` is false. In legacy mode, the default, both values give the same bytes. It stays in the schema; its text says so.
 - `options.feedLinesAfterPrint` is not lines: `GS V n` reads motion units of at most 0.125 mm. The MCP text says so. The name and the bytes stay.
 - The binder skips a JSON property that no model has: an unknown property is never a 400.
 

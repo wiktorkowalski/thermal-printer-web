@@ -1,28 +1,30 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 namespace ThermalPrinterWeb.Mcp;
 
-// Fields of the print tool that change nothing on this printer (issue #44). The schema does not list them,
-// so a caller does not learn them. The models keep them: an old payload and a stored job still bind,
+// A field of the print tool that changes nothing on this printer (issue #44). The schema does not list it,
+// so a caller does not learn it. The model keeps it: an old payload and a stored job still bind,
 // and the job has the same bytes as before.
 internal static class HiddenPrintFields
 {
     // The cutter makes a partial cut only.
     internal const string PartialCut = "partialCut";
 
-    // The image bytes are the same with true and false in legacy mode, and legacy mode is the default.
-    internal const string HighDensity = "highDensity";
-
     private const string Properties = "properties";
 
-    public static void RemoveFrom(Tool printTool)
+    // A schema of another shape loses nothing and the app starts: OldFieldTests fails then.
+    public static void RemoveFrom(IEnumerable<McpServerTool> tools)
     {
+        var printTool = tools.FirstOrDefault(tool => tool.ProtocolTool.Name == PrinterTools.PrintName)?.ProtocolTool;
+        if (printTool is null)
+            return;
+
         var schema = JsonNode.Parse(printTool.InputSchema.GetRawText());
-        var block = schema?[Properties]?["content"]?["items"]?[Properties] as JsonObject;
-        block?.Remove(PartialCut);
-        (block?["imageOptions"]?[Properties] as JsonObject)?.Remove(HighDensity);
+        if (schema?[Properties]?["content"]?["items"]?[Properties] is not JsonObject block || !block.Remove(PartialCut))
+            return;
+
         printTool.InputSchema = JsonSerializer.SerializeToElement(schema);
     }
 }
