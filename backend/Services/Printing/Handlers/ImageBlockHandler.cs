@@ -12,7 +12,7 @@ namespace ThermalPrinterWeb.Services.Printing.Handlers;
 internal sealed class ImageBlockHandler : IBlockHandler
 {
     // 576 = full V330M print-head width (80mm head).
-    private const int HeadWidth = 576;
+    internal const int HeadWidth = 576;
     private const int DefaultMaxHeight = 576;
 
     // Printed height limit for one image: 4096 dots = 512 mm of paper at 8 dots/mm.

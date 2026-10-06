@@ -114,8 +114,9 @@ public sealed class PayloadErrorTests
 
     // Written out, not read from the enums: a renamed or reordered member must fail a test.
     internal const string AlignmentNames = "Left, Center or Right";
-    internal const string PrintStyleNames = "Normal, Bold, Italic, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode or UpsideDownMode";
-    internal const string BarcodeTypeNames = "UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF, CODABAR, GS1_128 or GS1_DATABAR_OMNIDIRECTIONAL";
+    // Without the members of no effect on this printer (BlockEnums.HasNoEffect): Italic, GS1_128, GS1_DATABAR_OMNIDIRECTIONAL.
+    internal const string PrintStyleNames = "Normal, Bold, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode or UpsideDownMode";
+    internal const string BarcodeTypeNames = "UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF or CODABAR";
     internal const string BarWidthNames = "Thin, Default or Thick";
     internal const string BarLabelPositionNames = "None, Above, Below or Both";
     internal const string QRCodeModelNames = "Model1, Model2 or Micro";
@@ -149,8 +150,9 @@ public sealed class PayloadErrorTests
         foreach (var alignment in Enum.GetValues<Alignment>())
             data.Add(new PrintContent { Type = ContentType.Text, Content = "x", Alignment = alignment });
         data.Add(new PrintContent { Type = ContentType.Text, Content = "x", Style = [.. Enum.GetValues<PrintStyle>()] });
+        // 6 characters: within the paper at every bar width (BarcodeWidthTests).
         foreach (var width in Enum.GetValues<BarWidth>())
-            data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-0007", BarcodeOptions = new BarcodeOptions { Width = width } });
+            data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-07", BarcodeOptions = new BarcodeOptions { Width = width } });
         foreach (var position in Enum.GetValues<BarLabelPosition>())
             data.Add(new PrintContent { Type = ContentType.Barcode, Content = "BOX-0007", BarcodeOptions = new BarcodeOptions { LabelPosition = position } });
         foreach (var model in Enum.GetValues<QRCodeModel>())
@@ -693,7 +695,8 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
         ("""{"type":"Text","content":"x","alignment":VALUE}""", "Text", "alignment", "2", "Right", PayloadErrorTests.AlignmentNames),
         ("""{"type":"Text","content":"x","style":["Bold",VALUE]}""", "Text", "style[1]", "4", "DoubleHeight", PayloadErrorTests.PrintStyleNames),
         ("""{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"type":VALUE}}""", "Barcode", "barcodeOptions.type", "5", "CODE128", PayloadErrorTests.BarcodeTypeNames),
-        ("""{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"width":VALUE}}""", "Barcode", "barcodeOptions.width", "0", "Thick", PayloadErrorTests.BarWidthNames),
+        // 6 characters: within the paper also at Thick (BarcodeWidthTests).
+        ("""{"type":"Barcode","content":"BOX-07","barcodeOptions":{"width":VALUE}}""", "Barcode", "barcodeOptions.width", "0", "Thick", PayloadErrorTests.BarWidthNames),
         ("""{"type":"Barcode","content":"BOX-0007","barcodeOptions":{"labelPosition":VALUE}}""", "Barcode", "barcodeOptions.labelPosition", "3", "Above", PayloadErrorTests.BarLabelPositionNames),
         ("""{"type":"QRCode","content":"x","qrCodeOptions":{"model":VALUE}}""", "QRCode", "qrCodeOptions.model", "0", "Micro", PayloadErrorTests.QRCodeModelNames),
         ("""{"type":"QRCode","content":"x","qrCodeOptions":{"size":VALUE}}""", "QRCode", "qrCodeOptions.size", "2", "ExtraLarge", PayloadErrorTests.QRCodeSizeNames),

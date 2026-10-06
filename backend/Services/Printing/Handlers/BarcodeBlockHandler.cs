@@ -32,6 +32,20 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         // First: a rejected barcode must not leave its settings in the document.
         var command = BuildCommand(e, item.Content, opts.Type);
 
+        // After BuildCommand: the content is valid for the type, so the width counts what goes out.
+        // The numbers are the only caller content in the text.
+        var moduleDots = BarcodeWidth.ModuleDots(opts.Width);
+        var countedDots = moduleDots ?? ctx.BarModuleDots ?? BarcodeWidth.UnsetDots;
+        if (BarcodeWidth.Dots(opts.Type, item.Content, countedDots) is { } dots && dots > BarcodeWidth.MaxDots)
+        {
+            // Thin is the narrowest width that the API has. It also helps a block with no width that got a wider module from the block before it.
+            var fix = countedDots > BarcodeWidth.ThinDots
+                ? "use barcodeOptions.width Thin or shorter content"
+                : "use shorter content";
+            throw new PrintContentException(
+                $"the barcode is at least {dots} dots wide and the paper holds {BarcodeWidth.MaxDots}; the printer drops a wider barcode: {fix}");
+        }
+
         // The bars plus the caption lines. A null height keeps what the printer has: count the tallest.
         var captionLines = opts.LabelPosition == BarLabelPosition.Both ? 2 : 1;
         ctx.AddPaper((opts.HeightInDots ?? MaxHeightInDots) + captionLines * PaperLength.LineDots(ctx.LineSpacing));
@@ -39,7 +53,10 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         if (opts.HeightInDots.HasValue)
             ctx.Add(e.SetBarcodeHeightInDots(opts.HeightInDots.Value));
         if (opts.Width.HasValue)
+        {
             ctx.Add(e.SetBarWidth(MapBarWidth(opts.Width.Value)));
+            ctx.BarModuleDots = moduleDots;
+        }
         if (opts.LabelPosition.HasValue)
             ctx.Add(e.SetBarLabelPosition(MapBarLabelPosition(opts.LabelPosition.Value)));
         if (opts.UseFontB.HasValue)

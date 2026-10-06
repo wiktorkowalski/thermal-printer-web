@@ -228,17 +228,29 @@ public sealed class CodeContentEncodingTests
         Assert.Equal(0, ctx.ReplacedCharacters);
     }
 
+    // 2 prefix bytes + 252 characters + 1 doubled brace = 255: the length byte holds it.
+    // So the length check passes and the width check rejects it: 252 symbols do not fit the paper (BarcodeWidthTests).
     [Fact]
-    public async Task Barcode_Code128Brace_FillsTheLengthByteExactly()
+    public async Task Barcode_Code128BraceThatFillsTheLengthByte_IsRejectedForItsWidthNotItsLength()
+    {
+        var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
+        var block = Barcode("{" + new string('A', 251), BarcodeType.CODE128);
+
+        var ex = await Assert.ThrowsAsync<PrintContentException>(() => new BarcodeBlockHandler().HandleAsync(block, ctx));
+
+        Assert.StartsWith("the barcode is at least 11228 dots wide", ex.Message);
+        Assert.Empty(ctx.Output);
+    }
+
+    // A doubled brace is two bytes and one symbol.
+    [Fact]
+    public async Task Barcode_Code128Brace_IsSentTwice()
     {
         var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
 
-        // 2 prefix bytes + 252 characters + 1 doubled brace = 255.
-        await new BarcodeBlockHandler().HandleAsync(Barcode("{" + new string('A', 251), BarcodeType.CODE128), ctx);
+        await new BarcodeBlockHandler().HandleAsync(Barcode("{A", BarcodeType.CODE128), ctx);
 
-        var bytes = ctx.Output[^1];
-        Assert.Equal(0xFF, bytes[3]);
-        Assert.Equal(4 + 255, bytes.Length);
+        Assert.Equal([0x1D, 0x6B, 0x49, 5, .. "{B{{A"u8], ctx.Output[^1]);
     }
 
     [Theory]

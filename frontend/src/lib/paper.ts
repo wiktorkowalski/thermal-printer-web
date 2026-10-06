@@ -1,6 +1,6 @@
-import type { PrintContent, PrintStyle, TextSize } from "@/types/printer";
+import type { BarcodeOptions, PrintContent, PrintStyle, TextSize } from "@/types/printer";
 import { columnsPerLine, CHARS_PER_LINE } from "@/lib/printer-constants";
-import { DEFAULT_FEED_BEFORE_CUT, QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
+import { BARCODE_MODULES, BARCODE_UNSET_MODULE_DOTS, DEFAULT_FEED_BEFORE_CUT, QR_MAX_MODULES, QR_MIN_MODULES, QR_MODULES_PER_BYTE, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
 import { qrDataBytes } from "@/lib/validation";
 
 // Vretti V330M geometry. The head is 576 dots wide (72 mm printable on 80 mm
@@ -20,6 +20,24 @@ const FONT_B_GLYPH_DOTS = 17;
 // ESCPOS_NET Size2DCode and BarWidth enum values = module width in dots.
 export const QR_MODULE_DOTS = { Normal: 4, Large: 5, ExtraLarge: 6 } as const;
 export const BAR_MODULE_DOTS = { Thin: 3, Default: 4, Thick: 5 } as const;
+
+/**
+ * The printed width of a barcode in dots, as the backend counts it (BarcodeWidth.cs), or null for a type with no width:
+ * GS1-128 and GS1 DataBar print no bars on this printer. Over HEAD_DOTS the backend rejects the block.
+ * A width that is left out is Default (the backend model default); null sends no width command.
+ */
+export function barcodeWidthDots(content: string, options: BarcodeOptions | undefined): number | null {
+  const type = options?.type ?? "CODE128";
+  // An imported file can hold any value here.
+  if (typeof content !== "string" || !Object.hasOwn(BARCODE_MODULES, type)) return null;
+  const modules = BARCODE_MODULES[type as keyof typeof BARCODE_MODULES];
+  // CODE39: the printer adds the start and the stop character unless the content holds one.
+  const added = type === "CODE39" && !content.startsWith("*") && !content.endsWith("*") ? 2 : 0;
+  const width = options?.width ?? "Default";
+  // null: the backend counts the module of the barcode before it in the job, else the smallest one. The editor counts the smallest.
+  const moduleDots = options?.width === null ? BARCODE_UNSET_MODULE_DOTS : Object.hasOwn(BAR_MODULE_DOTS, width) ? BAR_MODULE_DOTS[width] : BAR_MODULE_DOTS.Default;
+  return (modules.perCharacter * (content.length + added) + modules.fixed) * moduleDots;
+}
 export const DEFAULT_BARCODE_HEIGHT_DOTS = 162;
 
 // The cutter sits past the head, so every cut strip starts with blank paper.

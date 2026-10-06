@@ -46,7 +46,8 @@ export function PaperText({ text, style = [], size, alignment = DEFAULT_ALIGNMEN
     wordBreak: "break-all",
     overflowWrap: "anywhere",
     fontWeight: style.includes("Bold") ? 500 : 400,
-    fontStyle: style.includes("Italic") ? "italic" : "normal",
+    // Italic has no effect on this printer (issue #44): the paper shows upright text.
+    fontStyle: "normal",
     textDecoration: style.includes("Underline") ? "underline" : "none",
     textUnderlineOffset: "0.2em",
     fontFamily: "inherit",

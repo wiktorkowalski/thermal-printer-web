@@ -14,12 +14,14 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
 {
     private readonly HttpClient _client = app.CreateClient();
 
-    // A job with every field of the issue: Italic, partialCut, highDensity (on a block that does not read it),
+    // A job with every field of the issue: Italic, the two GS1 barcode types, partialCut, highDensity (on a block that does not read it),
     // a code page that prints wrong glyphs, feedLinesAfterPrint.
+    // Read from paper on 2026-10-07: Italic prints like plain text, the two GS1 barcodes print their data as text with no bars.
     private const string OldContent =
         """
         [{"type":"Text","content":"Zażółć","alignment":"Left","style":["Italic","Bold"],"imageOptions":{"useLegacyMode":true,"highDensity":false}},
          {"type":"Barcode","content":"0123456789012","barcodeOptions":{"type":"GS1_DATABAR_OMNIDIRECTIONAL"}},
+         {"type":"Barcode","content":"0109501101530003","barcodeOptions":{"type":"GS1_128","width":"Thick"}},
          {"type":"Cut","partialCut":true}]
         """;
 
@@ -36,6 +38,9 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
          {"type":"Barcode","content":"0123456789012","alignment":"Center","style":null,"size":null,
           "barcodeOptions":{"type":"GS1_DATABAR_OMNIDIRECTIONAL","heightInDots":100,"width":"Default","labelPosition":"Below"},"qrCodeOptions":null,
           "imageOptions":null,"lines":1,"partialCut":false,"separatorChar":"=","separatorLength":32,"signalOptions":null},
+         {"type":"Barcode","content":"0109501101530003","alignment":"Center","style":null,"size":null,
+          "barcodeOptions":{"type":"GS1_128","heightInDots":100,"width":"Thick","labelPosition":"Below"},"qrCodeOptions":null,
+          "imageOptions":null,"lines":1,"partialCut":false,"separatorChar":"=","separatorLength":32,"signalOptions":null},
          {"type":"Cut","content":null,"alignment":"Center","style":null,"size":null,"barcodeOptions":null,"qrCodeOptions":null,
           "imageOptions":null,"lines":1,"partialCut":true,"separatorChar":"=","separatorLength":32,"signalOptions":null}]
         """;
@@ -47,6 +52,13 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
 
     // ESC ! n with the Bold bit (8) and the Italic bit (64).
     private static readonly byte[] BoldItalic = [0x1B, 0x21, 0x48];
+
+    // GS k m n and the data as sent: m is 75 for GS1 DataBar and 74 for GS1-128, n is the length. No code set prefix.
+    private static readonly byte[] DataBarCommand = [0x1D, 0x6B, 75, 13, .. "0123456789012"u8];
+    private static readonly byte[] Gs1128Command = [0x1D, 0x6B, 74, 16, .. "0109501101530003"u8];
+
+    // GS w 5: the width Thick. The GS1 types get no width check, so a wide one still goes out.
+    private static readonly byte[] ThickBars = [0x1D, 0x77, 5];
 
     private static readonly byte[] FullDensity = [0x30, 0x31, 0x33, 0x33];
     private static readonly byte[] HalfDensity = [0x30, 0x31, 0x32, 0x32];
@@ -61,9 +73,13 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
     private static void AssertOldBytes(byte[] job)
     {
         Assert.Equal(Wpc1250Prelude, job[..Wpc1250Prelude.Length]);
+        // Italic still sets its bit: the printer ignores it.
         Assert.Equal(1, job.AsSpan().Count(BoldItalic));
         // The text in Windows-1250, not in PC852.
         Assert.Equal(1, job.AsSpan().Count(TextInWindows1250));
+        Assert.Equal(1, job.AsSpan().Count(DataBarCommand));
+        Assert.Equal(1, job.AsSpan().Count(Gs1128Command));
+        Assert.True(job.AsSpan().IndexOf(ThickBars) < job.AsSpan().IndexOf(Gs1128Command));
         Assert.Equal(PartialCutAfterFive, job[^PartialCutAfterFive.Length..]);
     }
 
@@ -100,7 +116,7 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
                 Result = JobResult.Printed,
                 HttpStatus = 200,
                 AppVersion = "before-44",
-                BlockCount = 3,
+                BlockCount = 4,
                 Payload = new PrintJobPayload { JobId = id, Headers = "{}", Blocks = StoredBlocks, Options = StoredOptions }
             });
             await db.SaveChangesAsync();
@@ -116,13 +132,56 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         Assert.Equal("Italic", blocks[0].GetProperty("style")[0].GetString());
         Assert.False(blocks[0].GetProperty("imageOptions").GetProperty("highDensity").GetBoolean());
         Assert.Equal("GS1_DATABAR_OMNIDIRECTIONAL", blocks[1].GetProperty("barcodeOptions").GetProperty("type").GetString());
-        Assert.True(blocks[2].GetProperty("partialCut").GetBoolean());
+        Assert.Equal("GS1_128", blocks[2].GetProperty("barcodeOptions").GetProperty("type").GetString());
+        Assert.True(blocks[3].GetProperty("partialCut").GetBoolean());
         Assert.Equal("WPC1250", read.GetProperty("options").GetProperty("codePage").GetString());
         Assert.Equal(5, read.GetProperty("options").GetProperty("feedLinesAfterPrint").GetInt32());
 
         Assert.True(reprintStatus == HttpStatusCode.OK, reprintBody);
         AssertOldBytes(reprinted);
         Assert.Equal(fresh, reprinted);
+    }
+
+    // A row with a barcode that is wider than the paper: the printer dropped that barcode and the job counted as printed.
+    // Its reprint follows the rule of today: a 400 that names the block, and nothing goes to the printer.
+    [Fact]
+    public async Task Reprint_RowWithABarcodeWiderThanThePaper_Returns400()
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+        var client = wired.CreateClient();
+        var id = Guid.CreateVersion7();
+        await wired.JournalIdleAsync();
+        await using (var db = wired.JournalDb())
+        {
+            db.PrintJobs.Add(new PrintJob
+            {
+                Id = id,
+                CreatedAt = new DateTime(2026, 10, 7, 12, 0, 0, DateTimeKind.Utc),
+                Transport = "http",
+                Result = JobResult.Printed,
+                HttpStatus = 200,
+                AppVersion = "before-44",
+                BlockCount = 2,
+                Payload = new PrintJobPayload
+                {
+                    JobId = id,
+                    Headers = "{}",
+                    Blocks = """[{"type":"Text","content":"TEST #44"},{"type":"Barcode","content":"TEST-44-OK","barcodeOptions":{"type":"CODE128","heightInDots":70,"width":"Default","labelPosition":"Below"}}]"""
+                }
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var (readStatus, readBody) = await client.SendJsonAsync(HttpMethod.Get, $"{TestHttp.PrintUrl}/jobs/{id}");
+        var (reprintStatus, reprintBody) = await client.SendJsonAsync(HttpMethod.Post, $"{TestHttp.PrintUrl}/jobs/{id}/reprint");
+
+        Assert.True(readStatus == HttpStatusCode.OK, readBody);
+        Assert.Equal(HttpStatusCode.BadRequest, reprintStatus);
+        Assert.Equal(
+            "Block 1 (Barcode): the barcode is at least 580 dots wide and the paper holds 576; the printer drops a wider barcode: use barcodeOptions.width Thin or shorter content",
+            JsonDocument.Parse(reprintBody).RootElement.GetProperty("error").GetString());
+        Assert.Empty(printer.Jobs);
     }
 
     // highDensity on an Image block, where the handler reads it: legacy mode sends the same bytes for both values,
@@ -196,7 +255,8 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         Assert.Equal([PrintStyle.Italic, PrintStyle.Bold], job.Content[0].Style);
         Assert.False(job.Content[0].ImageOptions!.HighDensity);
         Assert.Equal(BarcodeType.GS1_DATABAR_OMNIDIRECTIONAL, job.Content[1].BarcodeOptions!.Type);
-        Assert.True(job.Content[2].PartialCut);
+        Assert.Equal(BarcodeType.GS1_128, job.Content[2].BarcodeOptions!.Type);
+        Assert.True(job.Content[3].PartialCut);
         Assert.Equal("WPC1250", job.Options!.CodePage);
         Assert.Equal(5, job.Options.FeedLinesAfterPrint);
     }
@@ -208,14 +268,53 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         var tools = (await _client.McpAsync("tools/list")).GetRawText();
 
         Assert.All(
-            [HiddenPrintFields.PartialCut, "partial", "WPC1250", "ISO8859_2", "1250", "8859"],
+            [HiddenPrintFields.PartialCut, "partial", "WPC1250", "ISO8859_2", "1250", "8859", "Italic", "GS1", "DataBar"],
             name => Assert.DoesNotContain(name, tools, StringComparison.OrdinalIgnoreCase));
         Assert.All(
-            [HiddenPrintFields.PartialCut, "highDensity", "WPC1250", "ISO8859_2"],
+            [HiddenPrintFields.PartialCut, "highDensity", "WPC1250", "ISO8859_2", "Italic", "GS1", "DataBar"],
             name => Assert.DoesNotContain(name, PrinterTools.ServerInstructions, StringComparison.OrdinalIgnoreCase));
         // The pruned schema is still the schema of the print tool.
         Assert.Contains("\"useLegacyMode\"", tools);
         Assert.Contains("\"separatorLength\"", tools);
+    }
+
+    // The schema lists the names that a caller can use: every member but the ones of no effect.
+    [Fact]
+    public async Task ToolsList_EnumNamesOfNoEffect_AreNotInTheSchema()
+    {
+        var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
+        var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == PrinterTools.PrintName);
+        var block = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties");
+        var styles = block.GetProperty("style").GetProperty("items").GetProperty("enum").EnumerateArray().Select(name => name.GetString());
+        var types = block.GetProperty("barcodeOptions").GetProperty("properties").GetProperty("type").GetProperty("enum").EnumerateArray().Select(name => name.GetString());
+
+        Assert.Equal(["Normal", "Bold", "Underline", "DoubleHeight", "DoubleWidth", "FontB", "ReverseMode", "UpsideDownMode"], styles);
+        Assert.Equal(["UPC_A", "UPC_E", "EAN13", "EAN8", "CODE39", "CODE128", "ITF", "CODABAR"], types);
+        Assert.Equal(["Italic"], BlockEnums.NoEffectNames<PrintStyle>());
+        Assert.Equal(["GS1_128", "GS1_DATABAR_OMNIDIRECTIONAL"], BlockEnums.NoEffectNames<BarcodeType>());
+    }
+
+    // Each of the three alone: the job is the job of before. Italic sets its bit in ESC ! n, a GS1 type sends its GS k command.
+    [Theory]
+    [InlineData("""{"type":"Text","content":"x","style":["Italic"]}""", new byte[] { 0x1B, 0x21, 0x40, (byte)'x', 0x0A })]
+    [InlineData("""{"type":"Text","content":"x","style":[2]}""", new byte[] { 0x1B, 0x21, 0x40, (byte)'x', 0x0A })]
+    [InlineData("""{"type":"Barcode","content":"0109501101530003","barcodeOptions":{"type":"GS1_128"}}""",
+        new byte[] { 0x1D, 0x6B, 74, 16, 0x30, 0x31, 0x30, 0x39, 0x35, 0x30, 0x31, 0x31, 0x30, 0x31, 0x35, 0x33, 0x30, 0x30, 0x30, 0x33 })]
+    [InlineData("""{"type":"Barcode","content":"0109501101530003","barcodeOptions":{"type":8}}""",
+        new byte[] { 0x1D, 0x6B, 74, 16, 0x30, 0x31, 0x30, 0x39, 0x35, 0x30, 0x31, 0x31, 0x30, 0x31, 0x35, 0x33, 0x30, 0x30, 0x30, 0x33 })]
+    [InlineData("""{"type":"Barcode","content":"0123456789012","barcodeOptions":{"type":"GS1_DATABAR_OMNIDIRECTIONAL"}}""",
+        new byte[] { 0x1D, 0x6B, 75, 13, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x31, 0x32 })]
+    [InlineData("""{"type":"Barcode","content":"0123456789012","barcodeOptions":{"type":9}}""",
+        new byte[] { 0x1D, 0x6B, 75, 13, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x31, 0x32 })]
+    public async Task PostPrinter_OneMemberOfNoEffect_StillBindsAndSendsItsBytes(string block, byte[] expected)
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+
+        var (status, body) = await wired.CreateClient().SendJsonAsync(HttpMethod.Post, TestHttp.PrintUrl, $$"""{"content":[{{block}}]}""");
+
+        Assert.True(status == HttpStatusCode.OK, body);
+        Assert.Equal(1, (await printer.NextJobAsync()).AsSpan().Count(expected));
     }
 
     // highDensity stays in the schema: it is read outside legacy mode. The text says that it does nothing in the default mode.

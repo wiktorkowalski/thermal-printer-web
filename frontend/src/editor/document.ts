@@ -30,7 +30,7 @@ import {
   TEXT_SIZE_MAX,
   TEXT_SIZE_MIN,
 } from "@/lib/printer-limits";
-import { DOTS_PER_MM, DOUBLE_STYLES, textScale } from "@/lib/paper";
+import { DOTS_PER_MM, DOUBLE_STYLES, HEAD_DOTS, barcodeWidthDots, textScale } from "@/lib/paper";
 import {
   errorText,
   validateBarcode,
@@ -280,6 +280,15 @@ function sizeError(size: PrintContent["size"]): string | null {
     : `Text size must be whole numbers between ${TEXT_SIZE_MIN} and ${TEXT_SIZE_MAX}`;
 }
 
+/** The backend rejects a barcode that is wider than the paper: the printer drops it with no error. */
+export function barcodeWidthError(block: PrintContent): string | null {
+  const dots = barcodeWidthDots(block.content ?? "", block.barcodeOptions);
+  if (dots == null || dots <= HEAD_DOTS) return null;
+  const width = block.barcodeOptions?.width;
+  const fix = width === null || width === BarWidth.Thin ? "Use shorter data" : "Use Thin bars or shorter data";
+  return `Too wide: at least ${dots} dots, the paper holds ${HEAD_DOTS}. ${fix}`;
+}
+
 /**
  * Returns an error message for a block that would fail or print wrong, else null.
  * Values come from saved drafts and templates too, so any number can be out of range.
@@ -297,7 +306,7 @@ export function blockError(block: PrintContent): string | null {
       if (height != null && !inRange(height, BARCODE_MIN_HEIGHT_DOTS, BARCODE_MAX_HEIGHT_DOTS)) {
         return `Barcode height must be between ${BARCODE_MIN_HEIGHT_DOTS} and ${BARCODE_MAX_HEIGHT_DOTS} dots`;
       }
-      return message(validateBarcode(block.content, block.barcodeOptions?.type ?? BarcodeType.CODE128));
+      return message(validateBarcode(block.content, block.barcodeOptions?.type ?? BarcodeType.CODE128)) ?? barcodeWidthError(block);
     }
     case ContentType.QRCode: {
       if (!block.content) return null;

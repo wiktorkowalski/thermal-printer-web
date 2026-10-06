@@ -27,6 +27,22 @@ export const BARCODE_MAX_HEIGHT_DOTS = 255;
 // 2 bytes of it on the code set prefix and sends each '{' twice.
 export const BARCODE_MAX_PAYLOAD = 255;
 export const CODE128_MAX_PAYLOAD = BARCODE_MAX_PAYLOAD - 2;
+// backend/Services/Printing/BarcodeWidth.cs: the printed width of a barcode in modules (one module is the narrowest bar).
+// The printer drops a barcode wider than the paper with no error, so the backend rejects it (MaxDots = HEAD_DOTS in lib/paper.ts).
+// CODE128 and the fixed types are exact. CODE39, ITF and CODABAR count the narrowest bars the printer can pick: a lower bound.
+// The module in dots (ThinDots, DefaultDots, ThickDots) is BAR_MODULE_DOTS in lib/paper.ts; BARCODE_UNSET_MODULE_DOTS is UnsetDots.
+export const BARCODE_MODULES = {
+  CODE128: { perCharacter: 11, fixed: 35 },
+  CODE39: { perCharacter: 13, fixed: -1 },
+  ITF: { perCharacter: 7, fixed: 8 },
+  CODABAR: { perCharacter: 10, fixed: -1 },
+  EAN13: { perCharacter: 0, fixed: 95 },
+  UPC_A: { perCharacter: 0, fixed: 95 },
+  EAN8: { perCharacter: 0, fixed: 67 },
+  UPC_E: { perCharacter: 0, fixed: 51 },
+} as const;
+// A block with "width": null: the printer uses its own module. The backend counts the smallest one.
+export const BARCODE_UNSET_MODULE_DOTS = 2;
 
 // backend/Services/Printing/Handlers/QRCodeBlockHandler.cs: Model2MaxBytes, Model1MaxBytes, MicroMaxBytes
 // Bytes of the content as UTF-8, not characters.
