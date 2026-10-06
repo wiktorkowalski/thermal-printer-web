@@ -1,3 +1,5 @@
+using ThermalPrinterWeb.Models;
+
 namespace ThermalPrinterWeb.Services.Printing;
 
 // An estimate, in dots (8 dots = 1 mm): it only has to stop a job that empties the roll,
@@ -40,6 +42,10 @@ internal static class PaperLength
     // like the printer: at width 5 a Font A line holds 9 characters (540 dots), not 9.6.
     public static int Columns(bool fontB, int widthMultiplier)
         => (fontB ? FontBColumns : FontAColumns) / widthMultiplier;
+
+    // The characters per line of a Text block. It rejects a size outside the range.
+    public static int Columns(List<PrintStyle>? styles, TextSize? size)
+        => Columns(styles?.Contains(PrintStyle.FontB) == true, TextScale.Of(styles, size).Width);
 
     // The printer wraps a long line; an empty line still feeds one line.
     // Counted on the encoded text: one byte is one column, and one character can be three bytes.
