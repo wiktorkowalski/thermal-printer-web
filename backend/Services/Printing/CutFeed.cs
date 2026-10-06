@@ -36,8 +36,9 @@ internal static class CutFeed
     internal static int Lines(int? sent, int trailingFeedLines)
         => sent ?? Math.Max(0, DefaultLines - trailingFeedLines);
 
-    // The empty lines at the end of the content so far: the lines of the LineFeed blocks after the last block that uses paper.
-    // A Signal and a CodePage block move no paper, so they keep the count. An empty line inside a Text block is not counted.
+    // The empty lines at the end of the content so far: the lines of the LineFeed blocks after the last block of another type.
+    // By type, not by paper: a block with empty content that prints nothing ends the count too.
+    // A Signal and a CodePage block never move paper, so they keep the count. An empty line inside a Text block is not counted.
     internal static int TrailingLinesAfter(PrintContent block, int trailingFeedLines) => block.Type switch
     {
         ContentType.LineFeed => trailingFeedLines + LineFeedBlockHandler.LinesOf(block),

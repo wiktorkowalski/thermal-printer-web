@@ -117,6 +117,24 @@ public sealed class FeedLinesTests
         Assert.Equal([0x0A, 0x0A, 0x0A, 0x0A, 0x1B, 0x21, 0, .. Feed(3), .. FullCut], inside[^14..]);
     }
 
+    // Every block type but LineFeed, Signal and CodePage ends the count, also a block with empty content that prints nothing.
+    [Theory]
+    [InlineData(ContentType.Text, "ok")]
+    [InlineData(ContentType.Separator, null)]
+    [InlineData(ContentType.Barcode, "12345678")]
+    [InlineData(ContentType.QRCode, "ok")]
+    [InlineData(ContentType.QRCode, "")]
+    [InlineData(ContentType.Image, "")]
+    public async Task BuildDocumentAsync_NoFeedField_ABlockOfAnotherTypeEndsTheCount(ContentType type, string? content)
+    {
+        var block = new PrintContent { Type = type, Content = content };
+        var none = await JobBytesAsync([LineFeed(3), block], new PrintOptions { FeedLinesAfterPrint = 0 });
+
+        var job = await JobBytesAsync([LineFeed(3), block]);
+
+        Assert.Equal([.. none[..^FullCut.Length], .. Feed(3), .. FullCut], job);
+    }
+
     // Each cut has its own count: a Cut block starts a new strip.
     [Fact]
     public async Task BuildDocumentAsync_NoFeedFieldAndCutBlocks_CountsTheLinesBeforeEachCut()

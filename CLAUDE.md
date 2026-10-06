@@ -257,7 +257,8 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - The field is sent: n LF, whatever the content. `0` is the cut command alone: the way to get no gap.
 - The field is not sent (or is `null`): the server keeps 3 empty lines before the cut (`CutFeed.DefaultLines`). n = 3 minus the lines of the LineFeed blocks right before the cut, at least 0. So the model default is `null`, not a number.
   - Ends with text: `0A 0A 0A 1D 56 41 03`. Ends with `LineFeed 1`: the LF of the block, then `0A 0A 1D 56 41 03`. Ends with `LineFeed 3` or more: the cut command alone after the block.
-  - The count goes back from the cut over LineFeed blocks (several add up) and stops at the first block that uses paper. A Signal and a CodePage block move no paper: they keep the count (`CutFeed.TrailingLinesAfter`). A LineFeed block with no `lines` is one line.
+  - The count goes back from the cut over LineFeed blocks (several add up) and stops at the first block of another type. The rule is by block type: a block with empty content (an Image, Barcode or QRCode that prints nothing) stops the count too. The two exceptions are a Signal and a CodePage block: they never move paper, so they keep the count (`CutFeed.TrailingLinesAfter`). A LineFeed block with no `lines` is one line.
+  - A cut with nothing printed before it (an empty document, a Signal alone, a Cut block right after a Cut block) gets the 3 lines too.
   - An empty line inside a Text block (`"text\n\n\n"`) does not count: such a job gets 3 more lines. Only LineFeed blocks count.
   - Each cut has its own count: a Cut block starts a new strip, so a second Cut block right after it gets 3 lines.
   - `PrinterService.AddBlockAsync` sets the count (`BlockContext.TrailingFeedLines`) after each handler, so the Cut handler reads the lines before it.
@@ -565,7 +566,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 - Read from paper: Font A at 1, 2, 3, 4 and 8; Font B at 1 and 2. The other values are the same division.
 - `DoubleWidth` is width 2, `DoubleHeight` is height 2. A `size` gives 1 to 8 for each axis (`GS ! n`); width and height are independent. Polish letters are correct at 3 x 3 (read from paper).
 - Line pitch: 29 dots at height 1, plus 24 dots for each step of the height.
-- Cut: `GS V 65 n` feeds n motion units (at most 1 dot each, so 255 is under 9 lines), then cuts. The cutter is 124 dots past the head. With n = 3 and no empty line before it the cutter goes through the last printed line; 3 LF before the cut keep it whole. The server adds them when a job does not send `options.feedLinesAfterPrint` and does not end with a LineFeed block (`CutFeed.DefaultLines`).
+- Cut: `GS V 65 n` feeds n motion units (at most 1 dot each, so 255 is under 9 lines), then cuts. The cutter is 124 dots past the head. With n = 3 and no empty line before it the cutter goes through the last printed line; 3 LF before the cut keep it whole. The server adds the lines that are missing when a job does not send `options.feedLinesAfterPrint` (`CutFeed.DefaultLines`).
 
 Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 

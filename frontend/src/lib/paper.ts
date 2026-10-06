@@ -123,7 +123,8 @@ export function defaultFeedBeforeCut(content: readonly (PrintContent | null | un
     const block = content[i];
     if (block?.type === "LineFeed") {
       const lines = block.lines ?? 1;
-      trailing += typeof lines === "number" && lines > 0 ? lines : 0;
+      // The file is not checked yet: only a whole number counts, so the result is a whole number.
+      trailing += Number.isInteger(lines) && lines > 0 ? lines : 0;
     } else if (block?.type !== "Signal" && block?.type !== "CodePage") {
       break;
     }
