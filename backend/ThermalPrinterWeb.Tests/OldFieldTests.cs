@@ -9,6 +9,7 @@ namespace ThermalPrinterWeb.Tests;
 
 // Issue #44: fields with no effect on this printer are gone from the caller texts.
 // Callers and stored jobs still hold them: each one binds as before and the job has the bytes from before.
+// feedLinesAfterPrint is the exception: it has an effect now, it feeds lines (FeedLinesTests), so the end of the old job is new.
 public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinterApp>
 {
     private readonly HttpClient _client = app.CreateClient();

@@ -28,7 +28,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand
+│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand, CutFeed
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -255,11 +255,12 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - Bytes: n times LF (the bytes of a LineFeed block), then the cut command. The cut command is the same in every job: `GS V 65 3` (`GS V 66 3` for `partialCut`); its 3 is `CutFeed.MotionUnits`, a feed of under 1 mm.
 - The field is not sent (or is `null`): no LF, the cut command alone. These are the bytes from before the change; `FeedLinesTests` pins them. So the model default is `null`, not a number.
 - With the cut command alone the cutter goes through the last printed line (issue #31, row F1). A caller sends 3 to keep that line whole, or ends the content with a LineFeed block. The house style does the second.
-- One line is the line of the job: 29 dots, or `options.defaultLineSpacing` when it is set. Each block sets the text size back to 1 x 1, so the size of the last block does not change the feed.
+- One line is the line of the job: 29 dots, or `options.defaultLineSpacing` when it is set (the paper estimate counts at least 24 dots per line). Each block sets the text size back to 1 x 1, so the size of the last block does not change the feed.
 - The feed is before each cut: every Cut block and the auto-cut. A job with no cut (`autoCut: false`, no Cut block) feeds nothing.
 - Why LF and not the n of `GS V`: n is one byte of motion units (255 dots, under 9 lines), and LF is the feed that is read from paper on this printer. `ESC d n` is not verified on it.
 - Paper: the lines count (n x `PaperLength.LineDots`). A Cut block also counts 127 dots (the cut command and the way to the cutter); the auto-cut counts its lines only. The largest value, 255, passes at the default line spacing (7395 dots, 92 cm). With `defaultLineSpacing: 255` an empty document takes 125 lines at most. Over the paper limit at the auto-cut the 400 reads `options.feedLinesAfterPrint: the document is over the limit ...`, with one Warning.
-- The web editor always sends the field (default 3), and its paper shows the same lines (`lib/paper.ts`).
+- The web editor always sends the field (default 3), and its paper shows the same lines (`lib/paper.ts`). Receipt mode sends 0: a receipt ends with its own LineFeed block of 3 lines and a Cut block.
+- The `print` tool description and `ServerInstructions` hold one rule (`PrinterTools.CutFeedRule`): send 3, or end the content with a LineFeed block of 3 lines, not both. A caller that does both gets both feeds.
 - Journal rows: a reprint reads the stored number as lines. A row from before the change that set the field now feeds lines (it fed motion units). Such a row also holds `"feedLinesAfterPrint":3` when its caller sent an `options` object without the field (the model default of that time): its reprint feeds 3 lines. A row with no `options` (simple mode, `print_note`) keeps its bytes.
 
 **Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).

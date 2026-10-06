@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services.Journal;
 using ThermalPrinterWeb.Services.Printing;
@@ -242,12 +243,28 @@ public sealed class FeedLinesTests
 
         var (isError, text) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}],"options":{"feedLinesAfterPrint":3}}""");
         var (_, plainText) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}]}""");
+        var (_, nullText) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}],"options":{"feedLinesAfterPrint":null}}""");
         var rows = await app.JournalRowsAsync();
 
         Assert.False(isError, text);
         Assert.Equal("Printed.", text);
         Assert.Equal("Printed.", plainText);
-        Assert.Contains(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual([.. Prelude, .. OkBlock, .. Feed(3), .. FullCut]));
-        Assert.Contains(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual(JobFromBefore));
+        Assert.Equal("Printed.", nullText);
+        Assert.Equal(3, rows.Count);
+        Assert.Single(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual([.. Prelude, .. OkBlock, .. Feed(3), .. FullCut]));
+        Assert.Equal(2, rows.Count(row => row.Payload.Bytes!.AsSpan().SequenceEqual(JobFromBefore)));
+    }
+
+    // The number in the caller texts is the feed of the house style.
+    [Fact]
+    public void CallerTexts_FeedBeforeACut_NameTheFeedOfTheHouseStyle()
+    {
+        Assert.Contains($"set options.feedLinesAfterPrint to {SimpleNote.FeedLines} ", PrinterTools.CutFeedRule);
+        Assert.Contains($"a LineFeed block of {SimpleNote.FeedLines} lines, not both", PrinterTools.CutFeedRule);
+        Assert.Contains(PrinterTools.CutFeedRule, PrinterTools.ServerInstructions);
+        var description = typeof(PrintOptions).GetProperty(nameof(PrintOptions.FeedLinesAfterPrint))!
+            .GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), false)
+            .Cast<System.ComponentModel.DescriptionAttribute>().Single().Description;
+        Assert.Contains($"send {SimpleNote.FeedLines} to keep that line whole", description);
     }
 }

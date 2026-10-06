@@ -61,7 +61,7 @@ internal static class PaperLength
     }
 
     // The cut command alone: GS V m n feeds n motion units, and one unit is at most one dot.
-    // The lines of options.feedLinesAfterPrint are counted apart (CutFeed).
+    // The lines of options.feedLinesAfterPrint are counted apart (CutFeed). The parameter stays: SimpleNoteTests calls it with its own 3.
     public static int CutDots(int motionUnits) => motionUnits + CutterOffsetDots;
 
     // The size the printer gives an image: it only scales down, to fit inside the limits.

@@ -32,7 +32,8 @@ import { PrintDock, PrinterAlert, Toast, roundButtonClass } from "@/components/p
 import { Sheet } from "@/components/sheet";
 import { SectionLabel, Segmented, fieldLabelClass, inputClass, quietButtonClass } from "@/components/editor/controls";
 
-const PRINT_OPTIONS = { codePage: "PC852", autoCut: true, feedLinesAfterPrint: 3 };
+// No feed from the options: a receipt ends with its own 3 empty lines and a Cut block (lib/receipt-utils.ts).
+const PRINT_OPTIONS = { codePage: "PC852", autoCut: true, feedLinesAfterPrint: 0 };
 const TAX_CATEGORIES: TaxCategory[] = ["A", "B", "C", "D"];
 
 const DRAFT_KEY = "thermal-printer-draft-receipt";
