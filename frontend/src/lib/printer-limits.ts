@@ -43,6 +43,7 @@ export const IMAGE_MIN_PRINT_SIZE = 1;
 export const MAX_BLOCKS = 500;
 export const MAX_IMAGE_BLOCKS = 20;
 export const MAX_SIGNAL_BLOCKS = 3;
+// MaxFeedBeforeCut is a number of lines (the feed is built in backend/Services/Printing/CutFeed.cs): one line is 29 dots, LINE_DOTS in lib/paper.ts.
 export const MAX_FEED_BEFORE_CUT = 255;
 export const MAX_LINE_SPACING = 255;
 export const MAX_REQUEST_BYTES = 30_000_000;

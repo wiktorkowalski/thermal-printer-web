@@ -35,6 +35,11 @@ public static class PrinterTools
     internal const string SignalRule =
         "Nothing beeps or lights by itself. Send a sound or a light only when the user asks for one, never on your own for a print, an error or a finished task.";
 
+    // In ServerInstructions and in the print description. The 3 is SimpleNote.FeedLines: a test pins it.
+    internal const string CutFeedRule =
+        "With no empty line before it the cut of a " + PrintName + " document goes through the last printed line, so set options.feedLinesAfterPrint to 3 "
+        + "or end the content with a LineFeed block of 3 lines, not both.";
+
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =
         "80 mm thermal receipt printer: one line holds 48 characters (24 with DoubleWidth, 64 with FontB, 48 / width with a size of 1 to 8) "
@@ -44,6 +49,7 @@ public static class PrinterTools
         + $"for styled text, barcodes, QR codes or images call {PrintName} with {{\"content\":[{{\"type\":\"Text\",\"content\":\"...\"}}]}}. "
         + "House style: headline Bold with size 2x3 (24 characters per line), body FontB with size 2x3 (32 characters per line), "
         + $"a 48-character Separator between them; {PrintNoteName} prints this style and breaks the lines for you. "
+        + $"{CutFeedRule} "
         + "Polish letters print, emoji print as '?'. "
         + $"The printer has a buzzer and an error light: {BeepName} and a Signal block in {PrintName} use them. {SignalRule} "
         + $"The server keeps a journal of every print: {JournalTools.ListJobsName} lists or searches it, {JournalTools.GetJobName} reads one job, "
@@ -136,6 +142,7 @@ public static class PrinterTools
         + "so keep each line within the limit (one Text block per line, or \\n inside content) "
         + "or set \"wrap\":true on the Text block: then the server breaks each longer line at a space (a longer word breaks at the limit) and keeps each \\n. "
         + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
+        + CutFeedRule + " "
         + "Polish letters print; emoji print as '?'. "
         + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks (CRLF counts as \\n). "
         + "Image content is base64 PNG or JPEG; other formats are rejected. "
@@ -147,7 +154,7 @@ public static class PrinterTools
         IPrinterService printer,
         PrintJobLog jobLog,
         [Description("Needed. Ordered content blocks to print, top to bottom.")] List<PrintContent>? content = null,
-        [Description("Optional print options: code page, line spacing, auto-cut.")] PrintOptions? options = null,
+        [Description("Optional print options: code page, line spacing, auto-cut, empty lines before a cut.")] PrintOptions? options = null,
         [Description(SourceDescription)] string? source = null)
     {
         if (content is null)

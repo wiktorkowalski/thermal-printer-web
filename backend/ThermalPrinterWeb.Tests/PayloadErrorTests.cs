@@ -44,6 +44,10 @@ public sealed class PayloadErrorTests
     internal static string OverPaper(int block, ContentType type)
         => $"Block {block} ({type}): the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)";
 
+    // The feed lines before the auto-cut pass the limit: no block is at fault.
+    internal static readonly string OverPaperAtAutoCut =
+        $"options.feedLinesAfterPrint: the document is over the limit of {PaperLength.MaxDots} dots of paper ({PaperLength.MaxDots / PaperLength.DotsPerMetre} m)";
+
     internal static string QRCodeControl(int codePoint, int index)
         => $"content holds the control character U+{codePoint:X4} at index {index}; a QR code takes no control character but a line break (\\n or \\r\\n)";
 
@@ -337,7 +341,7 @@ public sealed class PayloadErrorTests
     public async Task PrintAsync_OptionOutsideThePrinterRange_IsAValidationFailureLoggedOnce(int? lineSpacing, int? feed, string expectedError)
     {
         var logger = new RecordingLogger<PrinterService>();
-        var options = new PrintOptions { DefaultLineSpacing = lineSpacing, FeedLinesAfterPrint = feed ?? 3 };
+        var options = new PrintOptions { DefaultLineSpacing = lineSpacing, FeedLinesAfterPrint = feed };
 
         var result = await NewService(logger).PrintAsync([Text()], options);
 
@@ -349,16 +353,19 @@ public sealed class PayloadErrorTests
 
     [Theory]
     [InlineData(0, 0)]
-    [InlineData(255, 255)]
+    [InlineData(0, 255)]
+    [InlineData(255, 0)]
     public async Task BuildDocumentAsync_OptionsAtTheLimits_GoToThePrinter(int lineSpacing, int feed)
     {
         var options = new PrintOptions { DefaultLineSpacing = lineSpacing, FeedLinesAfterPrint = feed };
 
         var bytes = await NewService().BuildDocumentAsync([Text()], options);
 
-        // ESC 3 n, then GS V 65 n at the end. No ESC 2 after it: the next job starts with ESC @.
+        // ESC 3 n, then the feed lines and GS V 65 3 at the end. No ESC 2 after it: the next job starts with ESC @.
         Assert.Contains(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x33, (byte)lineSpacing]));
-        Assert.Equal([0x1D, 0x56, 0x41, (byte)feed], bytes[^1]);
+        Assert.Equal([0x1D, 0x56, 0x41, 3], bytes[^1]);
+        if (feed > 0)
+            Assert.Equal(Enumerable.Repeat((byte)0x0A, feed), bytes[^2]);
         Assert.DoesNotContain(bytes, command => command.AsSpan().SequenceEqual([(byte)0x1B, (byte)0x32]));
     }
 
@@ -397,11 +404,21 @@ public sealed class PayloadErrorTests
             // Line spacing 255: 125 lines are 31,875 dots.
             { [Text(new string('\n', 124))], new PrintOptions { DefaultLineSpacing = 255 }, null },
             { [Text(new string('\n', 125))], new PrintOptions { DefaultLineSpacing = 255 }, OverPaper(0, ContentType.Text) },
-            // Each cut feeds 255 dots and the 124 dots to the cutter: 379.
-            { [.. Enumerable.Repeat(cut, 84)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
-            { [.. Enumerable.Repeat(cut, 85)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(84, ContentType.Cut) },
-            // A feed of 0 still moves the paper to the cutter.
-            { [.. Enumerable.Repeat(cut, 259)], new PrintOptions { FeedLinesAfterPrint = 0 }, OverPaper(258, ContentType.Cut) },
+            // Each cut feeds 255 lines of 29 dots, the 3 units of the cut command and the 124 dots to the cutter: 7522.
+            { [.. Enumerable.Repeat(cut, 4)], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
+            { [.. Enumerable.Repeat(cut, 5)], new PrintOptions { FeedLinesAfterPrint = 255 }, OverPaper(4, ContentType.Cut) },
+            // A feed of 0, or no feed field, still moves the paper to the cutter: 127 dots.
+            { [.. Enumerable.Repeat(cut, 251)], new PrintOptions { FeedLinesAfterPrint = 0 }, null },
+            { [.. Enumerable.Repeat(cut, 252)], new PrintOptions { FeedLinesAfterPrint = 0 }, OverPaper(251, ContentType.Cut) },
+            { [.. Enumerable.Repeat(cut, 252)], null, OverPaper(251, ContentType.Cut) },
+            // The auto-cut counts its feed lines, not its cut command: 255 lines of 29 dots are 7395 dots.
+            { [], new PrintOptions { FeedLinesAfterPrint = 255 }, null },
+            // A line of the feed has the line spacing of the job: 125 lines of 255 dots are 31,875 dots.
+            { [], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 125 }, null },
+            { [], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 126 }, OverPaperAtAutoCut },
+            { [Text()], new PrintOptions { DefaultLineSpacing = 255, FeedLinesAfterPrint = 125 }, OverPaperAtAutoCut },
+            // No feed field: the auto-cut adds no paper, so a document at the limit still passes.
+            { [.. Enumerable.Repeat(LineFeed(100), 11), LineFeed(3)], new PrintOptions(), null },
             // The printer wraps on bytes. KATAKANA has no .NET encoding, so the text goes out as UTF-8: 3 bytes for one euro sign.
             { [.. Enumerable.Repeat(Text(new string('€', 10_000)), 2)], new PrintOptions { CodePage = "KATAKANA" }, OverPaper(1, ContentType.Text) },
             // PC852 has no ellipsis: it prints as three dots.
@@ -590,6 +607,9 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     [InlineData("""{"content":[{"type":"LineFeed","lines":"three"}]}""", "$.content[0].lines")]
     [InlineData("""{"content":[{"type":"Text","content":5}]}""", "$.content[0].content")]
     [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"autoCut":"yes"}}""", "$.options.autoCut")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"feedLinesAfterPrint":"three"}}""", "$.options.feedLinesAfterPrint")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"feedLinesAfterPrint":1.5}}""", "$.options.feedLinesAfterPrint")]
+    [InlineData("""{"content":[{"type":"Text","content":"x"}],"options":{"feedLinesAfterPrint":99999999999}}""", "$.options.feedLinesAfterPrint")]
     [InlineData("""{"content":"text"}""", "$.content")]
     [InlineData("""{"content":[""", "$.content[0]")]
     [InlineData("""{"name":5,"message":"m"}""", "$.name")]

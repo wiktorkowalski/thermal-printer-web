@@ -3,11 +3,13 @@ using System.Text.Json;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services.Journal;
+using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Tests;
 
 // Issue #44: fields with no effect on this printer are gone from the caller texts.
 // Callers and stored jobs still hold them: each one binds as before and the job has the bytes from before.
+// feedLinesAfterPrint is the exception: it has an effect now, it feeds lines (FeedLinesTests), so the end of the old job is new.
 public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinterApp>
 {
     private readonly HttpClient _client = app.CreateClient();
@@ -52,8 +54,9 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
     // "Zażółć" and LF.
     private static readonly byte[] TextInWindows1250 = [(byte)'Z', (byte)'a', 0xBF, 0xF3, 0xB3, 0xE6, 0x0A];
 
-    // GS V 66 5: the partial cut command with the feed of the job.
-    private static readonly byte[] PartialCutAfterFive = [0x1D, 0x56, 0x42, 5];
+    // The feed of the job, then the partial cut command: five empty lines, ESC a 1 of the Cut block is before them, then GS V 66 3.
+    // Before feedLinesAfterPrint fed lines (issue #44, owner decision of 2026-10-06) the end was GS V 66 5.
+    private static readonly byte[] PartialCutAfterFive = [0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x1D, 0x56, 0x42, 3];
 
     private static void AssertOldBytes(byte[] job)
     {
@@ -228,17 +231,19 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         Assert.Contains("No effect in legacy mode, the default.", density);
     }
 
-    // feedLinesAfterPrint stays: it feeds, but not lines. The text says so.
+    // feedLinesAfterPrint feeds lines (owner decision of 2026-10-06). The text says so, with the height of one line.
     [Fact]
-    public async Task ToolsList_FeedLinesAfterPrint_SaysThatItIsNotLines()
+    public async Task ToolsList_FeedLinesAfterPrint_SaysThatItIsLines()
     {
         var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
         var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == PrinterTools.PrintName);
         var feed = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("options").GetProperty("properties")
             .GetProperty("feedLinesAfterPrint").GetProperty("description").GetString();
 
-        Assert.Contains("Not lines", feed);
-        Assert.Contains("add a LineFeed block", feed);
+        Assert.StartsWith("Empty lines before each cut", feed);
+        Assert.Contains($"One line is {PaperLength.DefaultLineDots} dots", feed);
+        Assert.DoesNotContain("motion units", feed);
+        Assert.DoesNotContain("Not lines", feed);
     }
 
     // The API names and the numbers of the enums are in stored jobs and in callers: a member with no effect stays.

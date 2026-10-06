@@ -10,7 +10,7 @@ public class PrintOptions
     public int? DefaultLineSpacing { get; set; }
     [Description("Cut the paper after the last block when the content has no Cut block. Default true.")]
     public bool AutoCut { get; set; } = true;
-    // The name says lines; the printer reads the n of GS V as motion units. A rename or a conversion changes the API or the bytes (issue #44).
-    [Description("Extra feed before a cut in printer motion units of at most 0.125 mm, 0 to 255. Not lines: the default 3 is under 1 mm. For empty lines before the cut add a LineFeed block. Leave it out.")]
-    public int FeedLinesAfterPrint { get; set; } = 3;
+    // Null: the caller did not send it. Such a job has the bytes from before the field fed lines (issue #44): the cut command alone (CutFeed).
+    [Description("Empty lines before each cut (a Cut block or the auto-cut), 0 to 255. One line is 29 dots (3.6 mm), or defaultLineSpacing dots when that is set. The lines count as paper. Left out: no empty line, and the cut goes through the last printed line; send 3 to keep that line whole.")]
+    public int? FeedLinesAfterPrint { get; set; }
 }
