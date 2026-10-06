@@ -68,7 +68,8 @@ export const DEFAULT_SETTINGS: JobSettings = {
   feedLinesAfterPrint: 3,
 };
 
-export const CODE_PAGES = ["PC852", "PC437", "PC850", "PC858", "WPC1250", "WPC1252", "ISO8859_2", "KATAKANA"];
+// WPC1250 and ISO8859_2 are not offered: they print wrong glyphs on this printer (issue #44). The server still takes them.
+export const CODE_PAGES = ["PC852", "PC437", "PC850", "PC858", "WPC1252", "KATAKANA"];
 
 export const BLOCK_LABELS: Record<ContentType, string> = {
   Text: "Text",

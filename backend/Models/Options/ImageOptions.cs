@@ -14,7 +14,7 @@ public class ImageOptions
     [Description("Use the older raster image command. Default true.")]
     public bool UseLegacyMode { get; set; } = true;
 
-    // Maps to ESCPOS PrintImage isHiDPI; true preserves prior behavior.
-    [Description("Print at full dot density. Default true.")]
+    // Maps to ESCPOS PrintImage isHiDPI. In legacy mode the bytes are the same for both values (OldFieldTests).
+    [Description("Only read when useLegacyMode is false: it picks the dot density command of that mode. No effect in legacy mode, the default. Leave it out. Default true.")]
     public bool HighDensity { get; set; } = true;
 }

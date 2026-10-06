@@ -36,7 +36,8 @@ export function JobSettingsPanel({ settings, onChange }: { settings: JobSettings
           onChange={(e) => onChange({ codePage: e.target.value })}
           className="h-9 w-28 rounded-md border border-line bg-surface px-2 font-mono text-[13px]"
         >
-          {CODE_PAGES.map((cp) => (
+          {/* A stored template can hold a page that is not offered any more: it stays selected until the user picks another. */}
+          {(CODE_PAGES.includes(settings.codePage) ? CODE_PAGES : [settings.codePage, ...CODE_PAGES]).map((cp) => (
             <option key={cp}>{cp}</option>
           ))}
         </select>

@@ -20,7 +20,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobsController.cs  # Journal over HTTP: list, one job, reprint, statistics, search, papercut ledger
 │   │   ├── PrintResultResponse.cs  # PrintResult to HTTP answer, for print and reprint
 │   │   └── PrintResponseClientErrorFactory.cs  # 415 and other bodiless client errors as PrintResponse
-│   ├── Mcp/                    # PrinterTools, JournalTools, McpApiKeyMiddleware, McpAuthOptions, ArgumentShapeFilter, ToolArgumentException
+│   ├── Mcp/                    # PrinterTools, JournalTools, McpApiKeyMiddleware, McpAuthOptions, ArgumentShapeFilter, ToolArgumentException, HiddenPrintFields
 │   ├── Services/
 │   │   ├── IPrinterService.cs
 │   │   ├── PrinterService.cs   # Builds the ESC/POS bytes, talks to the printer, document limits
@@ -250,6 +250,13 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 **Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots).
 
 **Options**: CodePage selection (default PC852), line spacing, auto-cut behavior
+
+**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).
+- No caller text offers them: `HiddenPrintFields` removes `partialCut` from the MCP schema of `print`, the code page texts do not name the two pages, the editor has no control for them.
+- The server still binds them and sends the same bytes as before: callers and journal rows hold them. `OldFieldTests` pins this. Do not remove them from the models or from `CodePages`.
+- `imageOptions.highDensity` is read only when `useLegacyMode` is false. In legacy mode, the default, both values give the same bytes. It stays in the schema; its text says so.
+- `options.feedLinesAfterPrint` is not lines: `GS V n` reads motion units of at most 0.125 mm. The MCP text says so. The name and the bytes stay.
+- The binder skips a JSON property that no model has: an unknown property is never a 400.
 
 ### Signals (buzzer and error light)
 
