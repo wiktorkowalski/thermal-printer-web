@@ -500,6 +500,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 
 **Journal tools** (`JournalTools.cs`): the same `PrintJournalReader`, the same `PrintJobReprinter` and the same facts as the HTTP job endpoints. No tool reads statistics or reads the ledger.
 - `list_jobs` and `get_job` answer `Not read: <fixed text>` or two lines: the fixed notice `JournalTools.UntrustedNotice`, then one line of JSON. `reprint_job` answers `Printed.` or `Not printed: <reason>`. A read stores no row.
+- The `reprint_job` description says that a job with a Signal block sounds the buzzer or flashes the light again, and to reprint such a job only when the user wants that (`JournalTools.ReprintSignalNote`, pinned by `McpToolTests`).
 - Row text is text that any caller sent to the printer, and the answer goes to a language model (prompt injection). The rules, pinned by `McpJournalToolTests`:
   - Row text is only inside JSON strings, in fields whose names say what they hold: `printedTitle`, `printedSnippet`, `printedLines` (the text of `get_job`, one string per line, at most 2000 characters in all), `callerSource`; also `error` and `transport`.
   - Each value goes through `LogSafeText.Clean`: a length limit, `?` in place of a control, format or line-separator character, `'` in place of `"`. So an answer has a largest size (20 jobs, every text at its limit); a test pins it at 80,000 characters.

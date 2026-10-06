@@ -43,6 +43,10 @@ public static class JournalTools
 
     internal const string ListJobsExample = """{"limit":10}""";
     internal const string GetJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
+    // A reprint sends the stored blocks, so it repeats a Signal block of the first job.
+    internal const string ReprintSignalNote =
+        "A job with a Signal block sounds the buzzer or flashes the error light again: reprint such a job only when the user wants that.";
+
     internal const string ReprintJobExample = """{"id":"01999999-0000-7000-8000-000000000000","source":"claude-code"}""";
     internal const string DeleteJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
     // A dry run: it has no confirm.
@@ -159,6 +163,7 @@ public static class JournalTools
     [Description(
         "Print a stored job again, by its id (from " + ListJobsName + "). One call is one print and it uses paper: "
         + "call it only when the user asks for that print. The job goes through the same checks as a new print. "
+        + ReprintSignalNote + " "
         + "id is needed. Answers 'Printed.' or 'Not printed: <reason>'. "
         + "Example: " + ReprintJobExample)]
     public static async Task<string> ReprintJobAsync(
