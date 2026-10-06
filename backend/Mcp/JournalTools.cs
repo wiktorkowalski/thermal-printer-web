@@ -43,10 +43,6 @@ public static class JournalTools
 
     internal const string ListJobsExample = """{"limit":10}""";
     internal const string GetJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
-    // A reprint sends the stored blocks, so it repeats a Signal block of the first job.
-    internal const string ReprintSignalNote =
-        "A job with a Signal block sounds the buzzer or flashes the error light again: reprint such a job only when the user wants that.";
-
     internal const string ReprintJobExample = """{"id":"01999999-0000-7000-8000-000000000000","source":"claude-code"}""";
     internal const string DeleteJobExample = """{"id":"01999999-0000-7000-8000-000000000000"}""";
     // A dry run: it has no confirm.
@@ -64,6 +60,10 @@ public static class JournalTools
     internal const string ConfirmNotValid =
         "the confirm code is not valid for these arguments: it is wrong, used, too old or from another dry run. Run the call without confirm again.";
     internal const string JobsChanged = "a job of the dry run is gone. Run the call without confirm again.";
+
+    // A reprint sends the stored blocks, so it repeats a Signal block of the first job.
+    internal const string ReprintSignalNote =
+        "A job with a Signal block sounds the buzzer or flashes the error light again: reprint such a job only when the user asks for that.";
 
     private const string DeleteRule =
         "A delete cannot be undone. Call this tool only when the user asks for that delete in their own message. "

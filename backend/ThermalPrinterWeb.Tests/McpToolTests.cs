@@ -197,7 +197,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     public async Task ToolsList_ReprintJob_SaysThatASignalBlockSignalsAgain()
     {
         Assert.Equal(
-            "A job with a Signal block sounds the buzzer or flashes the error light again: reprint such a job only when the user wants that.",
+            "A job with a Signal block sounds the buzzer or flashes the error light again: reprint such a job only when the user asks for that.",
             JournalTools.ReprintSignalNote);
 
         Assert.Contains(JournalTools.ReprintSignalNote, (await ToolAsync("reprint_job")).GetProperty("description").GetString());
