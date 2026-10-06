@@ -201,6 +201,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
             JournalTools.ReprintSignalNote);
 
         Assert.Contains(JournalTools.ReprintSignalNote, (await ToolAsync("reprint_job")).GetProperty("description").GetString());
+        Assert.Contains("reprint_job prints a stored job again, its Signal blocks included.", PrinterTools.ServerInstructions);
     }
 
     [Theory]
