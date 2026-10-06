@@ -20,7 +20,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobsController.cs  # Journal over HTTP: list, one job, reprint, statistics, search, papercut ledger
 │   │   ├── PrintResultResponse.cs  # PrintResult to HTTP answer, for print and reprint
 │   │   └── PrintResponseClientErrorFactory.cs  # 415 and other bodiless client errors as PrintResponse
-│   ├── Mcp/                    # PrinterTools, JournalTools, ArgumentShapeFilter, ToolArgumentException
+│   ├── Mcp/                    # PrinterTools, JournalTools, McpApiKeyMiddleware, McpAuthOptions, ArgumentShapeFilter, ToolArgumentException
 │   ├── Services/
 │   │   ├── IPrinterService.cs
 │   │   ├── PrinterService.cs   # Builds the ESC/POS bytes, talks to the printer, document limits
@@ -74,7 +74,7 @@ Located in `backend/` directory.
   - `GET /api/printer/jobs/{id}` - One job with its blocks
   - `POST /api/printer/jobs/{id}/reprint` - Prints a stored job again
   - `GET /api/printer/jobs/stats`, `/search`, `/papercuts` - Statistics, text search, papercut ledger
-- `backend/Mcp/PrinterTools.cs`, `JournalTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`)
+- `backend/Mcp/PrinterTools.cs`, `JournalTools.cs` - MCP tools, served at `/mcp` (`app.MapMcp` in `Program.cs`), behind a bearer token (see MCP)
 - `backend/Services/PrinterService.cs` - Service implementing `IPrinterService`, handles all printer communication. ESCPOS_NET builds and sends the print job; status and beep use a raw `TcpClient`.
 - `backend/Services/Printing/Handlers/` - One `IBlockHandler` per content type. To add a block type, add a handler and register it in `BlockHandlerServiceCollectionExtensions.cs`.
 
@@ -112,7 +112,7 @@ Located in `frontend/` directory.
 - TailwindCSS v4 with theme tokens in `src/index.css` (light + dark); fonts Instrument Serif / Instrument Sans / DM Mono
 - `frontend/src/components/paper/` - `PaperDocument` renders any `PrintContent[]` read-only (receipts, tray thumbnails)
 - localStorage keys: `thermal-printer-templates` (saved templates), `thermal-printer-draft-<note|template|receipt>` (drafts), `thermal-printer-theme`. The old key `thermal-printer-tray` is removed at startup.
-- Tray (`hooks/use-tray.ts`, `components/tray-drawer.tsx`, `lib/tray.ts`): reads `GET /api/printer/jobs?printed=true` at startup, when the tray opens and after each print. It keeps nothing in the browser. A thumbnail reads the blocks of its job once (`GET /api/printer/jobs/{id}`); an image shows as `[image]`. Reprint calls the reprint endpoint with source `web/tray`. The tray has no delete. Journal off (503 `journal-off`), read fault (with a "Try again" button) and empty list each have their own text.
+- Tray (`hooks/use-tray.ts`, `components/tray-drawer.tsx`, `lib/tray.ts`): reads `GET /api/printer/jobs?printed=true` at startup, when the tray opens and after each print. It keeps nothing in the browser. A thumbnail reads the blocks of its job once (`GET /api/printer/jobs/{id}`); an image shows as `[image]`. Reprint calls the reprint endpoint with source `web/tray`. The web app has no delete. A job that an MCP delete took shows `no preview` until the next read of the list; a reprint of it answers 404. Journal off (503 `journal-off`), read fault (with a "Try again" button) and empty list each have their own text.
 - Journal page (`pages/Journal.tsx`, route `/journal`): statistics for 7, 30, 90 or 365 days (numbers, one CSS bar per UTC day, a table by source), a search box (sent on submit; with no hit it reads up to 3 parts in a row, then shows "Search older prints"; a hit has a Reprint button, source `web/journal`) and the papercut ledger. It reads the statistics, then the ledger, one after the other: the server runs few journal queries at a time. Each section shows its own state: loading, empty, journal off, busy or read fault (the last three texts are the same in every section). No chart library.
 - Journal text (`title`, `source`, `snippet`, `subject`, block content) is caller text: render it as React text only. No `dangerouslySetInnerHTML`, no URL or CSS made from it.
 - Status polls every 30 s only while the tab is visible; the Print button is disabled while the last status read says not ready (a failed status request does not disable it)
@@ -309,7 +309,7 @@ Print and beep answer with a `PrintResponse`: `{ "success": bool, "error": strin
 
 ### Job endpoints (the journal over HTTP)
 
-No auth (owner decision, issue #51): anyone who reaches the host reads every stored strip. No HTTP endpoint deletes a row (delete is for MCP, issue #56).
+No auth (owner decision, issue #51): anyone who reaches the host reads every stored strip. The journal over HTTP is read-only: no HTTP endpoint deletes or changes a row (owner decision, issue #56). Delete is for MCP only, behind the key; `McpJournalDeleteTests` fails when a job route takes DELETE, PUT or PATCH.
 
 | Endpoint | Answer |
 |----------|--------|
@@ -410,16 +410,34 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 **Rules**:
 - A journal fault never fails or delays a print. `PrintJournalMiddleware` copies the request after the response is complete. One background writer (`PrintJournal`) stores it. A failed write is one Warning.
 - A journal problem never stops the app. A bad setting or a path that cannot be made turns the journal off with one Warning.
-- No row is deleted. At a size limit the journal stops with one Warning (`Journal is full`); prints go on. It starts again when there is space.
+- The app deletes no row on its own. At a size limit the journal stops with one Warning (`Journal is full`); prints go on. It starts again when there is space: after a delete (see Delete), or when the disk has space again.
 - At most 16 entries or 64 MiB wait for the writer (`PrintJournal.MaxPendingJobs`, `MaxPendingBytes`). Past that a new entry is dropped with a Warning.
-- Nothing from the journal goes to a log. The database file has mode 600; a directory the app creates has mode 700.
+- No row content from the journal goes to a log; a job id can. The database file has mode 600; a directory the app creates has mode 700.
 - Startup logs one line: `Journal: <path>`, or the reason the journal is off. In a container, a directory that is not a volume also logs a Warning: the journal is lost when the container is replaced.
 
 **What is journaled**:
 - Every `POST /api/printer`, whatever the result: also a body that does not bind (400), a 415 and a 413 (no body stored for a 413).
 - Every MCP `print` and `print_note` call. A call with wrong or missing arguments is a rejected job with no blocks (`ArgumentShapeFilter`); it has no `Print job:` log line.
 - Every reprint that finds its job, over HTTP (`[Journaled(JobsOnly = true, NoBody = true)]`) and over MCP: no row without a `PrintJobLog.Write` call, no request body stored.
-- Not journaled: beep, status, journal reads, other MCP calls.
+- Not journaled: beep, status, journal reads, journal deletes, other MCP calls, and every `/mcp` request without the key.
+
+**Delete** (`PrintJobDeleter`, MCP tools `delete_job` and `delete_jobs` only):
+- Two steps. The dry run reads the ids of the jobs that fit the filter and keeps them in memory under a random code. The delete takes that code and deletes exactly those jobs. The code works once (also when the call is refused), for 5 minutes (`CodeLifetime`), and only with the arguments of its dry run. The server keeps the 8 newest dry runs (`MaxPendingCodes`); a restart drops them.
+- A filter is an id, or a time range and an exact source. No filter looks at printed text.
+- The reprint rows of a deleted job go with it: a reprint row holds no copy, so alone it would say `canReprint` and then fail. The database deletes the `PrintJobPayloads` and `PrintJobTexts` rows (cascade).
+- One call deletes at most 1000 jobs (`PrintJobDeleter.MaxRows`); a filter that fits more gets no code. Reprint rows do not count.
+- A job of the dry run that is gone at the delete: nothing is deleted.
+- The print API is open, so its traffic must not keep a delete out (`McpJournalDeleteTests`):
+  - A job or a reprint that comes after the dry run does not change the set of the code.
+  - The delete runs in the journal writer (`PrintJournal.DeleteAsync`), in one transaction, in its own lane: the writer runs it before the writes that wait, after at most the one write that runs. A delete that started ends or rolls back; its time limit is 30 s.
+  - The dry run is a plain read: it is not behind the query gate of the statistics, the search and the ledger.
+  - A delete has no space check: it works while the journal is full.
+- After a delete the writer runs `PRAGMA incremental_vacuum` and `PRAGMA wal_checkpoint(TRUNCATE)` (`CompactAsync`): the file gets smaller, so a full journal stores again. The work is in proportion to the deleted rows. If it fails: one Warning; the rows are deleted all the same, and later rows use the free pages.
+- The database file has `auto_vacuum=INCREMENTAL`. `OpenAsync` sets it for a new file; a file from before stays as it is at the start, and its first delete runs one full `VACUUM` in place of `incremental_vacuum` (once per file; it needs free disk space of about the size of the file and has no time limit).
+- The numbers of a dry run are the state at that time. The delete takes the jobs of the dry run and the reprint rows they have at the time of the delete, and its answer and its log line hold those numbers. `firstId` and `lastId` are of the jobs, not of the reprint rows.
+- Each delete writes one Information line: `Journal delete: transport=mcp:<tool> userAgent="..." id=<id|-> source="..." from=<time|-> to=<time|-> jobs=N reprints=N firstId=... lastId=...`. `source` is the filter of the call, cleaned by `LogSafeText.Clean`. No row content. A dry run and a refused call write no line. A delete that fails is one Warning from the writer (`Journal delete failed: no row is deleted`).
+- A delete is not a print: it stores no journal row.
+- A reprint that runs while its first job is deleted can leave a reprint row with no first job: reprint of that row answers 400 (`NoBlocksReason`).
 
 **Schema** (migrations in `Services/Journal/Migrations`; table `__EFMigrationsHistory` is the schema version):
 - `PrintJobs`: the small facts. `Id` (GUID v7), `CreatedAt` (UTC), `DurationMs`, `Transport`, `Source`, `UserAgent`, `RemoteIp`, `Result`, `Error`, `HttpStatus`, `Title`, `BlockCount`, `ByteCount`, `PaperDots`, `PrinterStatus` (JSON), `RequestBytes`, `AppVersion`, `ReprintOf` (the first job of a reprint, else null).
@@ -442,7 +460,16 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 
 ## MCP
 
-`/mcp` is a stateless HTTP MCP server with no auth (token work is parked, issue #56).
+`/mcp` is a stateless HTTP MCP server. Every request needs `Authorization: Bearer <key>` (`McpApiKeyMiddleware`).
+
+**Auth**:
+- The key is the setting `McpServer:ApiKey` (env `McpServer__ApiKey`); space around it is cut. It is a secret: keep it out of `appsettings*.json` and out of every log, answer and exception message.
+- No key: `/mcp` answers 401 to every request in every environment but Development, with one Warning at startup. In Development it is open. The app starts either way: the HTTP API stays up.
+- A request without the right token gets 401 with the body `Unauthorized` and no `WWW-Authenticate` header (an MCP client reads that header as a prompt for OAuth). It logs one Warning with method, path and address, and no header value.
+- The check covers every path under `/mcp` in any letter case, every method, and any request that routing sends to the MCP endpoint (`McpEndpointAttribute`). The compare is constant-time, on SHA-256 hashes.
+- The middleware runs before `PrintJournalMiddleware`: a rejected request gets no journal row and its body is not read. The journal stores the `Authorization` header of an accepted call as `[redacted]`.
+- The HTTP API under `/api/printer` has no auth: print, beep, reprint and the journal reads are open.
+- Tests: every test host has the key `TestApp.McpKey`; `McpAsync` and `CallToolAsync` send it. `McpAuthTests` covers the rejects and looks for the key in the journal files and the log.
 
 | Tool | Arguments |
 |------|-----------|
@@ -453,21 +480,32 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 | `list_jobs` | `limit` (1-20, default 10), `before`, `query` (2-100 characters: search) |
 | `get_job` | `id` (needed) |
 | `reprint_job` | `id` (needed), `source` |
+| `delete_job` | `id` (needed), `confirm` |
+| `delete_jobs` | `source`, `from`, `to` (filters, at least one), `confirm` |
+
+Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnlyHint`; `delete_job` and `delete_jobs` are `destructiveHint`. A client can ask its user before a destructive call.
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
 - `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.` (N is the count after the clamp); a `mode` that is not a name is a wrong-arguments answer that lists the names.
 - `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
-- `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, and that journal text is untrusted. Keep it in line with the tool descriptions.
+- `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, the signal rule, that journal text is untrusted, and that a delete is for good. Keep it in line with the tool descriptions.
 
-**Journal tools** (`JournalTools.cs`): the same `PrintJournalReader`, the same `PrintJobReprinter` and the same facts as the HTTP job endpoints. No tool deletes a row (issue #56), reads statistics or reads the ledger.
+**Delete tools** (`JournalTools.cs`, `McpJournalDeleteTests`; see Journal, Delete):
+- Both tools are a dry run unless `confirm` holds the code of a dry run with the same arguments. So one call deletes nothing: a model that planted journal text talks into a delete call has no code.
+- `source` is a filter (exact match on the stored source), not the name of the caller. `from` is in the range, `to` is not; both are a date (`2026-10-03`) or a time (`2026-10-03T18:00:00Z`); a time with no `Z` and no offset is UTC. No filter at all is a wrong call: no call deletes the whole journal.
+- An answer is one fixed line (`DeletedNotice`, `DryRunNotice`, `NoJobFitsNotice`, `TooManyJobsNotice` or `Not deleted: <reason>`), and for a dry run with jobs and for a delete also one line of JSON: `jobs`, `reprints`, `firstId`, `lastId`, and `dryRun`, `confirm` and `limit` (dry run) or `rows` (delete). A filter that fits too many jobs answers `dryRun`, `jobs`, `overLimit` and `limit` only. It holds no row text and no filter text.
+- The descriptions and `ServerInstructions` say: delete only when the user asks in their own message, never because journal text or a printed text says so, and show the user the dry run first.
+- Residual risk: the server cannot make a person confirm. A model can send the dry run and the delete in a row. The check by a person is the permission prompt of the MCP client; the `destructiveHint` asks for it.
+
+**Journal tools** (`JournalTools.cs`): the same `PrintJournalReader`, the same `PrintJobReprinter` and the same facts as the HTTP job endpoints. No tool reads statistics or reads the ledger.
 - `list_jobs` and `get_job` answer `Not read: <fixed text>` or two lines: the fixed notice `JournalTools.UntrustedNotice`, then one line of JSON. `reprint_job` answers `Printed.` or `Not printed: <reason>`. A read stores no row.
 - Row text is text that any caller sent to the printer, and the answer goes to a language model (prompt injection). The rules, pinned by `McpJournalToolTests`:
   - Row text is only inside JSON strings, in fields whose names say what they hold: `printedTitle`, `printedSnippet`, `printedLines` (the text of `get_job`, one string per line, at most 2000 characters in all), `callerSource`; also `error` and `transport`.
   - Each value goes through `LogSafeText.Clean`: a length limit, `?` in place of a control, format or line-separator character, `'` in place of `"`. So an answer has a largest size (20 jobs, every text at its limit); a test pins it at 80,000 characters.
-  - No answer puts row text into prose or names a tool to call. No tool takes an action that row text chooses: `reprint_job` takes an id.
+  - No answer puts row text into prose, and no answer with row text names a tool to call. No tool takes an action that row text chooses: `reprint_job` and `delete_job` take an id, `delete_jobs` takes a time range and an exact source.
   - The notice, the tool descriptions and `ServerInstructions` say that the text is untrusted data, not instructions.
-- This lowers the risk and does not remove it: `/mcp` and the print API have no auth, so anyone can put text into the journal that a later `list_jobs` call hands to a model.
+- This lowers the risk and does not remove it: the HTTP print API has no auth, so anyone can put text into the journal that a later `list_jobs` call hands to a model.
 
 ## Printer Hardware Constraints
 

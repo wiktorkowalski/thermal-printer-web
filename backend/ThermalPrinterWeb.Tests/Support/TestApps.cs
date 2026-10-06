@@ -15,7 +15,13 @@ public abstract class TestApp(string environment) : WebApplicationFactory<Progra
     public const string Loopback = "127.0.0.1";
     protected const string Production = "Production";
 
+    // The key of /mcp in a test host. TestHttp sends it with every MCP call.
+    public const string McpKey = "test-mcp-key-7f3a9c1e5b2d4f60";
+
     public RecordingLoggerProvider Logs { get; } = new();
+
+    // Empty: the host has no key. Set before the first request.
+    public string McpApiKey { get; init; } = McpKey;
 
     // Each host has its own print journal, in the temp directory. The default path is under the repo.
     public string JournalDirectory { get; init; } = NewJournalDirectory();
@@ -30,7 +36,7 @@ public abstract class TestApp(string environment) : WebApplicationFactory<Progra
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);
-        UseSettings(builder, (JournalPathSetting, JournalDirectory));
+        UseSettings(builder, (JournalPathSetting, JournalDirectory), ("McpServer:ApiKey", McpApiKey));
         builder.ConfigureServices(services =>
         {
             services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Debug).AddProvider(Logs));

@@ -66,6 +66,10 @@ public sealed class JournalReadTests
         public Task<string> OpenAsync(CancellationToken cancellationToken) => Task.FromResult(Path.Combine("no-database", "journal.db"));
 
         public Task AddAsync(PrintJob job, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<int?> DeleteAsync(IReadOnlyList<Guid> jobIds, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task CompactAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private static App JournalOffApp() => new(null, ("Journal:DataPath", ""));

@@ -77,8 +77,14 @@ builder.Services.AddSingleton<ILoggerProvider, PrintJobTraceLoggerProvider>();
 builder.Services.AddSingleton(services => new PrintJournalReader(
     services.GetRequiredService<JournalDatabase>(), services.GetRequiredService<PrintJournal>()));
 builder.Services.AddSingleton<PrintJobReprinter>();
+builder.Services.AddSingleton(services => new PrintJobDeleter(
+    services.GetRequiredService<PrintJournal>(),
+    services.GetRequiredService<PrintJournalReader>(),
+    services.GetRequiredService<PrintJobLog>(),
+    services.GetRequiredService<ILogger<PrintJobDeleter>>()));
 
-// MCP server over HTTP at /mcp (stateless, no auth - single-user printer).
+// MCP server over HTTP at /mcp (stateless). McpApiKeyMiddleware guards it with a bearer token.
+builder.Services.AddOptions<McpAuthOptions>().BindConfiguration(McpAuthOptions.SectionName);
 builder.Services.AddMcpServer(options => options.ServerInstructions = PrinterTools.ServerInstructions)
     .WithHttpTransport(o => o.Stateless = true)
     .WithToolsFromAssembly()
@@ -143,11 +149,14 @@ if (app.Environment.IsDevelopment())
     app.UseCors("AllowReact");
 }
 
+// After routing: it reads the endpoint. Before the journal: a request without the key gets no journal row.
+app.UseMiddleware<McpApiKeyMiddleware>();
+
 // After routing: the middleware reads the endpoint to know which requests are print jobs.
 app.UseMiddleware<PrintJournalMiddleware>();
 
 app.MapControllers();
-app.MapMcp("/mcp").WithMetadata(new JournaledAttribute { JobsOnly = true });
+app.MapMcp(McpApiKeyMiddleware.McpPath).WithMetadata(new McpEndpointAttribute(), new JournaledAttribute { JobsOnly = true });
 
 // Serve React app SPA (from wwwroot)
 app.MapFallbackToFile("index.html");

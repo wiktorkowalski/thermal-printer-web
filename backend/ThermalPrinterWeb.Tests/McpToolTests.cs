@@ -55,7 +55,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
         var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
 
         Assert.Equal(
-            ["beep", "get_job", "get_status", "list_jobs", "print", "print_note", "reprint_job"],
+            ["beep", "delete_job", "delete_jobs", "get_job", "get_status", "list_jobs", "print", "print_note", "reprint_job"],
             tools.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()).Order());
     }
 
@@ -65,6 +65,8 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     [InlineData("list_jobs", "limit,before,query")]
     [InlineData("get_job", "id")]
     [InlineData("reprint_job", "id,source")]
+    [InlineData("delete_job", "id,confirm")]
+    [InlineData("delete_jobs", "source,from,to,confirm")]
     [InlineData("print", "content,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]
     [InlineData("beep", "count,duration,mode")]

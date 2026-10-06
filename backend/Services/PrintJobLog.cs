@@ -28,7 +28,11 @@ public sealed class PrintJobLog(ILogger<PrintJobLog> logger, IHttpContextAccesso
             "Print job: transport={Transport} source=\"{Source}\" userAgent=\"{UserAgent}\" result={Result}",
             transport,
             LogSafeText.Clean(source, MaxSourceLength),
-            LogSafeText.Clean(httpContext.HttpContext?.Request.Headers.UserAgent.ToString(), MaxUserAgentLength),
+            CallerUserAgent(),
             result.Failure?.ToString() ?? "Printed");
     }
+
+    // The User-Agent of the request, cleaned for a log line.
+    internal string CallerUserAgent()
+        => LogSafeText.Clean(httpContext.HttpContext?.Request.Headers.UserAgent.ToString(), MaxUserAgentLength);
 }

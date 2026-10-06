@@ -207,6 +207,37 @@ public sealed partial class PrintJournalReader
         return new StoredJob(originalId, content, options, null);
     }
 
+    // The jobs that fit the filter of a delete, oldest first, and the number of their reprint rows. It deletes nothing.
+    // More than maxJobs fit: the number, and no ids. It reads PrintJobs only, and it is not behind the query gate:
+    // the reads of the open HTTP API must not keep a delete out.
+    internal async Task<JobSelection> SelectForDeleteAsync(JobDeleteFilter filter, int maxJobs, CancellationToken cancellationToken)
+    {
+        using var timeout = Timeout(cancellationToken);
+        await using var db = Open();
+
+        // The filter values are parameters: caller text never becomes SQL.
+        var jobs = db.PrintJobs.AsNoTracking();
+        if (filter.Id is { } id)
+            jobs = jobs.Where(job => job.Id == id);
+        if (filter.Source is { } source)
+            jobs = jobs.Where(job => job.Source == source);
+        if (filter.From is { } from)
+            jobs = jobs.Where(job => job.CreatedAt >= from);
+        if (filter.To is { } to)
+            jobs = jobs.Where(job => job.CreatedAt < to);
+
+        var ids = await jobs.OrderBy(job => job.Id).Select(job => job.Id).Take(maxJobs + 1).ToListAsync(timeout.Token);
+        if (ids.Count > maxJobs)
+            return new JobSelection([], await jobs.CountAsync(timeout.Token), 0);
+
+        // A reprint of a reprint names the first job, so one step is enough.
+        var reprints = ids.Count == 0
+            ? 0
+            : await db.PrintJobs.AsNoTracking()
+                .CountAsync(job => job.ReprintOf != null && ids.Contains(job.ReprintOf.Value) && !ids.Contains(job.Id), timeout.Token);
+        return new JobSelection(ids, ids.Count, reprints);
+    }
+
     // The text values only: the entity is never loaded, its blobs are up to 30 MB.
     private static Task<JobCopy?> CopyAsync(JournalDbContext db, Guid jobId, CancellationToken cancellationToken)
         => db.PrintJobPayloads.AsNoTracking()
