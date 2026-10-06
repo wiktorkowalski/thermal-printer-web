@@ -36,6 +36,8 @@ internal static class CodePages
             ["PC852"] = (CodePage.PC852_LATIN2, 852),
             ["LATIN2"] = (CodePage.PC852_LATIN2, 852),
             ["CP852"] = (CodePage.PC852_LATIN2, 852),
+            // WPC1250 and ISO8859_2 print wrong glyphs on this firmware (probe strip, issue #31). No caller text
+            // names them (issue #44); the names stay, so a job that sends one has the same bytes as before.
             ["WPC1250"] = (CodePage.WPC1250_LATIN2, 1250),
             ["CP1250"] = (CodePage.WPC1250_LATIN2, 1250),
             ["WINDOWS-1250"] = (CodePage.WPC1250_LATIN2, 1250),

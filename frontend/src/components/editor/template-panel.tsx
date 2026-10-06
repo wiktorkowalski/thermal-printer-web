@@ -30,8 +30,6 @@ function summary(block: Block): string {
       return `${block.separatorChar ?? "-"} × ${block.separatorLength ?? 32}`;
     case "LineFeed":
       return `× ${block.lines ?? 1}`;
-    case "Cut":
-      return block.partialCut ? "partial" : "full";
     case "Image":
       return block.content ? "1-bit" : "empty";
     default:

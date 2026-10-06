@@ -137,6 +137,7 @@ export interface PrintContent {
   qrCodeOptions?: QRCodeOptions;
   imageOptions?: ImageOptions;
   lines?: number;
+  /** No effect on this printer: every cut is partial. The editor has no control for it; stored jobs and templates hold it. */
   partialCut?: boolean;
   separatorChar?: string;
   separatorLength?: number;

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol.Server;
 using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
@@ -108,6 +109,9 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
+
+// Once, before the first tools/list: the tool object is shared by every request.
+HiddenPrintFields.RemoveFrom(app.Services.GetServices<McpServerTool>().Single(tool => tool.ProtocolTool.Name == PrinterTools.PrintName).ProtocolTool);
 
 PrinterOptions printerOptions;
 try

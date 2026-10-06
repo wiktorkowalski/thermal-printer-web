@@ -22,7 +22,8 @@ public class PrintContent
     public ImageOptions? ImageOptions { get; set; }
     [Description("LineFeed blocks only: number of empty lines. Default 1, at most 100.")]
     public int? Lines { get; set; } = 1;
-    [Description("Cut blocks only: true leaves the strip attached at one point. Default false (full cut).")]
+    // Not in the MCP schema (HiddenPrintFields): the cutter makes a partial cut for both values. Still bound and sent as before.
+    [Description("Cut blocks only. No effect on this printer: every cut is a partial cut.")]
     public bool? PartialCut { get; set; } = false;
     [Description("Separator blocks only: the character to repeat; only the first character is used and it must not be empty. Default '='.")]
     public string? SeparatorChar { get; set; } = "=";
