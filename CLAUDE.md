@@ -236,10 +236,10 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - The column limit comes from the block: `PaperLength.Columns(styles, size)`, from the font (`FontB` or Font A) and the width of `TextScale.Of` (`size.width`, else 2 for `DoubleWidth`, else 1). See the table in Printer Hardware Constraints.
 - The columns are those of the default code page (PC852). A job with another code page can get a line over the limit.
 - One block stays one block: the server adds LF inside the text. Block numbers in errors and `BlockCount` do not change.
-- Limits (`TextBlockHandler`): a text over 10,000 characters is rejected before the wrap reads it. Then the 10,000 characters, the 500 lines and the paper estimate count the text after the wrap. A break inside a long word adds one character: 10,000 characters with no space are over the limit.
+- Limits (`TextBlockHandler`): a text over 10,000 characters is rejected before the wrap reads it. Then the 10,000 characters, the 500 lines and the paper estimate count the text after the wrap. A break inside a long word adds one character: 10,000 characters with no space are over the limit. These two errors read `text length after the wrap N ...` and `text line count after the wrap N ...`: N is not the number that the caller sent.
 - Only a Text block reads the flag. A Separator does not wrap.
 - Journal: `Blocks` holds the block as sent (the flag, the text with no break of the server), so a reprint wraps again. `PlainText`, `Title` and the search text are the text as sent too. Simple mode is different: its blocks are built wrapped, so its stored text is the text on the paper.
-- The web editor has no control for the flag. It keeps the flag of an imported template; the paper and a tray thumbnail show such a text with a break in the middle of a word.
+- The web editor has no control for the flag. It keeps the flag of an imported template; the paper and a tray thumbnail show such a text with a break in the middle of a word, and the inspector says "The printer breaks the line mid-word". The checks of the editor count the text as sent, so such a block near a limit can pass the editor and get a 400 from the server.
 
 **Alignment**: Left, Center (default), Right
 

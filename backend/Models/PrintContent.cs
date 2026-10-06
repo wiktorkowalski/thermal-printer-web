@@ -31,5 +31,5 @@ public class PrintContent
     [Description("Signal blocks only: the buzzer or the error light at this place in the document. Default: Sound, 1 beep, duration 1. One document holds at most 3 Signal blocks. Nothing beeps or lights by itself: add a Signal block only when the user asks for a sound or a light.")]
     public SignalOptions? SignalOptions { get; set; }
     [Description("Text blocks only: true makes the server break each line that is longer than the characters per line of the block. The break is at a space or a tab; a word longer than the line breaks at the limit; each \\n stays. So prose can go in one block as it is. The limits of 10000 characters and 500 lines count the text with the line breaks that the server adds. Default false: the text prints as sent and the printer wraps in the middle of a word.")]
-    public bool? Wrap { get; set; } = false;
+    public bool? Wrap { get; set; }
 }

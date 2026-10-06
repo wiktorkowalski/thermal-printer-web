@@ -156,14 +156,14 @@ public sealed class TextWrapTests
         var tooManyLines = await NewService().PrintAsync([Wrapped(manyLines, eightByOne)]);
 
         Assert.Equal(PrintResult.Ok, fits);
-        Assert.Equal(PrintResult.Invalid($"Block 1 (Text): text length {TextBlockHandler.MaxLength + 208} is over the limit of {TextBlockHandler.MaxLength}"), tooLong);
+        Assert.Equal(PrintResult.Invalid($"Block 1 (Text): text length after the wrap {TextBlockHandler.MaxLength + 208} is over the limit of {TextBlockHandler.MaxLength}"), tooLong);
         Assert.Equal(PrintResult.Ok, fewLines);
         Assert.Equal(
-            PrintResult.Invalid($"Block 0 (Text): text line count {TextBlockHandler.MaxLines + 1} is over the limit of {TextBlockHandler.MaxLines}"),
+            PrintResult.Invalid($"Block 0 (Text): text line count after the wrap {TextBlockHandler.MaxLines + 1} is over the limit of {TextBlockHandler.MaxLines}"),
             tooManyLines);
     }
 
-    // The paper limit counts the lines after the wrap: 410 words of 32 columns are 410 tall lines.
+    // The paper limit counts the lines after the wrap. Words of 17 columns: two do not fit in 32, so each word is one tall line.
     [Fact]
     public async Task PrintAsync_WrappedLines_AreLimitedByThePaper()
     {
@@ -205,6 +205,8 @@ public sealed class TextWrapTests
     {
         // One character and spaces that are not printed: each block is one line, so every block is wrapped and the job prints.
         { "x" + new string(' ', TextBlockHandler.MaxLength - 1), true },
+        // The slowest character to measure (it prints as a stand-in), then spaces: every block is wrapped and the job prints.
+        { new string('↑', 128) + new string(' ', TextBlockHandler.MaxLength - 128), true },
         // Emoji with no space, each one measured: the paper limit stops the job after a few blocks.
         { string.Concat(Enumerable.Repeat("😀", TextBlockHandler.MaxLength / 4)), false }
     };
