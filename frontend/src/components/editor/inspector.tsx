@@ -382,19 +382,9 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
       );
       break;
     case "Cut":
+      // No cut type control: the cutter of this printer makes a partial cut only (issue #44).
       body = (
-        <>
-          <Segmented
-            label="Cut type"
-            value={block.partialCut ? "partial" : "full"}
-            onChange={(v) => onUpdate({ partialCut: v === "partial" })}
-            options={[
-              { value: "full", label: "Full cut" },
-              { value: "partial", label: "Partial cut" },
-            ]}
-          />
-          <p className="text-[13px] text-ink-2">The printer feeds the job's “feed before cut” lines, then cuts. A partial cut leaves a small bridge.</p>
-        </>
+        <p className="text-[13px] text-ink-2">The printer feeds the job's “feed before cut” value, then cuts. Every cut leaves a small bridge.</p>
       );
       break;
   }

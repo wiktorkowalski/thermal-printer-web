@@ -113,7 +113,7 @@ export function BlockView(props: BlockViewProps) {
         <PaperRow {...rowProps} paperClassName="py-0">
           {frame(<FeedSpace lines={feedLines} />)}
         </PaperRow>
-        <CutRow right={<span>{block.partialCut ? "partial" : "full"}</span>} />
+        <CutRow />
         <TearEdge />
         <div className="h-5" />
         <TearEdge top />
