@@ -270,7 +270,9 @@ public sealed class TextSizeTests
     {
         var block = Sized(new string('\n', lines - 1), 8, 8);
 
-        var build = TestBlocks.NewService().BuildDocumentAsync([block], null);
+        // A feed of 0: the limit of the block alone. With no feed field the 3 default lines before the cut (87 dots)
+        // put 162 lines (31,914 dots) over the limit; PayloadErrorTests.PaperJobs pins that kind of edge.
+        var build = TestBlocks.NewService().BuildDocumentAsync([block], new PrintOptions { FeedLinesAfterPrint = 0 });
 
         if (accepted)
             Assert.NotEmpty(await build);

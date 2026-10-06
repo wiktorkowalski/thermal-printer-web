@@ -1,4 +1,5 @@
 import type { PrintRequest } from "@/types/printer";
+import { defaultFeedBeforeCut } from "@/lib/paper";
 import { DEFAULT_SETTINGS, fromPrintContent, toPrintContent, toPrintOptions, type EditorDocument } from "./document";
 
 // Same key and shape as the old Template Builder, so saved templates survive.
@@ -46,7 +47,8 @@ export function requestToDocument(request: PrintRequest): EditorDocument {
       // An imported file can hold any JSON value here; the code page list renders it.
       codePage: typeof request.options?.codePage === "string" ? request.options.codePage : DEFAULT_SETTINGS.codePage,
       autoCut: request.options?.autoCut ?? DEFAULT_SETTINGS.autoCut,
-      feedLinesAfterPrint: request.options?.feedLinesAfterPrint ?? DEFAULT_SETTINGS.feedLinesAfterPrint,
+      // No field (a file that was not saved here): the lines that the server adds to such a job, so the paper is the same.
+      feedLinesAfterPrint: request.options?.feedLinesAfterPrint ?? defaultFeedBeforeCut(request.content ?? []),
     },
   };
 }

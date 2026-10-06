@@ -154,7 +154,10 @@ export interface PrintOptions {
   codePage?: string;
   defaultLineSpacing?: number;
   autoCut?: boolean;
-  /** Empty lines before each cut. Left out or null (a stored job serves null): the cut command alone (backend/Services/Printing/CutFeed.cs). */
+  /**
+   * Empty lines before each cut, added as sent; 0 is the cut command alone. Left out or null (a stored job serves null):
+   * the server keeps 3 empty lines before the cut and counts the LineFeed blocks right before it (backend/Services/Printing/CutFeed.cs).
+   */
   feedLinesAfterPrint?: number | null;
 }
 

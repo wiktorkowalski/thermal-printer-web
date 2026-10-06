@@ -9,7 +9,8 @@ using static ThermalPrinterWeb.Tests.Support.TestBlocks;
 namespace ThermalPrinterWeb.Tests;
 
 // options.feedLinesAfterPrint feeds lines before a cut (issue #44, owner decision of 2026-10-06).
-// A job that does not send the field has the bytes from before.
+// A job that does not send the field gets 3 empty lines before each cut, the lines of the LineFeed blocks right before the cut included
+// (owner decision of 2026-10-06, the second one).
 public sealed class FeedLinesTests
 {
     private const string PrintUrl = TestHttp.PrintUrl;
@@ -21,20 +22,34 @@ public sealed class FeedLinesTests
     private static readonly byte[] FullCut = [0x1D, 0x56, 0x41, 3];
     private static readonly byte[] PartialCut = [0x1D, 0x56, 0x42, 3];
 
-    // The whole job from before the change, as the printer got it with no feed field.
-    private static readonly byte[] JobFromBefore = [.. Prelude, .. OkBlock, .. FullCut];
+    // ESC a 1: every block starts with its alignment.
+    private static readonly byte[] Center = [0x1B, 0x61, 1];
+
+    // A job that ends with text and sends no feed field: the default lines, then the cut command.
+    private static readonly byte[] JobWithDefaultFeed = [.. Prelude, .. OkBlock, .. Feed(CutFeed.DefaultLines), .. FullCut];
 
     private static byte[] Feed(int lines) => [.. Enumerable.Repeat((byte)0x0A, lines)];
 
+    private static PrintContent LineFeed(int? lines) => new() { Type = ContentType.LineFeed, Lines = lines };
+
+    private static PrintContent Cut() => new() { Type = ContentType.Cut };
+
     private static string Job(string? options)
         => $$"""{"content":[{"type":"Text","content":"ok"}]{{(options is null ? "" : $",\"options\":{options}")}}}""";
+
+    [Fact]
+    public void DefaultLines_IsThree_AndTheHouseStyleUsesIt()
+    {
+        Assert.Equal(3, CutFeed.DefaultLines);
+        Assert.Equal(CutFeed.DefaultLines, SimpleNote.FeedLines);
+    }
 
     [Theory]
     [InlineData(null)]
     [InlineData("{}")]
     [InlineData("""{"feedLinesAfterPrint":null}""")]
     [InlineData("""{"autoCut":true,"codePage":"PC852"}""")]
-    public async Task PostPrinter_NoFeedField_SendsTheBytesFromBefore(string? options)
+    public async Task PostPrinter_NoFeedField_FeedsTheDefaultLines(string? options)
     {
         await using var printer = new WirePrinter();
         await using var app = new LoopbackPrinterApp(printer.Port);
@@ -42,16 +57,136 @@ public sealed class FeedLinesTests
         var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, Job(options));
 
         Assert.True(status == HttpStatusCode.OK, body);
-        Assert.Equal(JobFromBefore, await printer.NextJobAsync());
+        Assert.Equal(JobWithDefaultFeed, await printer.NextJobAsync());
     }
 
     [Fact]
-    public async Task BuildDocumentAsync_NoFeedField_SendsTheBytesFromBefore()
+    public async Task BuildDocumentAsync_NoFeedFieldAndTextAtTheEnd_FeedsThreeLines()
     {
-        Assert.Equal(JobFromBefore, await JobBytesAsync([Text()]));
-        Assert.Equal(JobFromBefore, await JobBytesAsync([Text()], new PrintOptions()));
-        // A Cut block: its ESC a 1, then the same cut command.
-        Assert.Equal([.. Prelude, .. OkBlock, 0x1B, 0x61, 1, .. FullCut], await JobBytesAsync([Text(), new() { Type = ContentType.Cut }]));
+        var withCutBlock = await JobBytesAsync([Text(), Cut()]);
+        var empty = await JobBytesAsync([]);
+
+        Assert.Equal(JobWithDefaultFeed, await JobBytesAsync([Text()]));
+        Assert.Equal(JobWithDefaultFeed, await JobBytesAsync([Text()], new PrintOptions()));
+        // A Cut block: its ESC a 1, the lines, then the same cut command.
+        Assert.Equal([.. Prelude, .. OkBlock, .. Center, .. Feed(3), .. FullCut], withCutBlock);
+        // An empty document has no empty line either.
+        Assert.Equal([.. Prelude, .. Feed(3), .. FullCut], empty);
+    }
+
+    // The LineFeed blocks at the end count toward the 3 lines: the cut adds what is missing, and nothing when 3 or more are there.
+    // A LineFeed block with no lines field is one line; a negative number is none.
+    [Theory]
+    [InlineData(new[] { 1 }, 2)]
+    [InlineData(new[] { 2 }, 1)]
+    [InlineData(new[] { 3 }, 0)]
+    [InlineData(new[] { 5 }, 0)]
+    [InlineData(new[] { 0 }, 3)]
+    [InlineData(new[] { -4 }, 3)]
+    [InlineData(new[] { 1, 1 }, 1)]
+    [InlineData(new[] { 2, 1 }, 0)]
+    public async Task BuildDocumentAsync_NoFeedFieldAndLineFeedAtTheEnd_AddsTheMissingLines(int[] trailing, int added)
+    {
+        List<PrintContent> content = [Text(), .. trailing.Select(lines => LineFeed(lines))];
+        byte[] blocks = [.. OkBlock, .. trailing.SelectMany(lines => (byte[])[.. Center, .. Feed(Math.Max(lines, 0))])];
+
+        var autoCut = await JobBytesAsync(content);
+        var cutBlock = await JobBytesAsync([.. content, Cut()]);
+
+        Assert.Equal([.. Prelude, .. blocks, .. Feed(added), .. FullCut], autoCut);
+        Assert.Equal([.. Prelude, .. blocks, .. Center, .. Feed(added), .. FullCut], cutBlock);
+    }
+
+    [Fact]
+    public async Task BuildDocumentAsync_NoFeedFieldAndLineFeedWithNoLinesField_CountsOneLine()
+    {
+        var job = await JobBytesAsync([Text(), LineFeed(null)]);
+
+        Assert.Equal([.. Prelude, .. OkBlock, .. Center, .. Feed(1), .. Feed(2), .. FullCut], job);
+    }
+
+    // The count is of the blocks right before the cut: a LineFeed block before the last printed block does not count,
+    // and an empty line inside a Text block does not count.
+    [Fact]
+    public async Task BuildDocumentAsync_NoFeedField_CountsOnlyTheLineFeedBlocksRightBeforeTheCut()
+    {
+        var earlier = await JobBytesAsync([LineFeed(3), Text()]);
+        var inside = await JobBytesAsync([Text("ok\n\n\n")]);
+
+        Assert.Equal([.. Prelude, .. Center, .. Feed(3), .. OkBlock, .. Feed(3), .. FullCut], earlier);
+        Assert.Equal([0x0A, 0x0A, 0x0A, 0x0A, 0x1B, 0x21, 0, .. Feed(3), .. FullCut], inside[^14..]);
+    }
+
+    // Each cut has its own count: a Cut block starts a new strip.
+    [Fact]
+    public async Task BuildDocumentAsync_NoFeedFieldAndCutBlocks_CountsTheLinesBeforeEachCut()
+    {
+        List<PrintContent> content = [Text(), LineFeed(3), Cut(), Text(), LineFeed(1), Cut(), Text(), Cut(), Cut()];
+
+        var job = await JobBytesAsync(content, new PrintOptions { AutoCut = false });
+
+        Assert.Equal(
+            [
+                .. Prelude,
+                .. OkBlock, .. Center, .. Feed(3), .. Center, .. FullCut,
+                .. OkBlock, .. Center, .. Feed(1), .. Center, .. Feed(2), .. FullCut,
+                .. OkBlock, .. Center, .. Feed(3), .. FullCut,
+                .. Center, .. Feed(3), .. FullCut
+            ],
+            job);
+    }
+
+    // A Signal and a CodePage block move no paper: the empty lines before them still count. After a printed block they add no line.
+    [Fact]
+    public async Task BuildDocumentAsync_NoFeedField_SignalAndCodePageBlocksKeepTheCount()
+    {
+        var codePage = new PrintContent { Type = ContentType.CodePage, Content = "PC852" };
+        var none = new PrintOptions { FeedLinesAfterPrint = 0 };
+        var three = new PrintOptions { FeedLinesAfterPrint = 3 };
+
+        foreach (var block in new[] { Signal(), codePage })
+        {
+            Assert.Equal(await JobBytesAsync([Text(), LineFeed(3), block], none), await JobBytesAsync([Text(), LineFeed(3), block]));
+            Assert.Equal(await JobBytesAsync([Text(), LineFeed(3), block, Cut()], none), await JobBytesAsync([Text(), LineFeed(3), block, Cut()]));
+            Assert.Equal(await JobBytesAsync([Text(), LineFeed(2), block, LineFeed(1)], none), await JobBytesAsync([Text(), LineFeed(2), block, LineFeed(1)]));
+            Assert.Equal(await JobBytesAsync([Text(), block], three), await JobBytesAsync([Text(), block]));
+        }
+    }
+
+    // A number that is sent is added as sent: the content is not read. 0 is the way to get the cut command alone.
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(3, 3)]
+    [InlineData(2, 1)]
+    [InlineData(0, 0)]
+    public async Task BuildDocumentAsync_FeedFieldAndLineFeedAtTheEnd_AddsTheNumberAsSent(int sent, int trailing)
+    {
+        var job = await JobBytesAsync([Text(), LineFeed(trailing)], new PrintOptions { FeedLinesAfterPrint = sent });
+
+        Assert.Equal([.. Prelude, .. OkBlock, .. Center, .. Feed(trailing), .. Feed(sent), .. FullCut], job);
+    }
+
+    // No cut, no feed: also for the default lines.
+    [Fact]
+    public async Task BuildDocumentAsync_NoFeedFieldWithoutAnyCut_FeedsNothing()
+    {
+        var job = await JobBytesAsync([Text()], new PrintOptions { AutoCut = false });
+
+        Assert.Equal([.. Prelude, .. OkBlock], job);
+    }
+
+    // The paths that must keep their bytes: the house style, a receipt (a feed of 0) and the editor (a feed of 3).
+    [Fact]
+    public async Task BuildDocumentAsync_HouseStyleReceiptAndEditor_KeepTheirBytes()
+    {
+        var note = SimpleNote.Build("Title", "Message", new DateOnly(2026, 10, 6));
+        List<PrintContent> receipt = [Text(), LineFeed(3), Cut()];
+        byte[] receiptBytes = [.. Prelude, .. OkBlock, .. Center, .. Feed(3), .. Center, .. FullCut];
+
+        // The note sends no options: its LineFeed block of 3 lines is the whole feed, with and without the default.
+        Assert.Equal(await JobBytesAsync(note, new PrintOptions { FeedLinesAfterPrint = 0 }), await JobBytesAsync(note));
+        Assert.Equal(receiptBytes, await JobBytesAsync(receipt, new PrintOptions { CodePage = "PC852", AutoCut = true, FeedLinesAfterPrint = 0 }));
+        Assert.Equal(JobWithDefaultFeed, await JobBytesAsync([Text()], new PrintOptions { CodePage = "PC852", AutoCut = true, FeedLinesAfterPrint = 3 }));
     }
 
     // The value is a number of lines: that many LF, the bytes of a LineFeed block, then the cut command of before.
@@ -119,12 +254,15 @@ public sealed class FeedLinesTests
 
     // The paper estimate counts the feed in lines of the line spacing of the job.
     [Theory]
-    [InlineData(null, null, false, 29)]
+    [InlineData(0, null, false, 29)]
     [InlineData(3, null, false, 29 + 3 * 29)]
     [InlineData(3, 60, false, 60 + 3 * 60)]
     [InlineData(255, null, false, 29 + 255 * 29)]
+    // No feed field: the 3 default lines count the same way.
+    [InlineData(null, null, false, 29 + 3 * 29)]
+    [InlineData(null, 60, false, 60 + 3 * 60)]
+    [InlineData(null, null, true, 29 + 3 * 29 + 127)]
     // A Cut block also counts its cut command and the way to the cutter: 3 + 124 dots.
-    [InlineData(null, null, true, 29 + 127)]
     [InlineData(0, null, true, 29 + 127)]
     [InlineData(3, null, true, 29 + 3 * 29 + 127)]
     public async Task PostPrinter_FeedField_CountsAsPaper(int? feed, int? lineSpacing, bool cutBlock, int expectedDots)
@@ -142,7 +280,24 @@ public sealed class FeedLinesTests
         Assert.Equal(expectedDots, Assert.Single(await app.JournalRowsAsync()).PaperDots);
     }
 
+    // No feed field: the lines that the cut adds count as paper, the lines of a LineFeed block count once.
+    [Theory]
+    [InlineData(1, 29 + 1 * 29 + 2 * 29)]
+    [InlineData(3, 29 + 3 * 29)]
+    [InlineData(5, 29 + 5 * 29)]
+    public async Task PostPrinter_NoFeedFieldAndLineFeedAtTheEnd_CountsThePaperOnce(int trailing, int expectedDots)
+    {
+        await using var app = new NoPrinterApp();
+        var json = JsonSerializer.Serialize(new { content = new object[] { new { type = "Text", content = "ok" }, new { type = "LineFeed", lines = trailing } } });
+
+        var (status, body) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, PrintUrl, json);
+
+        Assert.True(status == HttpStatusCode.OK, body);
+        Assert.Equal(expectedDots, Assert.Single(await app.JournalRowsAsync()).PaperDots);
+    }
+
     // Over HTTP: the largest feed passes at the default line spacing; with a larger spacing the paper limit answers 400.
+    // PayloadErrorTests.PaperJobs pins the 400 of a job with no feed field that is over the limit only with its default lines.
     [Theory]
     [InlineData("""{"feedLinesAfterPrint":255}""", null)]
     [InlineData("""{"feedLinesAfterPrint":125,"defaultLineSpacing":255}""", "options.feedLinesAfterPrint: the document is over the limit of 32000 dots of paper (4 m)")]
@@ -188,16 +343,47 @@ public sealed class FeedLinesTests
         Assert.True(status == HttpStatusCode.OK, body);
         Assert.Equal([.. Prelude, .. OkBlock, .. Feed(3), .. FullCut], first);
         Assert.Equal(first, second);
-        Assert.Equal(JobFromBefore, plain);
-        Assert.Equal(JobFromBefore, plainAgain);
+        Assert.Equal(JobWithDefaultFeed, plain);
+        Assert.Equal(JobWithDefaultFeed, plainAgain);
     }
 
+    // The same for a feed of 0: the stored 0 is not read as "not sent", so the reprint has the cut command alone.
+    [Fact]
+    public async Task PrintThenReprint_FeedOfZero_StaysZero()
+    {
+        await using var printer = new WirePrinter();
+        await using var app = new LoopbackPrinterApp(printer.Port);
+        var client = app.CreateClient();
+
+        await client.SendJsonAsync(HttpMethod.Post, PrintUrl, Job("""{"feedLinesAfterPrint":0}"""));
+        var first = await printer.NextJobAsync();
+        var row = Assert.Single(await app.JournalRowsAsync());
+        var (status, body) = await client.SendJsonAsync(HttpMethod.Post, $"{PrintUrl}/jobs/{row.Id}/reprint");
+        var second = await printer.NextJobAsync();
+
+        Assert.True(status == HttpStatusCode.OK, body);
+        Assert.Equal([.. Prelude, .. OkBlock, .. FullCut], first);
+        Assert.Equal(first, second);
+    }
+
+    private const string StoredText =
+        """{"type":"Text","content":"ok","alignment":"Center","style":null,"size":null,"lines":1,"partialCut":false,"separatorChar":"=","separatorLength":32}""";
+    private const string StoredLineFeed =
+        """{"type":"LineFeed","content":null,"alignment":"Center","style":null,"size":null,"lines":3,"partialCut":false,"separatorChar":"=","separatorLength":32}""";
+    private const string StoredCut =
+        """{"type":"Cut","content":null,"alignment":"Center","style":null,"size":null,"lines":1,"partialCut":false,"separatorChar":"=","separatorLength":32}""";
+
     // A row from before the change holds the number that the model had then: 3 when the caller sent an options object
-    // without the field. A reprint reads it as 3 lines (accepted by the owner). A row with no options keeps its bytes.
+    // without the field. A reprint reads it as 3 lines (accepted by the owner).
+    // A row with no feed field follows the rule of today: one that ends with a LineFeed block of 3 lines (the house style) keeps its bytes,
+    // one that ends with text now gets 3 lines (accepted by the owner).
     [Theory]
-    [InlineData("""{"codePage":null,"defaultLineSpacing":null,"autoCut":true,"feedLinesAfterPrint":3}""", 3)]
-    [InlineData(null, 0)]
-    public async Task Reprint_RowStoredBeforeTheChange_FeedsTheStoredNumberAsLines(string? storedOptions, int lines)
+    [InlineData("""{"codePage":null,"defaultLineSpacing":null,"autoCut":true,"feedLinesAfterPrint":3}""", false, 3)]
+    [InlineData(null, false, 3)]
+    [InlineData("""{"codePage":null,"defaultLineSpacing":null,"autoCut":true,"feedLinesAfterPrint":null}""", false, 3)]
+    [InlineData(null, true, 0)]
+    [InlineData("""{"codePage":null,"defaultLineSpacing":null,"autoCut":true,"feedLinesAfterPrint":null}""", true, 0)]
+    public async Task Reprint_RowStoredBeforeTheChange_FollowsTheRuleOfToday(string? storedOptions, bool endsLikeTheHouseStyle, int lines)
     {
         var id = Guid.CreateVersion7();
         await using var printer = new WirePrinter();
@@ -216,12 +402,12 @@ public sealed class FeedLinesTests
                 Result = JobResult.Printed,
                 HttpStatus = 200,
                 AppVersion = "before-44",
-                BlockCount = 1,
+                BlockCount = endsLikeTheHouseStyle ? 3 : 1,
                 Payload = new PrintJobPayload
                 {
                     JobId = id,
                     Headers = "{}",
-                    Blocks = """[{"type":"Text","content":"ok","alignment":"Center","style":null,"size":null,"lines":1,"partialCut":false,"separatorChar":"=","separatorLength":32}]""",
+                    Blocks = endsLikeTheHouseStyle ? $"[{StoredText},{StoredLineFeed},{StoredCut}]" : $"[{StoredText}]",
                     Options = storedOptions
                 }
             });
@@ -232,7 +418,11 @@ public sealed class FeedLinesTests
         var reprinted = await printer.NextJobAsync();
 
         Assert.True(status == HttpStatusCode.OK, body);
-        Assert.Equal([.. Prelude, .. OkBlock, .. Feed(lines), .. FullCut], reprinted);
+        // The house style: the bytes of before, LF LF LF, ESC a 1, GS V 65 3.
+        byte[] expected = endsLikeTheHouseStyle
+            ? [.. Prelude, .. OkBlock, .. Center, .. Feed(3), .. Center, .. FullCut]
+            : [.. Prelude, .. OkBlock, .. Feed(lines), .. FullCut];
+        Assert.Equal(expected, reprinted);
     }
 
     [Fact]
@@ -241,30 +431,48 @@ public sealed class FeedLinesTests
         await using var app = new NoPrinterApp();
         var client = app.CreateClient();
 
-        var (isError, text) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}],"options":{"feedLinesAfterPrint":3}}""");
+        var (isError, text) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}],"options":{"feedLinesAfterPrint":5}}""");
         var (_, plainText) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}]}""");
         var (_, nullText) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}],"options":{"feedLinesAfterPrint":null}}""");
+        var (_, zeroText) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"}],"options":{"feedLinesAfterPrint":0}}""");
+        var (_, lineFeedText) = await client.CallToolAsync("print", """{"content":[{"type":"Text","content":"ok"},{"type":"LineFeed","lines":3}]}""");
         var rows = await app.JournalRowsAsync();
 
         Assert.False(isError, text);
-        Assert.Equal("Printed.", text);
-        Assert.Equal("Printed.", plainText);
-        Assert.Equal("Printed.", nullText);
-        Assert.Equal(3, rows.Count);
-        Assert.Single(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual([.. Prelude, .. OkBlock, .. Feed(3), .. FullCut]));
-        Assert.Equal(2, rows.Count(row => row.Payload.Bytes!.AsSpan().SequenceEqual(JobFromBefore)));
+        Assert.All([text, plainText, nullText, zeroText, lineFeedText], answer => Assert.Equal("Printed.", answer));
+        Assert.Equal(5, rows.Count);
+        Assert.Single(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual([.. Prelude, .. OkBlock, .. Feed(5), .. FullCut]));
+        Assert.Equal(2, rows.Count(row => row.Payload.Bytes!.AsSpan().SequenceEqual(JobWithDefaultFeed)));
+        Assert.Single(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual([.. Prelude, .. OkBlock, .. FullCut]));
+        Assert.Single(rows, row => row.Payload.Bytes!.AsSpan().SequenceEqual([.. Prelude, .. OkBlock, .. Center, .. Feed(3), .. FullCut]));
     }
 
-    // The number in the caller texts is the feed of the house style.
+    // The number in the caller texts is the default feed, which is the feed of the house style.
     [Fact]
-    public void CallerTexts_FeedBeforeACut_NameTheFeedOfTheHouseStyle()
+    public void CallerTexts_FeedBeforeACut_NameTheDefaultLines()
     {
-        Assert.Contains($"set options.feedLinesAfterPrint to {SimpleNote.FeedLines} ", PrinterTools.CutFeedRule);
-        Assert.Contains($"a LineFeed block of {SimpleNote.FeedLines} lines, not both", PrinterTools.CutFeedRule);
+        Assert.Contains($"The server keeps {CutFeed.DefaultLines} empty lines before each cut", PrinterTools.CutFeedRule);
+        Assert.Contains($"count toward the {CutFeed.DefaultLines}, so add no LineFeed block for the cut", PrinterTools.CutFeedRule);
+        Assert.Contains("0 adds none", PrinterTools.CutFeedRule);
+        Assert.DoesNotContain("not both", PrinterTools.CutFeedRule);
         Assert.Contains(PrinterTools.CutFeedRule, PrinterTools.ServerInstructions);
         var description = typeof(PrintOptions).GetProperty(nameof(PrintOptions.FeedLinesAfterPrint))!
             .GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), false)
             .Cast<System.ComponentModel.DescriptionAttribute>().Single().Description;
-        Assert.Contains($"send {SimpleNote.FeedLines} to keep that line whole", description);
+        Assert.Contains($"Left out: the server keeps {CutFeed.DefaultLines} empty lines before the cut", description);
+        Assert.Contains($"count toward the {CutFeed.DefaultLines}.", description);
+        Assert.Contains("0 adds no line", description);
+    }
+
+    // The print tool description holds the rule too.
+    [Fact]
+    public async Task ToolsList_PrintDescription_HoldsTheCutFeedRule()
+    {
+        await using var app = new NoPrinterApp();
+
+        var tools = (await app.CreateClient().McpAsync("tools/list")).GetProperty("tools");
+        var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == PrinterTools.PrintName);
+
+        Assert.Contains(PrinterTools.CutFeedRule, print.GetProperty("description").GetString());
     }
 }

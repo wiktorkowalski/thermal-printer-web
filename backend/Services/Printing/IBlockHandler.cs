@@ -15,6 +15,9 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     public List<byte[]> Output { get; } = [];
     public bool HasCut { get; set; }
 
+    // The empty lines at the end of the blocks so far (CutFeed.TrailingLinesAfter). PrinterService sets it after each block.
+    public int TrailingFeedLines { get; set; }
+
     // Characters turned into '?' across the whole document.
     public int ReplacedCharacters { get; private set; }
 

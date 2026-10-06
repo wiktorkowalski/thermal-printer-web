@@ -215,7 +215,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - The server wraps the title and the message (`WordWrap.Wrap`): a break at a space or a tab, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. Spaces at a break are not printed. A character that prints as two (`→` as `->`) counts as two columns.
 - Simple mode always wraps, and only simple mode adds a date line. Template mode prints the blocks as sent; a Text block wraps only with `"wrap": true` (see Text wrap).
 - The date is the date in `Europe/Warsaw` (UTC when the host has no such zone). A reprint prints the stored date.
-- The 3 lines before the cut keep the date line whole: with no feed the cutter goes through the last text line.
+- The 3 lines before the cut keep the date line whole: with no feed the cutter goes through the last text line. They are a LineFeed block of `SimpleNote.FeedLines` lines, which is `CutFeed.DefaultLines`. Simple mode sends no options, so its Cut block counts these 3 lines and adds none (see Feed before a cut).
 - The limits are those of the built blocks, so an error names a block (`Block 0 (Text)` is the title, `Block 2 (Text)` the message). The message holds 10,000 characters after the wrap and 410 lines with a one-line title; more is a 400 (text length, text line count or paper). The 500-line limit counts the lines after the wrap.
 - A title or message over 10,000 characters is not wrapped (`WordWrap.Wrap` returns it as it is): the Text block rejects it for its length before any work on the text. So the wrap reads at most 10,000 characters, in one pass.
 - The journal `Title` is the first line of the title as wrapped: a title over 24 characters shows its first line in the tray.
@@ -249,19 +249,31 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots).
 
-**Options**: CodePage selection (default PC852), line spacing, auto-cut behavior, feed before a cut
+**Options**: CodePage selection (default PC852), line spacing, auto-cut behavior, feed before a cut (default: 3 empty lines)
 
-**Feed before a cut**: `options.feedLinesAfterPrint` is a number of empty lines, 0 to 255 (issue #44, owner decision of 2026-10-06). `CutFeed` builds it.
+**Feed before a cut**: `options.feedLinesAfterPrint` is a number of empty lines, 0 to 255 (issue #44, two owner decisions of 2026-10-06). `CutFeed` builds it.
 - Bytes: n times LF (the bytes of a LineFeed block), then the cut command. The cut command is the same in every job: `GS V 65 3` (`GS V 66 3` for `partialCut`); its 3 is `CutFeed.MotionUnits`, a feed of under 1 mm.
-- The field is not sent (or is `null`): no LF, the cut command alone. These are the bytes from before the change; `FeedLinesTests` pins them. So the model default is `null`, not a number.
-- With the cut command alone the cutter goes through the last printed line (issue #31, row F1). A caller sends 3 to keep that line whole, or ends the content with a LineFeed block. The house style does the second.
+- With the cut command alone the cutter goes through the last printed line (issue #31, row F1).
+- The field is sent: n LF, whatever the content. `0` is the cut command alone: the way to get no gap.
+- The field is not sent (or is `null`): the server keeps 3 empty lines before the cut (`CutFeed.DefaultLines`). n = 3 minus the lines of the LineFeed blocks right before the cut, at least 0. So the model default is `null`, not a number.
+  - Ends with text: `0A 0A 0A 1D 56 41 03`. Ends with `LineFeed 1`: the LF of the block, then `0A 0A 1D 56 41 03`. Ends with `LineFeed 3` or more: the cut command alone after the block.
+  - The count goes back from the cut over LineFeed blocks (several add up) and stops at the first block that uses paper. A Signal and a CodePage block move no paper: they keep the count (`CutFeed.TrailingLinesAfter`). A LineFeed block with no `lines` is one line.
+  - An empty line inside a Text block (`"text\n\n\n"`) does not count: such a job gets 3 more lines. Only LineFeed blocks count.
+  - Each cut has its own count: a Cut block starts a new strip, so a second Cut block right after it gets 3 lines.
+  - `PrinterService.AddBlockAsync` sets the count (`BlockContext.TrailingFeedLines`) after each handler, so the Cut handler reads the lines before it.
+  - The house style, simple mode, `print_note` and a receipt end with a LineFeed block of 3 lines: their bytes are the bytes of before. `FeedLinesTests` pins all of this.
 - One line is the line of the job: 29 dots, or `options.defaultLineSpacing` when it is set (the paper estimate counts at least 24 dots per line). Each block sets the text size back to 1 x 1, so the size of the last block does not change the feed.
 - The feed is before each cut: every Cut block and the auto-cut. A job with no cut (`autoCut: false`, no Cut block) feeds nothing.
 - Why LF and not the n of `GS V`: n is one byte of motion units (255 dots, under 9 lines), and LF is the feed that is read from paper on this printer. `ESC d n` is not verified on it.
 - Paper: the lines count (n x `PaperLength.LineDots`). A Cut block also counts 127 dots (the cut command and the way to the cutter); the auto-cut counts its lines only. The largest value, 255, passes at the default line spacing (7395 dots, 92 cm). With `defaultLineSpacing: 255` an empty document takes 125 lines at most. Over the paper limit at the auto-cut the 400 reads `options.feedLinesAfterPrint: the document is over the limit ...`, with one Warning.
-- The web editor always sends the field (default 3), and its paper shows the same lines (`lib/paper.ts`). Receipt mode sends 0: a receipt ends with its own LineFeed block of 3 lines and a Cut block.
-- The `print` tool description and `ServerInstructions` hold one rule (`PrinterTools.CutFeedRule`): send 3, or end the content with a LineFeed block of 3 lines, not both. A caller that does both gets both feeds.
-- Journal rows: a reprint reads the stored number as lines. A row from before the change that set the field now feeds lines (it fed motion units). Such a row also holds `"feedLinesAfterPrint":3` when its caller sent an `options` object without the field (the model default of that time): its reprint feeds 3 lines. A row with no `options` (simple mode, `print_note`) keeps its bytes.
+- The default lines count as paper too (3 x `PaperLength.LineDots`: 87 dots, or 765 with `defaultLineSpacing: 255`). So a job with no field whose blocks end within 3 lines of the 32,000 dots, with no LineFeed block at its end, is a 400 now: `the empty lines before the cut: the document is over the limit ...` at the auto-cut (`PrinterService.DefaultFeedCause`; the text names no field, the caller sent none), `Block N (Cut): ...` at a Cut block. One Warning. Such a job passes with `feedLinesAfterPrint: 0`. With no field 149 Cut blocks in a row pass (214 dots each), not 251.
+- The web editor always sends the field (start value 3, `DEFAULT_FEED_BEFORE_CUT` in `lib/printer-limits.ts`), and its paper shows the same lines (`lib/paper.ts`). Receipt mode sends 0: a receipt ends with its own LineFeed block of 3 lines and a Cut block. So the default of the server never applies to a print from the web UI.
+- An imported template file with no field gets the lines that the server adds to such a job (`defaultFeedBeforeCut` in `lib/paper.ts`, counted before the last cut). The editor holds one number for every cut: an earlier cut of that file can differ from the API.
+- The `print` tool description and `ServerInstructions` hold one rule (`PrinterTools.CutFeedRule`): the server keeps 3 empty lines before each cut, a LineFeed block right before the cut counts toward them, a number in the field is added as sent, 0 adds none. A caller that sends 3 and ends with a LineFeed block of 3 lines gets both feeds.
+- Journal rows: a reprint follows the rule of today.
+  - A stored number is read as lines. A row from before the first change that set the field now feeds lines (it fed motion units). Such a row also holds `"feedLinesAfterPrint":3` when its caller sent an `options` object without the field (the model default of that time): its reprint feeds 3 lines.
+  - A row with no field (no `options`, or `"feedLinesAfterPrint":null`) that ends with a LineFeed block of 3 lines keeps its bytes: simple mode, `print_note`, the house style.
+  - A row with no field that ends with text printed with the cut command alone. Its reprint now feeds 3 lines and its new row counts 87 dots more (accepted by the owner).
 
 **Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).
 - No caller text offers them: `HiddenPrintFields` removes `partialCut` from the MCP schema of `print`, the code page texts do not name the two pages, the editor has no control for them.
@@ -367,7 +379,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
 
-**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job. So a reprint follows the rules of today: a stored `feedLinesAfterPrint` feeds lines, also in a row from before that rule (see Feed before a cut).
+**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job. So a reprint follows the rules of today: a stored `feedLinesAfterPrint` feeds lines, and a row with no such field gets the default lines before its cut, also in a row from before these rules (see Feed before a cut).
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
 - No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
@@ -395,7 +407,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Printer data per document | 2 MiB | `PrinterService.MaxOutputBytes` |
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
 | `options.defaultLineSpacing` | 0-255 dots | `PrinterService.MaxLineSpacing` |
-| `options.feedLinesAfterPrint` | 0-255 lines; the paper limit counts them | `PrinterService.MaxFeedBeforeCut` |
+| `options.feedLinesAfterPrint` | 0-255 lines; the paper limit counts them. Not sent: 3 lines less the LineFeed lines right before the cut (not a limit; it counts as paper) | `PrinterService.MaxFeedBeforeCut`, `CutFeed.DefaultLines` |
 | Text block | 10,000 characters, 500 lines; with `wrap` both count the text after the wrap | `TextBlockHandler.MaxLength`, `MaxLines` |
 | Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
@@ -553,7 +565,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 - Read from paper: Font A at 1, 2, 3, 4 and 8; Font B at 1 and 2. The other values are the same division.
 - `DoubleWidth` is width 2, `DoubleHeight` is height 2. A `size` gives 1 to 8 for each axis (`GS ! n`); width and height are independent. Polish letters are correct at 3 x 3 (read from paper).
 - Line pitch: 29 dots at height 1, plus 24 dots for each step of the height.
-- Cut: `GS V 65 n` feeds n motion units (at most 1 dot each, so 255 is under 9 lines), then cuts. The cutter is 124 dots past the head. With n = 3 and no empty line before it the cutter goes through the last printed line; 3 LF before the cut keep it whole (`options.feedLinesAfterPrint`, `SimpleNote.FeedLines`).
+- Cut: `GS V 65 n` feeds n motion units (at most 1 dot each, so 255 is under 9 lines), then cuts. The cutter is 124 dots past the head. With n = 3 and no empty line before it the cutter goes through the last printed line; 3 LF before the cut keep it whole. The server adds them when a job does not send `options.feedLinesAfterPrint` and does not end with a LineFeed block (`CutFeed.DefaultLines`).
 
 Source of truth: `frontend/src/lib/printer-constants.ts` (`columnsPerLine`). The backend repeats 48 and 64 in `PaperLength.cs` (`Columns`) and the table in the MCP texts.
 

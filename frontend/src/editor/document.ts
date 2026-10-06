@@ -15,6 +15,7 @@ import { CHARS_PER_LINE } from "@/lib/printer-constants";
 import {
   BARCODE_MAX_HEIGHT_DOTS,
   BARCODE_MIN_HEIGHT_DOTS,
+  DEFAULT_FEED_BEFORE_CUT,
   IMAGE_MIN_PRINT_SIZE,
   LINE_FEED_MAX_LINES,
   MAX_BLOCKS,
@@ -65,7 +66,7 @@ export interface EditorState {
 export const DEFAULT_SETTINGS: JobSettings = {
   codePage: "PC852",
   autoCut: true,
-  feedLinesAfterPrint: 3,
+  feedLinesAfterPrint: DEFAULT_FEED_BEFORE_CUT,
 };
 
 // WPC1250 and ISO8859_2 are not offered: they print wrong glyphs on this printer (issue #44). The server still takes them.
