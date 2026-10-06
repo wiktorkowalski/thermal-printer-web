@@ -468,7 +468,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 - A request without the right token gets 401 with the body `Unauthorized` and no `WWW-Authenticate` header (an MCP client reads that header as a prompt for OAuth). It logs one Warning with method, path and address, and no header value.
 - The check covers every path under `/mcp` in any letter case, every method, and any request that routing sends to the MCP endpoint (`McpEndpointAttribute`). The compare is constant-time, on SHA-256 hashes.
 - The middleware runs before `PrintJournalMiddleware`: a rejected request gets no journal row and its body is not read. The journal stores the `Authorization` header of an accepted call as `[redacted]`.
-- The HTTP API under `/api/printer` has no auth: print, reprint and the journal reads are open.
+- The HTTP API under `/api/printer` has no auth: print, beep, reprint and the journal reads are open.
 - Tests: every test host has the key `TestApp.McpKey`; `McpAsync` and `CallToolAsync` send it. `McpAuthTests` covers the rejects and looks for the key in the journal files and the log.
 
 | Tool | Arguments |
@@ -489,7 +489,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
 - `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.` (N is the count after the clamp); a `mode` that is not a name is a wrong-arguments answer that lists the names.
 - `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
-- `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, that journal text is untrusted, and that a delete is for good. Keep it in line with the tool descriptions.
+- `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, the signal rule, that journal text is untrusted, and that a delete is for good. Keep it in line with the tool descriptions.
 
 **Delete tools** (`JournalTools.cs`, `McpJournalDeleteTests`; see Journal, Delete):
 - Both tools are a dry run unless `confirm` holds the code of a dry run with the same arguments. So one call deletes nothing: a model that planted journal text talks into a delete call has no code.
