@@ -1,10 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ModelContextProtocol.Server;
+using ThermalPrinterWeb.Models;
+using ThermalPrinterWeb.Services.Printing;
 
 namespace ThermalPrinterWeb.Mcp;
 
-// A field of the print tool that changes nothing on this printer (issue #44). The schema does not list it,
+// A field or an enum name of the print tool that changes nothing on this printer (issue #44). The schema does not list it,
 // so a caller does not learn it. The model keeps it: an old payload and a stored job still bind,
 // and the job has the same bytes as before.
 internal static class HiddenPrintFields
@@ -13,6 +15,7 @@ internal static class HiddenPrintFields
     internal const string PartialCut = "partialCut";
 
     private const string Properties = "properties";
+    private const string EnumNames = "enum";
 
     // A schema of another shape loses nothing and the app starts: OldFieldTests fails then.
     public static void RemoveFrom(IEnumerable<McpServerTool> tools)
@@ -22,9 +25,33 @@ internal static class HiddenPrintFields
             return;
 
         var schema = JsonNode.Parse(printTool.InputSchema.GetRawText());
-        if (schema?[Properties]?["content"]?["items"]?[Properties] is not JsonObject block || !block.Remove(PartialCut))
+        if (schema?[Properties]?["content"]?["items"]?[Properties] is not JsonObject block)
             return;
 
-        printTool.InputSchema = JsonSerializer.SerializeToElement(schema);
+        var changed = block.Remove(PartialCut);
+        // The members of no effect: BlockEnums names them.
+        changed |= RemoveNames(block["style"]?["items"]?[EnumNames], BlockEnums.NoEffectNames<PrintStyle>());
+        changed |= RemoveNames(block["barcodeOptions"]?[Properties]?["type"]?[EnumNames], BlockEnums.NoEffectNames<BarcodeType>());
+
+        if (changed)
+            printTool.InputSchema = JsonSerializer.SerializeToElement(schema);
+    }
+
+    private static bool RemoveNames(JsonNode? names, string[] hidden)
+    {
+        if (names is not JsonArray array)
+            return false;
+
+        var changed = false;
+        for (var i = array.Count - 1; i >= 0; i--)
+        {
+            if (array[i] is JsonValue value && value.TryGetValue<string>(out var name) && hidden.Contains(name))
+            {
+                array.RemoveAt(i);
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 }

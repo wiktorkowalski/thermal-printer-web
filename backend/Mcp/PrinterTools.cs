@@ -41,6 +41,11 @@ public static class PrinterTools
         + "the lines of a LineFeed block right before the cut count toward the 3, so add no LineFeed block for the cut. "
         + "Set options.feedLinesAfterPrint only for another gap: that number of lines is added as sent, 0 adds none.";
 
+    // In the print description. The numbers are BarcodeWidth: a test pins them.
+    internal const string BarcodeWidthRule =
+        "A Barcode wider than the paper (576 dots) rejects the document, because the printer drops such a barcode with no error: "
+        + "a CODE128 barcode holds 9 characters at the default bar width and 14 with barcodeOptions.width Thin; put longer data in a QRCode.";
+
     // The only text a caller sees before it loads a tool schema: sent in the initialize response.
     internal const string ServerInstructions =
         "80 mm thermal receipt printer: one line holds 48 characters (24 with DoubleWidth, 64 with FontB, 48 / width with a size of 1 to 8) "
@@ -146,6 +151,7 @@ public static class PrinterTools
         + CutFeedRule + " "
         + "Polish letters print; emoji print as '?'. "
         + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks (CRLF counts as \\n). "
+        + BarcodeWidthRule + " "
         + "Image content is base64 PNG or JPEG; other formats are rejected. "
         + "One document holds at most 500 blocks, 20 of them images, and prints at most 4 m of paper. "
         + "A Signal block sounds the buzzer or flashes the error light at its place in the document (signalOptions: mode, count 1 to 9, duration 1 to 9); one document holds at most 3. A Signal block prints nothing, but the document still feeds and cuts paper unless options.autoCut is false: for a signal with no paper call " + BeepName + ". "

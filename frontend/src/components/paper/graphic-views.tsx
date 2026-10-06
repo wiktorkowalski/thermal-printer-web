@@ -144,7 +144,8 @@ export function QrView({ data, options }: { data: string; options?: QRCodeOption
 // ---------------------------------------------------------------------------
 // Barcode: JsBarcode draws in dots (1 unit = 1 dot); CSS scales it to paper.
 
-const BARCODE_FORMAT: Record<string, { format: string; ean128?: boolean }> = {
+// No GS1_128 and no GS1 DataBar here: this printer prints their data as text, with no bars (issue #44).
+const BARCODE_FORMAT: Record<string, { format: string }> = {
   // ESCPOS_NET sends CODE128 in code set B; auto mode would pack digits (set C) and draw it narrower.
   CODE128: { format: "CODE128B" },
   CODE39: { format: "CODE39" },
@@ -154,7 +155,6 @@ const BARCODE_FORMAT: Record<string, { format: string; ean128?: boolean }> = {
   UPC_E: { format: "UPCE" },
   ITF: { format: "ITF" },
   CODABAR: { format: "codabar" },
-  GS1_128: { format: "CODE128", ean128: true },
 };
 
 export interface BarcodeRender {
@@ -186,7 +186,6 @@ export function BarcodeView({
     try {
       JsBarcode(svgRef.current, data, {
         format: mapping.format,
-        ean128: mapping.ean128,
         width: moduleDots,
         height,
         margin: 0,
@@ -219,7 +218,7 @@ export function BarcodeView({
     return (
       <span className="inline-flex flex-col items-center gap-1 text-paper-faint">
         <span className="inline-block border border-dashed border-paper-rule" style={{ width: "20ch", height: dotsToCh(height) }} />
-        [GS1 DataBar · no preview]
+        [{type} · no bars on this printer]
       </span>
     );
   }

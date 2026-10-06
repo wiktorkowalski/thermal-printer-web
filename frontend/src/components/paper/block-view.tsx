@@ -5,7 +5,7 @@ import { fileToBase64 } from "@/lib/api";
 import { EDITOR_IMAGE_MAX_MB } from "@/lib/printer-limits";
 import { IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
 import { DEFAULT_ALIGNMENT, DOUBLE_STYLES, HEAD_DOTS, countPrintedLines, longestLine, signalLabel, textMetrics, textScale } from "@/lib/paper";
-import { BLOCK_LABELS, blockError, type Block } from "@/editor/document";
+import { BLOCK_LABELS, barcodeWidthError, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView, type BarcodeRender } from "./graphic-views";
 import { CutRow, FeedSpace, PaperRow, TearEdge } from "./paper-strip";
@@ -186,11 +186,14 @@ export function BlockView(props: BlockViewProps) {
       ) : (
         <span className="text-paper-faint">[barcode · add data in the panel]</span>
       );
-      const tooWide = barcode?.valid && barcode.widthDots > HEAD_DOTS;
+      // "too wide" is the check of the backend. For CODE39, ITF and CODABAR that check is a lower bound,
+      // so a drawing past the paper with no error is only a warning.
+      const tooWide = !!barcodeWidthError(block);
+      const mayBeTooWide = !error && !!barcode?.valid && barcode.widthDots > HEAD_DOTS;
       right = block.content ? (
         <>
-          <span className={cn(error || tooWide ? "text-warn" : "text-ok-text")}>
-            {error ? "invalid" : tooWide ? "too wide" : "✓ valid"}
+          <span className={cn(error || mayBeTooWide ? "text-warn" : "text-ok-text")}>
+            {tooWide ? "too wide" : error ? "invalid" : mayBeTooWide ? "may be too wide" : "✓ valid"}
           </span>
           <span>{block.barcodeOptions?.heightInDots ?? 162} dots</span>
         </>

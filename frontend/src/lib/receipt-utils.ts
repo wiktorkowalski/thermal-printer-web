@@ -489,13 +489,8 @@ function biedronkaLayout(receipt: ReceiptData, taxRates: TaxRates): ReceiptLayou
     alignment: Alignment.Center,
   });
 
-  // Barcode
-  const barcode = '1000043879950072203475';
-  content.push({
-    type: ContentType.Barcode,
-    content: barcode,
-    barcodeOptions: { type: 'CODE128', width: 'Default', heightInDots: 60 },
-  });
+  // No barcode: the 22 digits of the real receipt are 1108 dots wide in CODE128 code set B, the only set that the
+  // server sends. The printer dropped that barcode with no error (issue #44); the server now rejects one over 576 dots.
 
   // Nr sys
   content.push({

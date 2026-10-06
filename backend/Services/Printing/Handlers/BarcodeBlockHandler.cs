@@ -32,6 +32,18 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         // First: a rejected barcode must not leave its settings in the document.
         var command = BuildCommand(e, item.Content, opts.Type);
 
+        // After BuildCommand: the content is valid for the type, so the width counts what goes out.
+        // The numbers are the only caller content in the text.
+        if (BarcodeWidth.Dots(opts.Type, item.Content, opts.Width) is { } dots && dots > BarcodeWidth.MaxDots)
+        {
+            // Thin is the narrowest width that the API has.
+            var fix = opts.Width is Models.BarWidth.Default or Models.BarWidth.Thick
+                ? "use barcodeOptions.width Thin or shorter content"
+                : "use shorter content";
+            throw new PrintContentException(
+                $"the barcode is at least {dots} dots wide and the paper holds {BarcodeWidth.MaxDots}; the printer drops a wider barcode: {fix}");
+        }
+
         // The bars plus the caption lines. A null height keeps what the printer has: count the tallest.
         var captionLines = opts.LabelPosition == BarLabelPosition.Both ? 2 : 1;
         ctx.AddPaper((opts.HeightInDots ?? MaxHeightInDots) + captionLines * PaperLength.LineDots(ctx.LineSpacing));

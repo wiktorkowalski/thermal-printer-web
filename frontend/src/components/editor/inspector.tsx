@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CHARS_PER_LINE } from "@/lib/printer-constants";
 import { BARCODE_MAX_HEIGHT_DOTS, EDITOR_BARCODE_MIN_HEIGHT_DOTS, EDITOR_LINE_FEED_MAX_LINES, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/lib/printer-limits";
-import { HEAD_DOTS, LINE_DOTS, longestLine, textMetrics } from "@/lib/paper";
+import { HEAD_DOTS, LINE_DOTS, barcodeWidthDots, longestLine, textMetrics } from "@/lib/paper";
 import { BLOCK_LABELS, blockError, textSizePatch, type Block } from "@/editor/document";
 import { SectionLabel, Segmented, Switch, ToggleChip, fieldLabelClass, inputClass, quietButtonClass } from "./controls";
 
@@ -28,10 +28,13 @@ export interface InspectorProps {
   onMove: (delta: number) => void;
 }
 
-const TEXT_STYLES: { style: PrintStyle; label: string; className?: string }[] = [
+// No Italic: it prints like plain text on this printer (issue #44). A block that holds it keeps it and shows a chip to remove it.
+type TextStyleChip = { style: PrintStyle; label: string; className?: string };
+const ITALIC_STYLE: TextStyleChip = { style: "Italic", label: "Italic · no effect" };
+
+const TEXT_STYLES: TextStyleChip[] = [
   { style: "Bold", label: "Bold", className: "font-bold" },
   { style: "Underline", label: "Underline", className: "underline" },
-  { style: "Italic", label: "Italic", className: "italic" },
   { style: "FontB", label: "Font B · 64" },
   { style: "ReverseMode", label: "Reverse" },
   { style: "UpsideDownMode", label: "Upside-down" },
@@ -49,9 +52,13 @@ const BARCODE_TYPES: { value: BarcodeType; label: string }[] = [
   { value: BarcodeType.UPC_E, label: "UPC-E" },
   { value: BarcodeType.ITF, label: "ITF" },
   { value: BarcodeType.CODABAR, label: "CODABAR" },
-  { value: BarcodeType.GS1_128, label: "GS1-128" },
-  { value: BarcodeType.GS1_DATABAR_OMNIDIRECTIONAL, label: "GS1 DataBar" },
 ];
+
+// GS1-128 and GS1 DataBar print no bars on this printer (issue #44): the list does not offer them.
+// A block that holds one keeps it; its type is then in the list, so the select shows what is sent.
+function barcodeTypes(current: BarcodeType) {
+  return BARCODE_TYPES.some((t) => t.value === current) ? BARCODE_TYPES : [{ value: current, label: `${current} · no bars` }, ...BARCODE_TYPES];
+}
 
 export function AlignmentControl({ value, onChange }: { value?: Alignment; onChange: (value: Alignment) => void }) {
   return (
@@ -132,7 +139,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
           <div className="flex flex-col gap-2.5">
             <span className={fieldLabelClass}>Style</span>
             <div className="grid grid-cols-2 gap-1.5">
-              {TEXT_STYLES.map(({ style, label, className }) => (
+              {(block.style?.includes(ITALIC_STYLE.style) ? [...TEXT_STYLES, ITALIC_STYLE] : TEXT_STYLES).map(({ style, label, className }) => (
                 <ToggleChip key={style} pressed={block.style?.includes(style) ?? false} onClick={() => onToggleStyle(style)} className={className}>
                   {label}
                 </ToggleChip>
@@ -278,6 +285,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
     case "Barcode": {
       const options = block.barcodeOptions ?? { type: BarcodeType.CODE128 };
       const height = options.heightInDots ?? 162;
+      const widthDots = barcodeWidthDots(block.content ?? "", block.barcodeOptions);
       body = (
         <>
           <Field
@@ -289,7 +297,8 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
                   <span className="text-xs text-danger-text">{error}</span>
                 ) : (
                   <span className="text-xs text-ok-text">
-                    Valid for {BARCODE_TYPES.find((t) => t.value === options.type)?.label} · {block.content.length} characters
+                    Valid for {BARCODE_TYPES.find((t) => t.value === options.type)?.label ?? options.type} · {block.content.length} characters
+                    {widthDots != null && ` · at least ${widthDots} of ${HEAD_DOTS} dots wide`}
                   </span>
                 )
               ) : null
@@ -309,7 +318,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
               onChange={(e) => onUpdate({ barcodeOptions: { ...options, type: e.target.value as BarcodeType } })}
               className={inputClass}
             >
-              {BARCODE_TYPES.map((t) => (
+              {barcodeTypes(options.type).map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>

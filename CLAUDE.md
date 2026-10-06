@@ -28,7 +28,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand, CutFeed
+│   │   └── Printing/           # BarcodeWidth, PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand, CutFeed
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -222,7 +222,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Supported content types**: Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage, Signal
 
-**Text styles**: Bold, Italic, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode, UpsideDownMode
+**Text styles**: Bold, Underline, DoubleHeight, DoubleWidth, FontB, ReverseMode, UpsideDownMode. `Italic` binds and has no effect (see Fields with no effect on this printer).
 
 **Text size**: `"size": { "width": 3, "height": 3 }` on a Text or Separator block. Each axis is a whole number from 1 to 8; an axis that is left out is 1.
 - A block with `size` ignores `DoubleWidth` and `DoubleHeight`: the size wins. `FontB` and the other styles still apply.
@@ -243,7 +243,30 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Alignment**: Left, Center (default), Right
 
-**Barcode types** (JSON names): UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF, CODABAR, GS1_128, GS1_DATABAR_OMNIDIRECTIONAL
+**Barcode types** (JSON names): UPC_A, UPC_E, EAN13, EAN8, CODE39, CODE128, ITF, CODABAR. `GS1_128` and `GS1_DATABAR_OMNIDIRECTIONAL` bind and print no bars (see Fields with no effect on this printer).
+
+**Barcode width** (issue #44, `BarcodeWidth`): the printer drops a barcode that is wider than the paper. It prints no bars and no caption and reports no error. So the server rejects such a block with a 400: `Block N (Barcode): the barcode is at least 580 dots wide and the paper holds 576; the printer drops a wider barcode: use barcodeOptions.width Thin or shorter content`. With `Thin` or with no width the text ends with `use shorter content`.
+- Width = modules x dots per module. One module is the narrowest bar: `Thin` 3 dots, `Default` 4, `Thick` 5 (`GS w n`, measured on paper). A block with no `barcodeOptions` or with no `width` gets `Default`. With `"width": null` no `GS w` goes out and the printer uses its own module, which is not measured: the check counts 2 dots, the smallest value of the command.
+- The limit is `BarcodeWidth.MaxDots`, the head width (`ImageBlockHandler.HeadWidth`). A width of exactly 576 passes.
+
+| Type | Modules | Is the number exact? |
+|------|---------|----------------------|
+| CODE128 | 11 per character + 35 (start, check symbol, stop) | Exact. Code set B, one symbol per character, `{` is one symbol. Measured: `BOX-0007` is 61.5 mm (123 modules x 4 dots). Holds 9 characters at `Default`, 14 at `Thin`, 7 at `Thick`. |
+| EAN13, UPC_A | 95 | Exact, fixed by the symbology. At most 475 dots: never rejected. |
+| EAN8 | 67 | Exact. Never rejected. |
+| UPC_E | 51 | Exact by the symbology; not measured. Never rejected. |
+| CODE39 | 13 per character - 1, with the start and stop characters that the printer adds (not added when the content starts or ends with `*`) | Lower bound: it counts a wide bar as 2 modules, the printer picks 2 to 3. Not measured. |
+| ITF | 7 per digit + 8 | Lower bound, same reason. Not measured. |
+| CODABAR | 10 per character - 1 | Lower bound: 2 wide bars per character at 2 modules. Not measured. |
+| GS1_128, GS1_DATABAR_OMNIDIRECTIONAL | none | No check: they print no bars. |
+
+- Evidence (owner, read from paper, 2026-10-07, all centered): CODE128 `ABC123` at `Default` (404 dots) and `TEST-44-OK` at `Thin` (435) print bars; `TEST-44-OK` at `Default` (580) prints nothing; EAN13 at `Default` (380) prints bars.
+- The check counts no quiet zone: it rejects only a barcode that is too wide for certain. Not known: whether the printer needs room for one. Every barcode that printed was 492 dots or less, every dropped one 580 or more. So a barcode of 497 to 576 dots passes the check and is not verified on paper.
+- The order in `BarcodeBlockHandler`: height range, characters, symbology rules of ESCPOS_NET, the length byte, then the width. So CODE128 content past the length byte keeps its text `content is too long for a CODE128 barcode`.
+- A rejected block logs one Warning with the dots, like every block limit (`PrinterService.AddBlockAsync`). `BarcodeWidthTests` pins the evidence, the limits and the MCP numbers.
+- Journal: a stored job with a barcode over the limit counted as printed (the printer dropped the barcode and printed the rest). Its reprint is now a 400, also from the tray. This holds for every receipt of the web UI from before this change: its barcode was 1108 dots wide. `OldFieldTests` pins the 400.
+- Web editor: `barcodeWidthDots` in `lib/paper.ts` is a copy of the model (numbers in `BARCODE_MODULES`, `lib/printer-limits.ts`); `barcodeWidthError` in `editor/document.ts` stops the print and the inspector shows the dots. The gutter of the paper says `too wide` for the same check. For CODE39, ITF and CODABAR the drawing (JsBarcode, wider bars) can pass the paper edge with no error: the gutter then says `may be too wide`.
+- Receipt mode prints no barcode: the 22 digits of the real receipt do not fit in code set B, the only set that the server sends.
 
 **QR codes**: Configurable model, size, and error correction level
 
@@ -276,9 +299,13 @@ Both modes take an optional `source`: a short name of the caller, for the log an
   - A row with no field (no `options`, or `"feedLinesAfterPrint":null`) that ends with a LineFeed block of 3 lines keeps its bytes: simple mode, `print_note`, the house style.
   - A row with no field that ends with text printed with the cut command alone. Its reprint now feeds 3 lines and its new row counts 87 dots more (accepted by the owner).
 
-**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only) and the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31).
-- No caller text offers them: `HiddenPrintFields` removes `partialCut` from the MCP schema of `print`, the code page texts do not name the two pages, the editor has no control for them.
-- The server still binds them and sends the same bytes as before: callers and journal rows hold them. `OldFieldTests` pins this. Do not remove them from the models or from `CodePages`.
+**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only), the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31) and three enum names, read from paper on 2026-10-07:
+  - Text style `Italic`: FontB text at size 2x3 prints the same with and without it.
+  - Barcode type `GS1_128`: no bars. `0109501101530003` printed as the small text `109501101530003`, with no line feed after it.
+  - Barcode type `GS1_DATABAR_OMNIDIRECTIONAL`: no bars. The data printed as small text with no line feed; the next block ran on in the same line.
+- No caller text offers them: `HiddenPrintFields` removes `partialCut` and the three enum names from the MCP schema of `print`, the code page texts do not name the two pages, no `[Description]` names the three, and the 400 text for an enum number with no name does not list them (`BlockEnums.HasNoEffect` is the one list). The editor has no control for them.
+- The server still binds them and sends the same bytes as before: callers and journal rows hold them. `OldFieldTests` pins this. Do not remove them from the models, the enums or `CodePages`. The two GS1 types get no barcode width check.
+- Web editor: the style list and the symbology list do not offer the three. A block that holds one (a draft, a saved template, an imported file) keeps it and sends it: the inspector then shows `Italic · no effect` or the type with `no bars`, so it can be removed. The paper shows upright text for `Italic` and `[TYPE · no bars on this printer]` for a GS1 type.
 - `imageOptions.highDensity` is read only when `useLegacyMode` is false. In legacy mode, the default, both values give the same bytes. It stays in the schema; its text says so.
 - `options.feedLinesAfterPrint` is not in this list any more: it feeds lines (see Feed before a cut). `OldFieldTests` pins the new end of the old job: 5 LF, then `GS V 66 3`.
 - The binder skips a JSON property that no model has: an unknown property is never a 400.
@@ -381,6 +408,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
 
 **Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job. So a reprint follows the rules of today: a stored `feedLinesAfterPrint` feeds lines, and a row with no such field gets the default lines before its cut, also in a row from before these rules (see Feed before a cut).
+- A stored job with a barcode wider than the paper gets a 400 from its reprint (see Barcode width): the first print counted as printed, with no barcode on the paper.
 - Each picture comes from the stored `Request` of the first job: the reader searches the JSON for the string with the hash of the block.
 - One call is one print. One reprint runs at a time; a second call gets 503 `busy` with `Retry-After: 5`.
 - No blocks stored (the job was refused before the print path), a picture that is not stored, or stored JSON that does not parse: 400 with a fixed reason (`PrintJournalReader.NoBlocksReason`, `NoImageReason`, `UnreadableReason`) and one Warning with the job id.
@@ -392,7 +420,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 - **Text**: every string goes through `BlockContext.EncodeText` (`PrinterSafeText`). A character that would reach the printer as a control byte prints as `?` or a readable stand-in (tab becomes a space). Every line ending becomes LF, the only control byte that passes. A character the code page lacks prints as `?` or as a best-fit letter. With `"wrap": true` the server breaks the lines first (see Text wrap).
 - **QR code**: the data is stored as UTF-8 bytes, whatever the code page. A control character rejects the block; `\n` and `\r\n` are line breaks.
-- **Barcode**: printable ASCII only (0x20-0x7E); any other character rejects the block. ESCPOS_NET checks length and characters per symbology.
+- **Barcode**: printable ASCII only (0x20-0x7E); any other character rejects the block. ESCPOS_NET checks length and characters per symbology. A barcode wider than the paper rejects the block (see Barcode width).
 - **Image**: one decode runs at a time (`DecodeQueue`). The number of waiting jobs and the wait time have limits (`ImageBlockHandler.MaxDecodeWaiters`, `DecodeWaitTimeout`); past them the job gets 503 `busy`. A JPEG must reach its EOI marker: a truncated JPEG is a 400. Bytes after EOI are ignored. A PNG without its IEND chunk still prints.
 
 ### Limits
@@ -415,7 +443,8 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
 | Signal count and duration (block: a 400 outside the range; beep call: clamped) | 1-9 each | `SignalCommand.Min`, `Max` |
 | Barcode height | 1-255 dots | `BarcodeBlockHandler.MinHeightInDots`, `MaxHeightInDots` |
-| Barcode data | per symbology; CODE128 holds 253 characters, `{` counts as 2 | no constant: ESCPOS_NET validates, `BarcodeBlockHandler.BuildCommand` checks the length byte |
+| Barcode data | per symbology; the CODE128 command holds 253 characters, `{` counts as 2 (the width limit is far lower) | no constant: ESCPOS_NET validates, `BarcodeBlockHandler.BuildCommand` checks the length byte |
+| Barcode printed width | 576 dots; CODE128 holds 9 characters at `Default`, 14 at `Thin`, 7 at `Thick` (see Barcode width) | `BarcodeWidth.MaxDots` and the module constants of `BarcodeWidth` |
 | QR data (UTF-8 bytes) | Model2 2953, Model1 707, Micro 21 | `QRCodeBlockHandler.Model2MaxBytes`, `Model1MaxBytes`, `MicroMaxBytes` |
 | Image file | 16 MiB | `ImageBlockHandler.MaxImageBytes` |
 | Image pixels | 16,384 per side, 8192 x 6144 (50 MP) in total | `ImageBlockHandler.MaxSidePixels`, `MaxPixels` |
