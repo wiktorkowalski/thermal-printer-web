@@ -258,7 +258,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - The field is not sent (or is `null`): the server keeps 3 empty lines before the cut (`CutFeed.DefaultLines`). n = 3 minus the lines of the LineFeed blocks right before the cut, at least 0. So the model default is `null`, not a number.
   - Ends with text: `0A 0A 0A 1D 56 41 03`. Ends with `LineFeed 1`: the LF of the block, then `0A 0A 1D 56 41 03`. Ends with `LineFeed 3` or more: the cut command alone after the block.
   - The count goes back from the cut over LineFeed blocks (several add up) and stops at the first block of another type. The rule is by block type: a block with empty content (an Image, Barcode or QRCode that prints nothing) stops the count too. The two exceptions are a Signal and a CodePage block: they never move paper, so they keep the count (`CutFeed.TrailingLinesAfter`). A LineFeed block with no `lines` is one line.
-  - A cut with nothing printed before it (an empty document, a Signal alone, a Cut block right after a Cut block) gets the 3 lines too.
+  - A cut with no block before it, or with Signal and CodePage blocks only (an empty document, a Signal alone, a Cut block right after a Cut block), gets the 3 lines too.
   - An empty line inside a Text block (`"text\n\n\n"`) does not count: such a job gets 3 more lines. Only LineFeed blocks count.
   - Each cut has its own count: a Cut block starts a new strip, so a second Cut block right after it gets 3 lines.
   - `PrinterService.AddBlockAsync` sets the count (`BlockContext.TrailingFeedLines`) after each handler, so the Cut handler reads the lines before it.

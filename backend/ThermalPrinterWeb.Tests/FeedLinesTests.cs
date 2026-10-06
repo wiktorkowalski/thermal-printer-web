@@ -123,6 +123,7 @@ public sealed class FeedLinesTests
     [InlineData(ContentType.Separator, null)]
     [InlineData(ContentType.Barcode, "12345678")]
     [InlineData(ContentType.QRCode, "ok")]
+    [InlineData(ContentType.Barcode, "")]
     [InlineData(ContentType.QRCode, "")]
     [InlineData(ContentType.Image, "")]
     public async Task BuildDocumentAsync_NoFeedField_ABlockOfAnotherTypeEndsTheCount(ContentType type, string? content)

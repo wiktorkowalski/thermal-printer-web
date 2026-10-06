@@ -12,7 +12,7 @@ internal static class PaperLength
     // and 20 images of the default height (1.4 m) pass; a receipt is under 1 m.
     // Taller text reaches the limit sooner: 162 lines at height 8.
     // The lines before a cut count too (CutFeed), also the 3 default lines of a job with no feed field:
-    // such a job has 87 dots less for its blocks when it does not end with a LineFeed block.
+    // such a job has up to 87 dots less for its blocks: 29 for each of the 3 lines that it lacks at its end.
     internal const int MaxDots = 32_000;
 
     // Measured line pitch: 11 lines = 40 mm. Same value as frontend/src/lib/paper.ts.
