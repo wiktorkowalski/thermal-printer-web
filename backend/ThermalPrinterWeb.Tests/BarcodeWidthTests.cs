@@ -30,11 +30,10 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
         => (await Record.ExceptionAsync(() => new BarcodeBlockHandler().HandleAsync(block, TestBlocks.NewContext(TestBlocks.Pc852))))?.Message;
 
     [Fact]
-    public void MaxDots_IsTheHeadWidth()
-    {
-        Assert.Equal(Paper, BarcodeWidth.MaxDots);
-        Assert.Equal(ImageBlockHandler.HeadWidth, BarcodeWidth.MaxDots);
-    }
+    public void MaxDots_IsTheHeadWidth() => Assert.Equal(Paper, BarcodeWidth.MaxDots);
+
+    private static int? Dots(BarcodeType type, string content, BarWidth width)
+        => BarcodeWidth.Dots(type, content, BarcodeWidth.ModuleDots(width)!.Value);
 
     // GS w n as ESCPOS_NET sends it: the model and the bytes hold the same number.
     [Theory]
@@ -58,7 +57,8 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
 
         await new BarcodeBlockHandler().HandleAsync(Barcode("A", width: null), ctx);
 
-        Assert.Equal(2, BarcodeWidth.ModuleDots(null));
+        Assert.Null(BarcodeWidth.ModuleDots(null));
+        Assert.Null(ctx.BarModuleDots);
         Assert.DoesNotContain(ctx.Output, command => command.Length == 3 && command[0] == 0x1D && command[1] == 0x77);
     }
 
@@ -71,7 +71,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     [InlineData("BOX-0007", BarcodeType.CODE128, BarWidth.Default, 492)]
     public async Task Handle_BarcodeThatPrintedOnPaper_Passes(string content, BarcodeType type, BarWidth width, int dots)
     {
-        Assert.Equal(dots, BarcodeWidth.Dots(type, content, width));
+        Assert.Equal(dots, Dots(type, content, width));
         Assert.Null(await ErrorAsync(Barcode(content, type, width)));
     }
 
@@ -82,7 +82,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
 
         var ex = await Assert.ThrowsAsync<PrintContentException>(() => new BarcodeBlockHandler().HandleAsync(Barcode("TEST-44-OK"), ctx));
 
-        Assert.Equal(580, BarcodeWidth.Dots(BarcodeType.CODE128, "TEST-44-OK", BarWidth.Default));
+        Assert.Equal(580, Dots(BarcodeType.CODE128, "TEST-44-OK", BarWidth.Default));
         Assert.Equal(TooWide(580), ex.Message);
         Assert.Empty(ctx.Output);
         Assert.Equal(0, ctx.PaperDots);
@@ -118,9 +118,9 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     [InlineData(BarWidth.Thick, 7, 560)]
     public async Task Handle_Code128AtTheLastLengthThatFits_PassesAndOneMoreIsRejected(BarWidth width, int length, int dots)
     {
-        var perCharacter = BarcodeWidth.Code128ModulesPerCharacter * BarcodeWidth.ModuleDots(width);
+        var perCharacter = BarcodeWidth.Code128ModulesPerCharacter * BarcodeWidth.ModuleDots(width)!.Value;
 
-        Assert.Equal(dots, BarcodeWidth.Dots(BarcodeType.CODE128, new string('A', length), width));
+        Assert.Equal(dots, Dots(BarcodeType.CODE128, new string('A', length), width));
         Assert.Null(await ErrorAsync(Barcode(new string('A', length), width: width)));
         Assert.Equal(
             TooWide(dots + perCharacter, offerThin: width != BarWidth.Thin),
@@ -139,7 +139,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     [Fact]
     public async Task Handle_Code128Braces_CountOneSymbolEach()
     {
-        Assert.Equal(536, BarcodeWidth.Dots(BarcodeType.CODE128, new string('{', 9), BarWidth.Default));
+        Assert.Equal(536, Dots(BarcodeType.CODE128, new string('{', 9), BarWidth.Default));
         Assert.Null(await ErrorAsync(Barcode(new string('{', 9))));
     }
 
@@ -155,7 +155,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     [InlineData(BarcodeType.UPC_E, "01234567890", 255)]
     public async Task Handle_FixedLengthSymbologyAtThick_Passes(BarcodeType type, string content, int dots)
     {
-        Assert.Equal(dots, BarcodeWidth.Dots(type, content, BarWidth.Thick));
+        Assert.Equal(dots, Dots(type, content, BarWidth.Thick));
         Assert.Null(await ErrorAsync(Barcode(content, type, BarWidth.Thick)));
     }
 
@@ -171,7 +171,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     [InlineData(BarcodeType.CODABAR, "A123456789012B", 556, "A1234567890123B", 596)]
     public async Task Handle_SymbologyWithWideBars_IsRejectedOnlyPastItsNarrowestWidth(BarcodeType type, string fits, int fitsDots, string tooLong, int tooLongDots)
     {
-        Assert.Equal(fitsDots, BarcodeWidth.Dots(type, fits, BarWidth.Default));
+        Assert.Equal(fitsDots, Dots(type, fits, BarWidth.Default));
         Assert.Null(await ErrorAsync(Barcode(fits, type)));
         Assert.Equal(TooWide(tooLongDots), await ErrorAsync(Barcode(tooLong, type)));
     }
@@ -184,7 +184,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     {
         var content = new string('1', length);
 
-        Assert.Null(BarcodeWidth.Dots(type, content, BarWidth.Thick));
+        Assert.Null(Dots(type, content, BarWidth.Thick));
         Assert.Null(await ErrorAsync(Barcode(content, type, BarWidth.Thick)));
     }
 
@@ -213,7 +213,7 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
     public async Task ToolsList_PrintTool_StatesTheBarcodeWidthsTheCodeApplies()
     {
         static int Code128Characters(BarWidth width)
-            => (BarcodeWidth.MaxDots / BarcodeWidth.ModuleDots(width) - BarcodeWidth.Code128FixedModules) / BarcodeWidth.Code128ModulesPerCharacter;
+            => (BarcodeWidth.MaxDots / BarcodeWidth.ModuleDots(width)!.Value - BarcodeWidth.Code128FixedModules) / BarcodeWidth.Code128ModulesPerCharacter;
 
         var tools = (await app.CreateClient().McpAsync("tools/list")).GetProperty("tools");
         var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == "print");
@@ -235,14 +235,17 @@ public sealed class BarcodeWidthTests(ClosedPortApp app) : IClassFixture<ClosedP
             print.GetProperty("description").GetString());
     }
 
-    // The largest document: 500 barcodes of the longest content. The width is one multiplication per block.
+    // GS w holds until the end of the job: a block with "width": null prints with the module of the barcode before it.
     [Fact]
-    public async Task PrintAsync_FiveHundredBlocksWithTheLongestContent_IsRejectedAtTheFirst()
+    public async Task BuildDocumentAsync_NoWidthAfterABlockWithAWidth_CountsTheModuleOfThatBlock()
     {
-        var blocks = Enumerable.Repeat(Barcode(new string('A', 253)), 500).ToList();
+        var thick = Barcode("A", width: BarWidth.Thick);
+        var unset = Barcode(new string('A', 8), width: null);
 
-        var result = await TestBlocks.NewService().PrintAsync(blocks);
+        var alone = await Record.ExceptionAsync(() => TestBlocks.NewService().BuildDocumentAsync([unset, thick], null));
+        var afterThick = await Record.ExceptionAsync(() => TestBlocks.NewService().BuildDocumentAsync([thick, unset], null));
 
-        Assert.Equal($"Block 0 (Barcode): {TooWide(11272)}", result.Error);
+        Assert.Null(alone);
+        Assert.Equal($"Block 1 (Barcode): {TooWide(615, offerThin: false)}", afterThick?.Message);
     }
 }

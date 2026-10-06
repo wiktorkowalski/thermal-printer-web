@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { fileToBase64 } from "@/lib/api";
 import { EDITOR_IMAGE_MAX_MB } from "@/lib/printer-limits";
 import { IMAGE_ACCEPT, errorText, validateImageFile } from "@/lib/validation";
-import { DEFAULT_ALIGNMENT, DOUBLE_STYLES, HEAD_DOTS, countPrintedLines, longestLine, signalLabel, textMetrics, textScale } from "@/lib/paper";
+import { DEFAULT_ALIGNMENT, DOUBLE_STYLES, HEAD_DOTS, barcodeWidthDots, countPrintedLines, longestLine, signalLabel, textMetrics, textScale } from "@/lib/paper";
 import { BLOCK_LABELS, barcodeWidthError, blockError, type Block } from "@/editor/document";
 import { PaperText } from "./paper-text";
 import { BarcodeView, DitheredImage, QrView, type BarcodeRender } from "./graphic-views";
@@ -186,14 +186,17 @@ export function BlockView(props: BlockViewProps) {
       ) : (
         <span className="text-paper-faint">[barcode · add data in the panel]</span>
       );
-      // "too wide" is the check of the backend. For CODE39, ITF and CODABAR that check is a lower bound,
+      // "too wide" is the check of the backend, shown when it is the error of the block. That check is a lower bound for
+      // CODE39, ITF and CODABAR and for a block with "width": null (drawn at the Default module),
       // so a drawing past the paper with no error is only a warning.
-      const tooWide = !!barcodeWidthError(block);
+      const tooWide = !!error && error === barcodeWidthError(block);
       const mayBeTooWide = !error && !!barcode?.valid && barcode.widthDots > HEAD_DOTS;
+      // GS1-128 and GS1 DataBar: the data can be valid, the printer prints no bars.
+      const noBars = !error && barcodeWidthDots(block.content ?? "", block.barcodeOptions) == null;
       right = block.content ? (
         <>
-          <span className={cn(error || mayBeTooWide ? "text-warn" : "text-ok-text")}>
-            {tooWide ? "too wide" : error ? "invalid" : mayBeTooWide ? "may be too wide" : "✓ valid"}
+          <span className={cn(error || mayBeTooWide || noBars ? "text-warn" : "text-ok-text")}>
+            {tooWide ? "too wide" : error ? "invalid" : noBars ? "no bars" : mayBeTooWide ? "may be too wide" : "✓ valid"}
           </span>
           <span>{block.barcodeOptions?.heightInDots ?? 162} dots</span>
         </>

@@ -15,6 +15,9 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     public List<byte[]> Output { get; } = [];
     public bool HasCut { get; set; }
 
+    // The module of the last GS w of the job, in dots. The command holds until ESC @: a Barcode block with no width prints with it.
+    public int? BarModuleDots { get; set; }
+
     // The empty lines at the end of the blocks so far (CutFeed.TrailingLinesAfter). PrinterService sets it after each block.
     public int TrailingFeedLines { get; set; }
 

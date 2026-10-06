@@ -231,7 +231,7 @@ public sealed class CodeContentEncodingTests
     // 2 prefix bytes + 252 characters + 1 doubled brace = 255: the length byte holds it.
     // So the length check passes and the width check rejects it: 252 symbols do not fit the paper (BarcodeWidthTests).
     [Fact]
-    public async Task Barcode_Code128BraceThatFillsTheLengthByte_PassesTheLengthCheck()
+    public async Task Barcode_Code128BraceThatFillsTheLengthByte_IsRejectedForItsWidthNotItsLength()
     {
         var ctx = TestBlocks.NewContext(TestBlocks.Pc852);
         var block = Barcode("{" + new string('A', 251), BarcodeType.CODE128);

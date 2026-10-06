@@ -57,7 +57,7 @@ const BARCODE_TYPES: { value: BarcodeType; label: string }[] = [
 // GS1-128 and GS1 DataBar print no bars on this printer (issue #44): the list does not offer them.
 // A block that holds one keeps it; its type is then in the list, so the select shows what is sent.
 function barcodeTypes(current: BarcodeType) {
-  return BARCODE_TYPES.some((t) => t.value === current) ? BARCODE_TYPES : [{ value: current, label: `${current} · no bars` }, ...BARCODE_TYPES];
+  return BARCODE_TYPES.some((t) => t.value === current) ? BARCODE_TYPES : [{ value: current, label: `${String(current)} · no bars` }, ...BARCODE_TYPES];
 }
 
 export function AlignmentControl({ value, onChange }: { value?: Alignment; onChange: (value: Alignment) => void }) {
@@ -297,7 +297,7 @@ export function Inspector({ block, index, count, onUpdate, onToggleStyle, onDupl
                   <span className="text-xs text-danger-text">{error}</span>
                 ) : (
                   <span className="text-xs text-ok-text">
-                    Valid for {BARCODE_TYPES.find((t) => t.value === options.type)?.label ?? options.type} · {block.content.length} characters
+                    Valid for {BARCODE_TYPES.find((t) => t.value === options.type)?.label ?? String(options.type)} · {block.content.length} characters
                     {widthDots != null && ` · at least ${widthDots} of ${HEAD_DOTS} dots wide`}
                   </span>
                 )

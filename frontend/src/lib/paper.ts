@@ -24,15 +24,18 @@ export const BAR_MODULE_DOTS = { Thin: 3, Default: 4, Thick: 5 } as const;
 /**
  * The printed width of a barcode in dots, as the backend counts it (BarcodeWidth.cs), or null for a type with no width:
  * GS1-128 and GS1 DataBar print no bars on this printer. Over HEAD_DOTS the backend rejects the block.
- * A width that is left out is Default (the backend model default); null is the module of the printer.
+ * A width that is left out is Default (the backend model default); null sends no width command.
  */
 export function barcodeWidthDots(content: string, options: BarcodeOptions | undefined): number | null {
   const type = options?.type ?? "CODE128";
-  if (!Object.hasOwn(BARCODE_MODULES, type)) return null;
+  // An imported file can hold any value here.
+  if (typeof content !== "string" || !Object.hasOwn(BARCODE_MODULES, type)) return null;
   const modules = BARCODE_MODULES[type as keyof typeof BARCODE_MODULES];
   // CODE39: the printer adds the start and the stop character unless the content holds one.
   const added = type === "CODE39" && !content.startsWith("*") && !content.endsWith("*") ? 2 : 0;
-  const moduleDots = options?.width === null ? BARCODE_UNSET_MODULE_DOTS : (BAR_MODULE_DOTS[options?.width ?? "Default"] ?? BAR_MODULE_DOTS.Default);
+  const width = options?.width ?? "Default";
+  // null: the backend counts the module of the barcode before it in the job, else the smallest one. The editor counts the smallest.
+  const moduleDots = options?.width === null ? BARCODE_UNSET_MODULE_DOTS : Object.hasOwn(BAR_MODULE_DOTS, width) ? BAR_MODULE_DOTS[width] : BAR_MODULE_DOTS.Default;
   return (modules.perCharacter * (content.length + added) + modules.fixed) * moduleDots;
 }
 export const DEFAULT_BARCODE_HEIGHT_DOTS = 162;

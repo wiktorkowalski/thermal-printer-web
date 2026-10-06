@@ -218,7 +218,7 @@ export function BarcodeView({
     return (
       <span className="inline-flex flex-col items-center gap-1 text-paper-faint">
         <span className="inline-block border border-dashed border-paper-rule" style={{ width: "20ch", height: dotsToCh(height) }} />
-        [{type} · no bars on this printer]
+        [{String(type)} · no bars on this printer]
       </span>
     );
   }

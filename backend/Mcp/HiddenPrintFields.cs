@@ -25,17 +25,20 @@ internal static class HiddenPrintFields
             return;
 
         var schema = JsonNode.Parse(printTool.InputSchema.GetRawText());
-        if (schema?[Properties]?["content"]?["items"]?[Properties] is not JsonObject block)
+        if (Child(Child(Child(Child(schema, Properties), "content"), "items"), Properties) is not { } block)
             return;
 
         var changed = block.Remove(PartialCut);
         // The members of no effect: BlockEnums names them.
-        changed |= RemoveNames(block["style"]?["items"]?[EnumNames], BlockEnums.NoEffectNames<PrintStyle>());
-        changed |= RemoveNames(block["barcodeOptions"]?[Properties]?["type"]?[EnumNames], BlockEnums.NoEffectNames<BarcodeType>());
+        changed |= RemoveNames(Child(Child(block, "style"), "items")?[EnumNames], BlockEnums.NoEffectNames<PrintStyle>());
+        changed |= RemoveNames(Child(Child(Child(block, "barcodeOptions"), Properties), "type")?[EnumNames], BlockEnums.NoEffectNames<BarcodeType>());
 
         if (changed)
             printTool.InputSchema = JsonSerializer.SerializeToElement(schema);
     }
+
+    // The indexer of a node that is not an object throws: a schema such as "items": true must not stop the app.
+    private static JsonObject? Child(JsonNode? node, string name) => (node as JsonObject)?[name] as JsonObject;
 
     private static bool RemoveNames(JsonNode? names, string[] hidden)
     {
