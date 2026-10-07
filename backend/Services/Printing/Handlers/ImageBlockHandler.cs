@@ -72,7 +72,10 @@ internal sealed class ImageBlockHandler : IBlockHandler
         {
             var png = await ResizeToPngAsync(source, format, new Size(maxWidth, maxHeight), options.PreserveAspectRatio);
             // ESCPOS_NET decodes the PNG again, so this stays inside the queue.
-            ctx.Add(ctx.Emitter.PrintImage(png, options.HighDensity, isLegacy: options.UseLegacyMode));
+            // Always the legacy raster command (GS v 0), whatever imageOptions.useLegacyMode and highDensity say.
+            // Read from paper on 2026-10-07: the other image command of ESCPOS_NET prints garbage text on this printer.
+            // In legacy mode ESCPOS_NET sends the same bytes for both densities.
+            ctx.Add(ctx.Emitter.PrintImage(png, isHiDPI: true, isLegacy: true));
         });
     }
 

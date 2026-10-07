@@ -110,7 +110,6 @@ export interface ImageOptions {
   maxWidth?: number;
   maxHeight?: number;
   preserveAspectRatio?: boolean;
-  useLegacyMode?: boolean;
 }
 
 /** Signal block. Count and duration are 1 to 9 each (lib/printer-limits.ts); a field that is left out is Sound, 1 and 1. */

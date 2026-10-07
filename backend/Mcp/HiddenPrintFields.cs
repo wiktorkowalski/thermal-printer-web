@@ -8,11 +8,15 @@ namespace ThermalPrinterWeb.Mcp;
 
 // A field or an enum name of the print tool that changes nothing on this printer (issue #44). The schema does not list it,
 // so a caller does not learn it. The model keeps it: an old payload and a stored job still bind,
-// and the job has the same bytes as before.
+// and the job has the same bytes as before. One exception: a job with useLegacyMode false now prints its image in legacy mode.
 internal static class HiddenPrintFields
 {
     // The cutter makes a partial cut only.
     internal const string PartialCut = "partialCut";
+
+    // The server always prints an image in legacy mode: the handler reads neither field.
+    internal const string UseLegacyMode = "useLegacyMode";
+    internal const string HighDensity = "highDensity";
 
     private const string Properties = "properties";
     private const string EnumNames = "enum";
@@ -29,6 +33,12 @@ internal static class HiddenPrintFields
             return;
 
         var changed = block.Remove(PartialCut);
+        if (Child(Child(block, "imageOptions"), Properties) is { } imageOptions)
+        {
+            changed |= imageOptions.Remove(UseLegacyMode);
+            changed |= imageOptions.Remove(HighDensity);
+        }
+
         // The members of no effect: BlockEnums names them.
         changed |= RemoveNames(Child(Child(block, "style"), "items")?[EnumNames], BlockEnums.NoEffectNames<PrintStyle>());
         changed |= RemoveNames(Child(Child(Child(block, "barcodeOptions"), Properties), "type")?[EnumNames], BlockEnums.NoEffectNames<BarcodeType>());

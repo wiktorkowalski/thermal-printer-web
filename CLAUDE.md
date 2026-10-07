@@ -270,7 +270,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **QR codes**: Configurable model, size, and error correction level
 
-**Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots).
+**Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots). The server always sends the legacy raster command (`GS v 0`); `imageOptions.useLegacyMode` and `highDensity` are not read (see Fields with no effect on this printer).
 
 **Options**: CodePage selection (default PC852), line spacing, auto-cut behavior, feed before a cut (default: 3 empty lines)
 
@@ -299,14 +299,18 @@ Both modes take an optional `source`: a short name of the caller, for the log an
   - A row with no field (no `options`, or `"feedLinesAfterPrint":null`) that ends with a LineFeed block of 3 lines keeps its bytes: simple mode, `print_note`, the house style.
   - A row with no field that ends with text printed with the cut command alone. Its reprint now feeds 3 lines and its new row counts 87 dots more (accepted by the owner).
 
-**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only), the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31) and three enum names, read from paper on 2026-10-07:
+**Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only), the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31), the image options `useLegacyMode` and `highDensity`, and three enum names, read from paper on 2026-10-07:
   - Text style `Italic`: FontB text at size 2x3 prints the same with and without it.
   - Barcode type `GS1_128`: no bars. `0109501101530003` printed as the small text `109501101530003`, with no line feed after it.
   - Barcode type `GS1_DATABAR_OMNIDIRECTIONAL`: no bars. The data printed as small text with no line feed; the next block ran on in the same line.
-- No caller text offers them: `HiddenPrintFields` removes `partialCut` and the three enum names from the MCP schema of `print`, the code page texts do not name the two pages, no `[Description]` names the three, and the 400 text for an enum number with no name does not list them (`BlockEnums.HasNoEffect` is the one list). The editor has no control for them.
+- No caller text offers them: `HiddenPrintFields` removes `partialCut`, `imageOptions.useLegacyMode`, `imageOptions.highDensity` and the three enum names from the MCP schema of `print`, the code page texts do not name the two pages, no `[Description]` names the three, and the 400 text for an enum number with no name does not list them (`BlockEnums.HasNoEffect` is the one list). The editor has no control for them.
 - The server still binds them and sends the same bytes as before: callers and journal rows hold them. `OldFieldTests` pins this. Do not remove them from the models, the enums or `CodePages`. The two GS1 types get no barcode width check.
 - Web editor: the style list and the symbology list do not offer the three. A block that holds one (a draft, a saved template, an imported file) keeps it and sends it: the inspector then shows `Italic · no effect` or the type with `no bars`, so it can be removed. The paper shows upright text for `Italic` and `[TYPE · no bars on this printer]` for a GS1 type; its gutter says `no bars`.
-- `imageOptions.highDensity` is read only when `useLegacyMode` is false. In legacy mode, the default, both values give the same bytes. It stays in the schema; its text says so.
+- `imageOptions.useLegacyMode` and `imageOptions.highDensity` are the exception to "the same bytes as before" (owner decision of 2026-10-07): the server always prints an image in legacy mode and reads neither field.
+  - Evidence, one strip with the same 384 x 160 PNG: legacy mode prints the picture; `useLegacyMode: false` prints garbage text, with `highDensity` true and false alike.
+  - Any value binds (`true`, `false`, `null`): no 400. The job has the bytes of a job without the fields. Only a job with `useLegacyMode: false` changes: it printed garbage and now prints the picture.
+  - A journal row keeps the fields as stored (`GET /api/printer/jobs/{id}` serves them); its reprint is in legacy mode. A new row still stores both.
+  - The editor has no control for them and its type does not list them. A draft or a template file that holds one keeps it and sends it.
 - `options.feedLinesAfterPrint` is not in this list any more: it feeds lines (see Feed before a cut). `OldFieldTests` pins the new end of the old job: 5 LF, then `GS V 66 3`.
 - The binder skips a JSON property that no model has: an unknown property is never a 400.
 
