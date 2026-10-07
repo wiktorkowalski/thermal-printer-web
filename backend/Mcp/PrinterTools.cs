@@ -175,7 +175,7 @@ public static class PrinterTools
         if (content is null)
             throw new ToolArgumentException(PrintName, "'content' is missing");
 
-        // The journal gets the blocks with the signature line, when options.sign asks for one.
+        // options.sign adds the signature line. The journal gets the blocks that SignatureLine gives back.
         var (result, printed) = await signature.PrintAsync(content, options);
         jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result, printed, options);
         return Answer(result);

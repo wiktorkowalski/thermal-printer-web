@@ -20,12 +20,12 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Print([FromBody] PrintRequest request, [FromServices] TimeProvider clock, [FromServices] SignatureLine signature)
     {
-        List<PrintContent> content;
+        List<PrintContent>? content;
         PrintResult result;
 
         if (request.Content != null && request.Content.Count > 0)
         {
-            // Template mode: options.sign adds the signature line. The journal gets the blocks with the line.
+            // Template mode: options.sign adds the signature line. The journal gets the blocks that SignatureLine gives back.
             (result, content) = await signature.PrintAsync(request.Content, request.Options);
         }
         else if (!string.IsNullOrEmpty(request.Name) && !string.IsNullOrEmpty(request.Message))

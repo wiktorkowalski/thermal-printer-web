@@ -260,16 +260,21 @@ public sealed class SignatureLineTests
         Assert.Equal(2, warnings.Count);
         Assert.All(warnings, warning => Assert.Equal(LogLevel.Warning, warning.Level));
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Message.Contains("SECRET", StringComparison.Ordinal));
-        // The rows hold the blocks as sent and no printer data.
+        // The rows hold no blocks: a reprint would print the document with no line.
         var rows = await app.JournalRowsAsync();
         Assert.Equal(2, rows.Count);
         Assert.All(rows, row =>
         {
             Assert.Equal(JobResult.Validation, row.Result);
             Assert.Equal(reason, row.Error);
-            Assert.Equal(1, row.BlockCount);
-            Assert.Null(row.Payload.Bytes!);
+            Assert.Null(row.BlockCount);
+            Assert.Null(row.Payload.Blocks);
+            Assert.Null(row.Payload.Bytes);
+            Assert.NotNull(row.Payload.Request);
         });
+        var (reprintStatus, reprintBody) = await client.SendJsonAsync(HttpMethod.Post, $"{PrintUrl}/jobs/{rows[0].Id}/reprint");
+        Assert.Equal(HttpStatusCode.BadRequest, reprintStatus);
+        Assert.Equal(PrintJournalReader.NoBlocksReason, Error(reprintBody));
     }
 
     private static string Blocks(int count) => string.Join(',', Enumerable.Repeat(X, count));
@@ -318,6 +323,14 @@ public sealed class SignatureLineTests
 
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.Equal("Block 1 (LineFeed): lines 101 is over the limit of 100", Error(body));
+        // The row holds the blocks as sent: block 1 of the row is the block of the answer, and a reprint gets the same answer.
+        var row = Assert.Single(await app.JournalRowsAsync());
+        var blocks = JsonDocument.Parse(row.Payload.Blocks!).RootElement;
+        Assert.Equal(2, blocks.GetArrayLength());
+        Assert.Equal("LineFeed", blocks[1].GetProperty("type").GetString());
+        var (reprintStatus, reprintBody) = await app.CreateClient().SendJsonAsync(HttpMethod.Post, $"{PrintUrl}/jobs/{row.Id}/reprint");
+        Assert.Equal(HttpStatusCode.BadRequest, reprintStatus);
+        Assert.Equal(Error(body), Error(reprintBody));
     }
 
     // The line counts as paper. The fault is at a block that the caller did not send: the answer names the field.
@@ -335,6 +348,23 @@ public sealed class SignatureLineTests
         Assert.True(plainStatus == HttpStatusCode.OK, plainBody);
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.Equal("options.sign: the document is over the limit of 32000 dots of paper (4 m)", Error(body));
+        // No blocks in the row of the refused job: its reprint would pass with no line.
+        var refused = (await app.JournalRowsAsync()).Single(row => row.Result == JobResult.Validation);
+        Assert.Null(refused.Payload.Blocks);
+        Assert.Null(refused.BlockCount);
+    }
+
+    // The printer refused the job: the row holds the line, so a reprint prints the date of that day.
+    [Fact]
+    public async Task Print_SignAndAPrinterThatIsNotReady_StoresTheBlocksWithTheLine()
+    {
+        await using var app = new ClosedPortApp { Clock = new TestClock(Noon) };
+
+        var row = await PrintAsync(app, Json(X, SignOptions("Claude")), HttpStatusCode.ServiceUnavailable);
+
+        Assert.Equal(JobResult.Printer, row.Result);
+        Assert.Equal(2, row.BlockCount);
+        Assert.Equal("x\n" + Signed, row.Payload.PlainText);
     }
 
     [Theory]

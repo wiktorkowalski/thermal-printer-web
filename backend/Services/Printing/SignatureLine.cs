@@ -3,8 +3,10 @@ using ThermalPrinterWeb.Models;
 
 namespace ThermalPrinterWeb.Services.Printing;
 
-// What went to the print path, for the journal, and how the print ended.
-public sealed record SignedPrint(PrintResult Result, List<PrintContent> Content);
+// How the print ended, and the blocks for the journal row. A job that printed, or that the printer refused: the blocks with the signature line.
+// A payload fault at a block of the caller: the blocks as sent, so the block number of the answer is the number in the row.
+// A fault of options.sign: no blocks, so the row cannot be reprinted. Its reprint would print the document with no line.
+public sealed record SignedPrint(PrintResult Result, List<PrintContent>? Content);
 
 // The signature line of template mode (issue #54): options.sign makes one last text line "yyyy-MM-dd * name".
 // The entry points of a new print call it (POST /api/printer with content, the MCP print tool), in place of IPrinterService.PrintAsync.
@@ -39,12 +41,16 @@ public sealed class SignatureLine(IPrinterService printer, TimeProvider clock, I
             return new SignedPrint(await printer.PrintAsync(content, options), content);
 
         if (Fault(sign, content.Count) is { } reason)
-            return new SignedPrint(PrintResult.Invalid(reason), content);
+            return new SignedPrint(PrintResult.Invalid(reason), null);
 
         var at = InsertIndex(content);
         List<PrintContent> signed = [.. content[..at], Build(sign, SimpleNote.Today(clock)), .. content[at..]];
-        var result = await printer.PrintAsync(signed, options);
-        return new SignedPrint(WithCallerBlockNumbers(result, at), signed);
+        var result = WithCallerBlockNumbers(await printer.PrintAsync(signed, options), at);
+        if (result.Failure != PrintFailure.Validation)
+            return new SignedPrint(result, signed);
+
+        var atTheLine = result.Error?.StartsWith(Field, StringComparison.Ordinal) == true;
+        return new SignedPrint(result, atTheLine ? null : content);
     }
 
     internal static PrintContent Build(string sign, DateOnly date)
@@ -63,6 +69,11 @@ public sealed class SignatureLine(IPrinterService printer, TimeProvider clock, I
     // Numbers only: the name is caller text and goes to no log and no answer.
     private string? Fault(string sign, int blockCount)
     {
+        // First: the request body can hold 30 MB of text, and the two checks below read every character.
+        // A name of over twice the limit is over it whatever it holds: a character is at most two UTF-16 units and at least one column.
+        if (sign.Length > MaxSignColumns * 2)
+            return TooLong(sign.Length);
+
         // The line breaks of the encoder (PrinterSafeText) and every other control character.
         if (sign.AsSpan().ContainsAny(LineSeparator, ParagraphSeparator) || sign.Any(char.IsControl))
         {
@@ -70,14 +81,10 @@ public sealed class SignatureLine(IPrinterService printer, TimeProvider clock, I
             return NotOneLineReason;
         }
 
-        // A character that prints as two counts as two (WordWrap). The request body can hold 30 MB of text, and the count encodes each character:
-        // a name of over twice the limit is over it whatever it holds (a character is at most two UTF-16 units and at least one column).
-        var columns = sign.Length > MaxSignColumns * 2 ? sign.Length : WordWrap.ColumnsOf(sign);
+        // A character that prints as two counts as two (WordWrap), in the default code page.
+        var columns = WordWrap.ColumnsOf(sign);
         if (columns > MaxSignColumns)
-        {
-            logger.LogWarning("Rejected print: {Field} has {Columns} columns, the limit is {MaxColumns}", Field, columns, MaxSignColumns);
-            return PrintContentException.OverLimit($"{Field} length", columns, MaxSignColumns).Message;
-        }
+            return TooLong(columns);
 
         if (blockCount == PrinterService.MaxBlocks)
         {
@@ -86,6 +93,12 @@ public sealed class SignatureLine(IPrinterService printer, TimeProvider clock, I
         }
 
         return null;
+    }
+
+    private string TooLong(int length)
+    {
+        logger.LogWarning("Rejected print: {Field} has the length {Length}, the limit is {MaxLength}", Field, length, MaxSignColumns);
+        return PrintContentException.OverLimit($"{Field} length", length, MaxSignColumns).Message;
     }
 
     // The print path numbers the blocks with the signature line among them. The caller did not send that block:
