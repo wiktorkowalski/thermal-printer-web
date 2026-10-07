@@ -308,7 +308,8 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - Web editor: the style list and the symbology list do not offer the three. A block that holds one (a draft, a saved template, an imported file) keeps it and sends it: the inspector then shows `Italic · no effect` or the type with `no bars`, so it can be removed. The paper shows upright text for `Italic` and `[TYPE · no bars on this printer]` for a GS1 type; its gutter says `no bars`.
 - `imageOptions.useLegacyMode` and `imageOptions.highDensity` are the exception to "the same bytes as before" (owner decision of 2026-10-07): the server always prints an image in legacy mode and reads neither field.
   - Evidence, one strip with the same 384 x 160 PNG: legacy mode prints the picture; `useLegacyMode: false` prints garbage text, with `highDensity` true and false alike.
-  - Any value binds (`true`, `false`, `null`): no 400. The job has the bytes of a job without the fields. Only a job with `useLegacyMode: false` changes: it printed garbage and now prints the picture.
+  - `true`, `false` and `null` bind: no 400. The job has the bytes of a job without the fields. A value of another JSON type is a 400, as for every field.
+  - Two jobs change. A job with `useLegacyMode: false` printed garbage and now prints the picture. A job with `null` in one of the two fields was a 400 and now prints (the two properties are `bool?`).
   - A journal row keeps the fields as stored (`GET /api/printer/jobs/{id}` serves them); its reprint is in legacy mode. A new row still stores both.
   - The editor has no control for them and its type does not list them. A draft or a template file that holds one keeps it and sends it.
 - `options.feedLinesAfterPrint` is not in this list any more: it feeds lines (see Feed before a cut). `OldFieldTests` pins the new end of the old job: 5 LF, then `GS V 66 3`.

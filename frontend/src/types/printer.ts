@@ -106,6 +106,7 @@ export interface QRCodeOptions {
   correctionLevel: QRCodeCorrectionLevel;
 }
 
+/** The server model also holds `useLegacyMode` and `highDensity`: the server reads neither. A stored block that holds one sends it as it is. */
 export interface ImageOptions {
   maxWidth?: number;
   maxHeight?: number;

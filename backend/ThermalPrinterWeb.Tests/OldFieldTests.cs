@@ -183,6 +183,39 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         return await printer.NextJobAsync();
     }
 
+    // A new row still holds both fields, as sent: a null is stored as null. Such a row prints again.
+    [Fact]
+    public async Task PostPrinterAndReprint_ImageWithNullFields_StoresBothFieldsAndPrintsAgain()
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+        var client = wired.CreateClient();
+        var picture = $"\"type\":\"Image\",\"content\":\"{TestImages.PngBase64()}\"";
+
+        var first = await PrintImageAsync(client, printer, $"{{{picture},\"imageOptions\":{{\"useLegacyMode\":null,\"highDensity\":null}}}}");
+        var row = Assert.Single(await wired.JournalRowsAsync());
+        var (status, body) = await client.SendJsonAsync(HttpMethod.Post, $"{TestHttp.PrintUrl}/jobs/{row.Id}/reprint");
+
+        Assert.Contains("\"useLegacyMode\":null,\"highDensity\":null", row.Payload.Blocks);
+        Assert.True(status == HttpStatusCode.OK, body);
+        Assert.Equal(first, await printer.NextJobAsync());
+    }
+
+    // The MCP binder is a second binder: it takes the same values.
+    [Theory]
+    [InlineData("""{"useLegacyMode":false,"highDensity":false}""")]
+    [InlineData("""{"useLegacyMode":null,"highDensity":null}""")]
+    public async Task McpPrint_ImageWithUseLegacyModeAndHighDensity_Prints(string imageOptions)
+    {
+        app.Printer.Jobs.Clear();
+        var arguments = $"{{\"content\":[{{\"type\":\"Image\",\"content\":\"{TestImages.PngBase64()}\",\"imageOptions\":{imageOptions}}}]}}";
+
+        var (isError, text) = await _client.CallToolAsync("print", arguments);
+
+        Assert.False(isError, text);
+        Assert.Equal("Printed.", text);
+    }
+
     // A row of before the change whose image block holds useLegacyMode false: it printed garbage text then.
     // The row reads with the field as stored, and its reprint is the picture in legacy mode.
     [Fact]
