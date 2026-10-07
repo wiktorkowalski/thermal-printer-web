@@ -65,6 +65,9 @@ public sealed class JournalRowCapTests
         Assert.Equal(Limit, job.BlockCount);
         Assert.Equal(Limit, JsonDocument.Parse(job.Payload.Blocks!).RootElement.GetArrayLength());
         Assert.NotNull(job.Payload.Bytes);
+        // A rule line has no text; a Text block has.
+        Assert.Equal(textMode ? null : "x", job.Title);
+        Assert.Equal(textMode ? null : string.Join('\n', Enumerable.Repeat("x", Limit)), job.Payload.PlainText);
         Assert.True((await GetJsonAsync(client, JobsUrl)).GetProperty("jobs")[0].GetProperty("canReprint").GetBoolean());
     }
 
@@ -101,13 +104,15 @@ public sealed class JournalRowCapTests
             Assert.Empty(db.PrintJobTexts);
         // The request is stored as it came: the one copy, under the request body limit.
         Assert.Contains(Secret, System.Text.Encoding.UTF8.GetString(job.Payload.Request!));
-        Assert.Equal(job.Payload.Request!.Length, job.RequestBytes);
+        if (!overMcp)
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes(json), job.Payload.Request);
         // The print path logs the limit once, with numbers only. The journal logs nothing.
         var warning = Assert.Single(app.Logs.Entries, entry => entry.Level >= LogLevel.Warning);
         Assert.Equal($"Rejected print: the document has {Limit + 1} blocks, the limit is {Limit}", warning.Message);
         Assert.DoesNotContain(app.Logs.Entries, entry => entry.Message.Contains(Secret));
 
         // The read paths: a row with no blocks, like a job that was refused before the print path.
+        // The search and the ledger: no fault on such a row (a rejected job is in no ledger, with or without a title).
         var listed = (await GetJsonAsync(client, JobsUrl)).GetProperty("jobs")[0];
         Assert.False(listed.GetProperty("canReprint").GetBoolean());
         Assert.Equal(JsonValueKind.Null, listed.GetProperty("blockCount").ValueKind);
@@ -121,6 +126,15 @@ public sealed class JournalRowCapTests
         Assert.Equal(PrintJournalReader.NoBlocksReason, JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
         var (_, tool) = await client.CallToolAsync("reprint_job", $$"""{"id":"{{job.Id}}"}""");
         Assert.Equal(PrinterTools.NotPrinted(PrintJournalReader.NoBlocksReason), tool);
+
+        // The MCP reads answer, with no text of the job.
+        foreach (var (name, arguments) in new[] { ("list_jobs", "{}"), ("get_job", $$"""{"id":"{{job.Id}}"}""") })
+        {
+            var (isError, read) = await client.CallToolAsync(name, arguments);
+            Assert.False(isError, read);
+            Assert.StartsWith(JournalTools.UntrustedNotice, read);
+            Assert.DoesNotContain(Secret, read);
+        }
     }
 
     // The request of the finding: 3 bytes per block in, about 250 bytes per block in Blocks.
@@ -142,8 +156,9 @@ public sealed class JournalRowCapTests
         Assert.InRange(perBlock, 200, 300);
     }
 
-    // The other count limits need no rule: the job is inside the block limit, so its Blocks value has a largest size.
-    // An image is a hash of about 85 characters, whatever the picture.
+    // The image and signal count limits need no rule of their own. An Image block is a hash of about 85 characters, whatever the picture,
+    // and a Signal block has no content: 500 of them have a largest size. A Text block has none: its content is stored as sent.
+    // No pin of the block count rule: the sizes that the PR text states.
     [Fact]
     public async Task PostPrinter_OverTheImageOrSignalLimit_StoresBlocksOfABoundedSize()
     {
