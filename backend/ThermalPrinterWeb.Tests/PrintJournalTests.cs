@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using ThermalPrinterWeb.Controllers;
 using ThermalPrinterWeb.Models;
 using ThermalPrinterWeb.Services;
 using ThermalPrinterWeb.Services.Journal;
@@ -319,7 +320,7 @@ public sealed class PrintJournalTests
         Assert.Equal(JobResult.Validation, job.Result);
         Assert.Equal(400, job.HttpStatus);
         Assert.Equal("claude-code", job.Source);
-        Assert.Equal("Request must have Content array or both Name and Message", job.Error);
+        Assert.Equal(PrinterController.NoJobError, job.Error);
         Assert.Equal(Json, Text(job.Payload.Request));
         Assert.Null(job.Payload.Blocks);
         Assert.Null(job.Payload.Bytes);
@@ -406,7 +407,7 @@ public sealed class PrintJournalTests
 
     // A print call with the wrong shape is a refused job: missing arguments, or a value the SDK cannot bind.
     [Theory]
-    [InlineData("print", """{"source":"claude-code"}""", "'content' is missing")]
+    [InlineData("print", """{"source":"claude-code"}""", "'content' or 'text' is missing")]
     [InlineData("print_note", """{"title":"SECRET-CALLER-CONTENT","source":"claude-code"}""", "'message' is missing")]
     [InlineData("print", """{"content":"SECRET-CALLER-CONTENT","source":"claude-code"}""", "'content' has the wrong JSON type")]
     public async Task McpPrint_WrongShape_StoresTheRequestAsARejectedJob(string tool, string arguments, string problem)

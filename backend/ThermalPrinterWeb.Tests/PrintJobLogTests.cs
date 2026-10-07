@@ -168,7 +168,7 @@ public sealed class PrintJobLogTests(FakePrinterApp app) : IClassFixture<FakePri
         var jobLines = await CallToolAsync("print", """{"source":"claude-code"}""");
 
         Assert.Empty(jobLines);
-        Assert.Single(app.Logs.Entries, entry => entry.Message == "Rejected MCP call to print: 'content' is missing");
+        Assert.Single(app.Logs.Entries, entry => entry.Message == "Rejected MCP call to print: 'content' or 'text' is missing");
     }
 
     [Theory]

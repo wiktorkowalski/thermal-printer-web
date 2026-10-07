@@ -28,6 +28,26 @@ public static class PrinterTools
         + """{"type":"Text","content":"Body line, 32 characters max.","style":["FontB"],"size":{"width":2,"height":3}},"""
         + """{"type":"QRCode","content":"https://example.com"}]}""";
 
+    // Text mode (StripMarkup): the markers, one after the other.
+    internal const string PrintTextExample =
+        """{"text":"# TITLE MAX 24 CHARS\n===\nBody prose as it is. The server breaks the lines.\n[ ] first step\n[ ] second step\nqr: https://example.com\n==="}""";
+
+    // In the print description. The numbers are SimpleNote and StripMarkup: a test pins them.
+    internal const string TextModeRule =
+        "In place of content, text takes the whole strip as plain text: the server builds the blocks in the house style and breaks the lines at spaces. "
+        + "A marker at the start of a line picks the style of that line: "
+        + "'# ' a headline (Bold at size 2x3, 24 characters per line, centered); "
+        + "'## ', or a whole line inside **...**, a bold line; a whole line inside ==...== a reversed line (white on black); "
+        + "a line of 3 or more '=' or of 3 or more '-' a rule of 48 characters; "
+        + "'- ', '* ', '1. ', '1) ', '[ ] ' or '[x] ' a list item, printed at the left, and the lines that the server adds start under its text; "
+        + "a line that starts with a space prints at the left too; "
+        + "'qr: ' and the data a QR code; an empty line is an empty line; "
+        + "a backslash at the start of a line prints the rest of the line as body text with no marker. "
+        + "Every other line is body text: FontB at size 2x3, 32 characters per line, centered unless align is Left or Right. "
+        + "A marker in the middle of a line is plain text, and no line is a syntax error. "
+        + "text holds at most 10000 characters. One line of text is one block, so 'Block N' in an error is line N + 1 of text. "
+        + "text makes no image, no barcode and no Signal block: use content for those. Send text or content, never both.";
+
     internal const string SourceDescription =
         "Optional. Short name of the caller, for example 'claude-code'. It goes to the server log and the print journal; it is not printed.";
 
@@ -52,7 +72,9 @@ public static class PrinterTools
         + "and a longer line wraps in the middle of a word, so break lines yourself "
         + $"or set \"wrap\":true on a Text block of {PrintName}: then the server breaks the lines at spaces. "
         + $"For a quick note call {PrintNoteName} with {{\"title\":\"...\",\"message\":\"...\"}}; "
-        + $"for styled text, barcodes, QR codes or images call {PrintName} with {{\"content\":[{{\"type\":\"Text\",\"content\":\"...\"}}]}}. "
+        + $"for a strip with a headline, prose, steps and a QR code call {PrintName} with {{\"text\":\"# TITLE\\n===\\nProse as it is.\\n[ ] step\"}}: "
+        + "plain text with line markers, and the server breaks the lines; "
+        + $"for full control, barcodes or images call {PrintName} with {{\"content\":[{{\"type\":\"Text\",\"content\":\"...\"}}]}}. "
         + "House style: headline Bold with size 2x3 (24 characters per line), body FontB with size 2x3 (32 characters per line), "
         + $"a 48-character Separator between them; {PrintNoteName} prints this style and breaks the lines for you. "
         + $"{CutFeedRule} "
@@ -143,7 +165,8 @@ public static class PrinterTools
     [Description(
         "Print a custom document: an ordered list of content blocks (Text, Image, Barcode, QRCode, LineFeed, Cut, Separator, CodePage, Signal). "
         + "Use for full control over styling, barcodes, QR codes and images; for a plain note use " + PrintNoteName + ". "
-        + "content is needed. Each block is an object with a type; a Text block is {\"type\":\"Text\",\"content\":\"...\"}. "
+        + "content or text is needed. " + TextModeRule + " Example with text: " + PrintTextExample + " "
+        + "Each block is an object with a type; a Text block is {\"type\":\"Text\",\"content\":\"...\"}. "
         + "One line holds 48 characters (24 with DoubleWidth, 64 with FontB, 32 with both; with \"size\":{\"width\":3,\"height\":3} a headline holds 16); longer lines wrap in the middle of a word, "
         + "so keep each line within the limit (one Text block per line, or \\n inside content) "
         + "or set \"wrap\":true on the Text block: then the server breaks each longer line at a space (a longer word breaks at the limit) and keeps each \\n. "
@@ -160,12 +183,25 @@ public static class PrinterTools
     public static async Task<string> PrintAsync(
         IPrinterService printer,
         PrintJobLog jobLog,
-        [Description("Needed. Ordered content blocks to print, top to bottom.")] List<PrintContent>? content = null,
+        [Description("Ordered content blocks to print, top to bottom. Needed unless text is sent.")] List<PrintContent>? content = null,
+        [Description("The strip as plain text with line markers, in place of content: '# ' headline, '## ' bold line, '===' rule, '[ ] ' step, 'qr: ' QR code; the server breaks the lines. At most 10000 characters.")] string? text = null,
+        [Description("Optional, with text only: Left, Center or Right for the body lines. Default Center. Headline, rules and QR codes stay centered; list items stay at the left.")] string? align = null,
         [Description("Optional print options: code page, line spacing, auto-cut, empty lines before a cut.")] PrintOptions? options = null,
         [Description(SourceDescription)] string? source = null)
     {
+        if (!string.IsNullOrEmpty(text))
+        {
+            // As over HTTP: an empty content array is no content.
+            if (content is { Count: > 0 })
+                throw new ToolArgumentException(PrintName, "'content' and 'text' are both sent: send one of them");
+            if (!StripMarkup.TryParseAlign(align, out var bodyAlignment))
+                throw new ToolArgumentException(PrintName, $"'align' must be {BlockEnums.Names<Alignment>()}");
+
+            content = StripMarkup.Compile(text, bodyAlignment);
+        }
+
         if (content is null)
-            throw new ToolArgumentException(PrintName, "'content' is missing");
+            throw new ToolArgumentException(PrintName, "'content' or 'text' is missing");
 
         var result = await printer.PrintAsync(content, options);
         jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result, content, options);
@@ -185,7 +221,7 @@ public static class PrinterTools
     // A caller that sends plain text to print most often wants print_note.
     internal static string? ValidCallFor(string tool) => tool switch
     {
-        PrintName => $"{PrintExample} For a plain note use {PrintNoteName}: {PrintNoteExample}",
+        PrintName => $"{PrintExample} Or as plain text with line markers: {PrintTextExample} For a plain note use {PrintNoteName}: {PrintNoteExample}",
         PrintNoteName => PrintNoteExample,
         BeepName => BeepExample,
         JournalTools.ListJobsName => JournalTools.ListJobsExample,

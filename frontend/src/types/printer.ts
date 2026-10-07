@@ -273,6 +273,14 @@ export interface PrintRequest {
   message?: string;
   imageBase64?: string;
   content?: PrintContent[];
+  /**
+   * Text mode: plain text with line markers; the server builds the blocks (backend/Services/Printing/StripMarkup.cs).
+   * It goes alone, with no `content`, `name`, `message` or `imageBase64`. The web UI does not send it:
+   * the tray and the journal page show such a job through its blocks.
+   */
+  text?: string;
+  /** Text mode only: the alignment of the body lines. Default Center. */
+  align?: Alignment;
   options?: PrintOptions;
   source?: string;
 }
