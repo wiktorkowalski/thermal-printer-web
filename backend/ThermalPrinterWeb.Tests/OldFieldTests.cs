@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using ThermalPrinterWeb.Mcp;
 using ThermalPrinterWeb.Models;
@@ -9,12 +10,13 @@ namespace ThermalPrinterWeb.Tests;
 
 // Issue #44: fields with no effect on this printer are gone from the caller texts.
 // Callers and stored jobs still hold them: each one binds as before and the job has the bytes from before.
-// feedLinesAfterPrint is the exception: it has an effect now, it feeds lines (FeedLinesTests), so the end of the old job is new.
+// Two exceptions. feedLinesAfterPrint has an effect now, it feeds lines (FeedLinesTests), so the end of the old job is new.
+// An image with useLegacyMode false printed garbage text: it now prints in legacy mode, like every image.
 public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinterApp>
 {
     private readonly HttpClient _client = app.CreateClient();
 
-    // A job with every field of the issue: Italic, the two GS1 barcode types, partialCut, highDensity (on a block that does not read it),
+    // A job with every field of the issue: Italic, the two GS1 barcode types, partialCut, highDensity (no block reads it),
     // a code page that prints wrong glyphs, feedLinesAfterPrint.
     // Read from paper on 2026-10-07: Italic prints like plain text, the two GS1 barcodes print their data as text with no bars.
     private const string OldContent =
@@ -60,8 +62,9 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
     // GS w 5: the width Thick. The GS1 types get no width check, so a wide one still goes out.
     private static readonly byte[] ThickBars = [0x1D, 0x77, 5];
 
-    private static readonly byte[] FullDensity = [0x30, 0x31, 0x33, 0x33];
-    private static readonly byte[] HalfDensity = [0x30, 0x31, 0x32, 0x32];
+    // GS v 0: the raster command of legacy mode. GS ( L: the command of the other mode, which prints garbage text on this printer.
+    private static readonly byte[] LegacyRaster = [0x1D, 0x76, 0x30];
+    private static readonly byte[] OtherImageCommand = [0x1D, 0x28, 0x4C];
 
     // "Zażółć" and LF.
     private static readonly byte[] TextInWindows1250 = [(byte)'Z', (byte)'a', 0xBF, 0xF3, 0xB3, 0xE6, 0x0A];
@@ -142,36 +145,123 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         Assert.Equal(fresh, reprinted);
     }
 
-    // highDensity on an Image block, where the handler reads it: legacy mode sends the same bytes for both values,
-    // the other mode sends the density of the value. So the field stays bound, and the MCP text says when it is read.
+    // useLegacyMode and highDensity on an Image block: the handler reads neither (owner decision of 2026-10-07).
+    // Read from paper that day: with useLegacyMode false the printer printed garbage text for both densities.
+    // So every value binds and the job is the job with no field: the picture in legacy mode.
+    [Theory]
+    [InlineData("""{"useLegacyMode":true}""")]
+    [InlineData("""{"useLegacyMode":false}""")]
+    [InlineData("""{"useLegacyMode":null}""")]
+    [InlineData("""{"highDensity":true}""")]
+    [InlineData("""{"highDensity":false}""")]
+    [InlineData("""{"highDensity":null}""")]
+    [InlineData("""{"useLegacyMode":true,"highDensity":true}""")]
+    [InlineData("""{"useLegacyMode":true,"highDensity":false}""")]
+    [InlineData("""{"useLegacyMode":false,"highDensity":true}""")]
+    [InlineData("""{"useLegacyMode":false,"highDensity":false}""")]
+    [InlineData("""{"useLegacyMode":null,"highDensity":null}""")]
+    public async Task PostPrinter_ImageWithUseLegacyModeOrHighDensity_SendsTheBytesOfAJobWithoutThem(string imageOptions)
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+        var client = wired.CreateClient();
+
+        var picture = $"\"type\":\"Image\",\"content\":\"{TestImages.PngBase64()}\"";
+
+        var withFields = await PrintImageAsync(client, printer, $"{{{picture},\"imageOptions\":{imageOptions}}}");
+        var withoutOptions = await PrintImageAsync(client, printer, $"{{{picture}}}");
+
+        Assert.Equal(withoutOptions, withFields);
+        Assert.Equal(1, withFields.AsSpan().Count(LegacyRaster));
+        Assert.Equal(0, withFields.AsSpan().Count(OtherImageCommand));
+    }
+
+    private static async Task<byte[]> PrintImageAsync(HttpClient client, WirePrinter printer, string block)
+    {
+        var (status, body) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.PrintUrl, $$"""{"content":[{{block}}]}""");
+        Assert.True(status == HttpStatusCode.OK, body);
+        return await printer.NextJobAsync();
+    }
+
+    // A new row still holds both fields, as sent: a null is stored as null. Such a row prints again.
     [Fact]
-    public async Task PostPrinter_ImageWithHighDensity_ChangesTheBytesOnlyOutsideLegacyMode()
+    public async Task PostPrinterAndReprint_ImageWithNullFields_StoresBothFieldsAndPrintsAgain()
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+        var client = wired.CreateClient();
+        var picture = $"\"type\":\"Image\",\"content\":\"{TestImages.PngBase64()}\"";
+
+        var first = await PrintImageAsync(client, printer, $"{{{picture},\"imageOptions\":{{\"useLegacyMode\":null,\"highDensity\":null}}}}");
+        var row = Assert.Single(await wired.JournalRowsAsync());
+        var (status, body) = await client.SendJsonAsync(HttpMethod.Post, $"{TestHttp.PrintUrl}/jobs/{row.Id}/reprint");
+
+        Assert.Contains("\"useLegacyMode\":null,\"highDensity\":null", row.Payload.Blocks);
+        Assert.True(status == HttpStatusCode.OK, body);
+        Assert.Equal(first, await printer.NextJobAsync());
+    }
+
+    // The MCP binder is a second binder: it takes the same values.
+    [Theory]
+    [InlineData("""{"useLegacyMode":false,"highDensity":false}""")]
+    [InlineData("""{"useLegacyMode":null,"highDensity":null}""")]
+    public async Task McpPrint_ImageWithUseLegacyModeAndHighDensity_Prints(string imageOptions)
+    {
+        app.Printer.Jobs.Clear();
+        var arguments = $"{{\"content\":[{{\"type\":\"Image\",\"content\":\"{TestImages.PngBase64()}\",\"imageOptions\":{imageOptions}}}]}}";
+
+        var (isError, text) = await _client.CallToolAsync("print", arguments);
+
+        Assert.False(isError, text);
+        Assert.Equal("Printed.", text);
+    }
+
+    // A row of before the change whose image block holds useLegacyMode false: it printed garbage text then.
+    // The row reads with the field as stored, and its reprint is the picture in legacy mode.
+    [Fact]
+    public async Task GetJobAndReprint_StoredImageWithUseLegacyModeFalse_ServesTheFieldAndPrintsInLegacyMode()
     {
         await using var printer = new WirePrinter();
         await using var wired = new LoopbackPrinterApp(printer.Port);
         var client = wired.CreateClient();
         var picture = TestImages.PngBase64();
-
-        async Task<byte[]> JobAsync(string imageOptions)
+        var fresh = await PrintImageAsync(client, printer, $$"""{"type":"Image","content":"{{picture}}"}""");
+        var request = $$"""{"content":[{"type":"Image","content":"{{picture}}","imageOptions":{"useLegacyMode":false,"highDensity":false} }]}""";
+        var storedBlocks =
+            $$"""
+            [{"type":"Image","content":"{{PrintJobEntry.ImageHash(picture)}}","alignment":"Center","style":null,"size":null,"barcodeOptions":null,"qrCodeOptions":null,
+              "imageOptions":{"maxWidth":576,"maxHeight":576,"preserveAspectRatio":true,"useLegacyMode":false,"highDensity":false},
+              "lines":1,"partialCut":false,"separatorChar":"=","separatorLength":32,"signalOptions":null}]
+            """;
+        var id = Guid.CreateVersion7();
+        await wired.JournalIdleAsync();
+        await using (var db = wired.JournalDb())
         {
-            var json = $$"""{"content":[{"type":"Image","content":"{{picture}}","imageOptions":{{imageOptions}}}]}""";
-            var (status, body) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.PrintUrl, json);
-            Assert.True(status == HttpStatusCode.OK, body);
-            return await printer.NextJobAsync();
+            db.PrintJobs.Add(new PrintJob
+            {
+                Id = id,
+                CreatedAt = new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc),
+                Transport = "http",
+                Result = JobResult.Printed,
+                HttpStatus = 200,
+                AppVersion = "before-44",
+                BlockCount = 1,
+                Payload = new PrintJobPayload { JobId = id, Headers = "{}", Blocks = storedBlocks, Request = Encoding.UTF8.GetBytes(request) }
+            });
+            await db.SaveChangesAsync();
         }
 
-        var legacy = await JobAsync("""{"highDensity":true}""");
-        var legacyLow = await JobAsync("""{"highDensity":false}""");
-        var modern = await JobAsync("""{"useLegacyMode":false,"highDensity":true}""");
-        var modernLow = await JobAsync("""{"useLegacyMode":false,"highDensity":false}""");
+        var (readStatus, readBody) = await client.SendJsonAsync(HttpMethod.Get, $"{TestHttp.PrintUrl}/jobs/{id}");
+        var (reprintStatus, reprintBody) = await client.SendJsonAsync(HttpMethod.Post, $"{TestHttp.PrintUrl}/jobs/{id}/reprint");
 
-        Assert.Equal(legacy, await JobAsync("{}"));
-        Assert.Equal(legacy, legacyLow);
-        Assert.NotEqual(legacy, modern);
-        Assert.NotEqual(modern, modernLow);
-        // GS ( L, function 49: the density of the picture, 51 for full and 50 for half.
-        Assert.Equal(1, modern.AsSpan().Count(FullDensity));
-        Assert.Equal(1, modernLow.AsSpan().Count(HalfDensity));
+        Assert.True(readStatus == HttpStatusCode.OK, readBody);
+        var stored = JsonDocument.Parse(readBody).RootElement.GetProperty("blocks")[0].GetProperty("imageOptions");
+        Assert.False(stored.GetProperty("useLegacyMode").GetBoolean());
+        Assert.False(stored.GetProperty("highDensity").GetBoolean());
+        Assert.True(reprintStatus == HttpStatusCode.OK, reprintBody);
+        var reprinted = await printer.NextJobAsync();
+        Assert.Equal(fresh, reprinted);
+        Assert.Equal(1, reprinted.AsSpan().Count(LegacyRaster));
     }
 
     // The binder skips a property that it does not know: a field that leaves the models later is no new 400.
@@ -226,14 +316,33 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         var tools = (await _client.McpAsync("tools/list")).GetRawText();
 
         Assert.All(
-            [HiddenPrintFields.PartialCut, "partial", "WPC1250", "ISO8859_2", "1250", "8859", "Italic", "GS1", "DataBar"],
+            [HiddenPrintFields.PartialCut, "partial", HiddenPrintFields.UseLegacyMode, HiddenPrintFields.HighDensity, "legacy", "density",
+                "WPC1250", "ISO8859_2", "1250", "8859", "Italic", "GS1", "DataBar"],
             name => Assert.DoesNotContain(name, tools, StringComparison.OrdinalIgnoreCase));
         Assert.All(
-            [HiddenPrintFields.PartialCut, "highDensity", "WPC1250", "ISO8859_2", "Italic", "GS1", "DataBar"],
+            [HiddenPrintFields.PartialCut, HiddenPrintFields.UseLegacyMode, HiddenPrintFields.HighDensity, "legacy", "density",
+                "WPC1250", "ISO8859_2", "Italic", "GS1", "DataBar"],
             name => Assert.DoesNotContain(name, PrinterTools.ServerInstructions, StringComparison.OrdinalIgnoreCase));
         // The pruned schema is still the schema of the print tool.
-        Assert.Contains("\"useLegacyMode\"", tools);
+        Assert.Contains("\"preserveAspectRatio\"", tools);
         Assert.Contains("\"separatorLength\"", tools);
+    }
+
+    // The image options that a caller can use: the size and the aspect ratio. The server picks the image command.
+    [Fact]
+    public async Task ToolsList_ImageOptions_ListsNoUseLegacyModeAndNoHighDensity()
+    {
+        var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
+        var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == PrinterTools.PrintName);
+        var imageOptions = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties")
+            .GetProperty("imageOptions").GetProperty("properties");
+
+        Assert.Equal(["maxWidth", "maxHeight", "preserveAspectRatio"], imageOptions.EnumerateObject().Select(property => property.Name));
+        // The names in HiddenPrintFields are the JSON names of the model: a rename there leaves the property in the schema.
+        var modelNames = typeof(ImageOptions).GetProperties().Select(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name));
+        Assert.Equal(
+            ["maxWidth", "maxHeight", "preserveAspectRatio", HiddenPrintFields.UseLegacyMode, HiddenPrintFields.HighDensity],
+            modelNames);
     }
 
     // The schema lists the names that a caller can use: every member but the ones of no effect.
@@ -273,19 +382,6 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
 
         Assert.True(status == HttpStatusCode.OK, body);
         Assert.Equal(1, (await printer.NextJobAsync()).AsSpan().Count(expected));
-    }
-
-    // highDensity stays in the schema: it is read outside legacy mode. The text says that it does nothing in the default mode.
-    [Fact]
-    public async Task ToolsList_HighDensity_SaysWhenItIsRead()
-    {
-        var tools = (await _client.McpAsync("tools/list")).GetProperty("tools");
-        var print = tools.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == PrinterTools.PrintName);
-        var density = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties")
-            .GetProperty("imageOptions").GetProperty("properties").GetProperty("highDensity").GetProperty("description").GetString();
-
-        Assert.StartsWith("Only read when useLegacyMode is false", density);
-        Assert.Contains("No effect in legacy mode, the default.", density);
     }
 
     // feedLinesAfterPrint feeds lines (owner decision of 2026-10-06). The text says so, with the height of one line.
