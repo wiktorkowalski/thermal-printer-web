@@ -172,10 +172,11 @@ public sealed class ReprintWideBarcodeTests
         var id = await StoreAsync(wired, ReceiptBlocks);
 
         var (_, before) = await client.SendJsonAsync(HttpMethod.Get, $"{TestHttp.PrintUrl}/jobs/{id}");
-        await ReprintAsync(client, id);
+        var (reprintStatus, reprintBody) = await ReprintAsync(client, id);
         await wired.JournalIdleAsync();
         var (status, after) = await client.SendJsonAsync(HttpMethod.Get, $"{TestHttp.PrintUrl}/jobs/{id}");
 
+        Assert.True(reprintStatus == HttpStatusCode.OK, reprintBody);
         Assert.True(status == HttpStatusCode.OK, after);
         Assert.Equal(before, after);
         var read = JsonDocument.Parse(after).RootElement;
@@ -203,6 +204,25 @@ public sealed class ReprintWideBarcodeTests
         Assert.Equal(reason, Error(body));
         Assert.Equal($"Not printed: {reason}", answer);
         Assert.Empty(printer.Jobs);
+    }
+
+    // A new print that got the 400 stores its blocks. Its reprint is a reprint like any other: the job without the barcode.
+    // The caller can send that job as a new print, so no limit is passed.
+    [Fact]
+    public async Task Reprint_RowOfANewPrintThatGotThe400_SendsTheJobWithoutTheBarcode()
+    {
+        await using var printer = new WirePrinter();
+        await using var wired = new LoopbackPrinterApp(printer.Port);
+        var client = wired.CreateClient();
+        var (refused, _) = await client.SendJsonAsync(HttpMethod.Post, TestHttp.PrintUrl, $$"""{"content":{{ReceiptBlocks}}}""");
+        var row = Assert.Single(await wired.JournalRowsAsync());
+
+        var (status, body) = await ReprintAsync(client, row.Id);
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused);
+        Assert.Equal(JobResult.Validation, row.Result);
+        Assert.True(status == HttpStatusCode.OK, body);
+        Assert.Equal(GoldenReprint, await printer.NextJobAsync());
     }
 
     // No field of a request turns a new print into a reprint: the flag comes from the journal trace only.
