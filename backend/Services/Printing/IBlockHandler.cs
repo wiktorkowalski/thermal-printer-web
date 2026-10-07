@@ -18,6 +18,13 @@ internal sealed class BlockContext(EPSON emitter, PrintOptions? options)
     // The module of the last GS w of the job, in dots. The command holds until ESC @: a Barcode block with no width prints with it.
     public int? BarModuleDots { get; set; }
 
+    // The job is a reprint of a stored job. PrinterService sets it from the journal trace of the request: no caller field sets it.
+    // A reprint leaves out a barcode that is wider than the paper, as the printer did at the first print. A new print rejects it.
+    public bool IsReprint { get; init; }
+
+    // The Barcode blocks that a reprint left out.
+    public int SkippedBarcodes { get; set; }
+
     // The empty lines at the end of the blocks so far (CutFeed.TrailingLinesAfter). PrinterService sets it after each block.
     public int TrailingFeedLines { get; set; }
 

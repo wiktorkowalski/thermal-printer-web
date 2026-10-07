@@ -38,6 +38,14 @@ internal sealed class BarcodeBlockHandler : IBlockHandler
         var countedDots = moduleDots ?? ctx.BarModuleDots ?? BarcodeWidth.UnsetDots;
         if (BarcodeWidth.Dots(opts.Type, item.Content, countedDots) is { } dots && dots > BarcodeWidth.MaxDots)
         {
+            // A stored job from before the width rule printed without this barcode: its reprint does the same.
+            // The block sends no setting, no bars and no caption and counts no paper. Every other check of the block ran before this line.
+            if (ctx.IsReprint)
+            {
+                ctx.SkippedBarcodes++;
+                return Task.CompletedTask;
+            }
+
             // Thin is the narrowest width that the API has. It also helps a block with no width that got a wider module from the block before it.
             var fix = countedDots > BarcodeWidth.ThinDots
                 ? "use barcodeOptions.width Thin or shorter content"

@@ -184,7 +184,9 @@ internal sealed class PrinterService(
         }
 
         var e = new EPSON();
-        var ctx = new BlockContext(e, options);
+        // Only PrintJobReprinter sets ReprintOf, after it read the job from the journal.
+        var reprintOf = PrintJobTrace.Current?.ReprintOf;
+        var ctx = new BlockContext(e, options) { IsReprint = reprintOf is not null };
 
         // ESC @ first: the job starts from the power-on state, whatever the job before left
         // (line spacing, text size, barcode and QR settings). It also resets the code page,
@@ -231,6 +233,10 @@ internal sealed class PrinterService(
         // Count only: the content is caller input and the endpoint is public.
         if (ctx.ReplacedCharacters > 0)
             logger.LogInformation("Replaced {Count} unprintable character(s) with '?'", ctx.ReplacedCharacters);
+
+        // The id of the first job and a count: no block content. Not "JobId": the log scope of the request has that key for the new row.
+        if (ctx.SkippedBarcodes > 0)
+            logger.LogInformation("Reprint of job {ReprintOf}: left out {Count} barcode(s) wider than the paper", reprintOf, ctx.SkippedBarcodes);
 
         if (options?.AutoCut != false && !ctx.HasCut)
         {
