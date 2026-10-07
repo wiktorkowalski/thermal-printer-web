@@ -67,7 +67,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     [InlineData("reprint_job", "id,source")]
     [InlineData("delete_job", "id,confirm")]
     [InlineData("delete_jobs", "source,from,to,confirm")]
-    [InlineData("print", "content,options,source")]
+    [InlineData("print", "content,text,align,options,source")]
     [InlineData("print_note", "title,message,imageBase64,source")]
     [InlineData("beep", "count,duration,mode")]
     [InlineData("get_status", "")]
@@ -236,11 +236,11 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
 
     [Theory]
     // Wrong names: the caller guessed before it read the schema (#37).
-    [InlineData("print", $$$"""{"text":"{{{Secret}}}"}""", "'content' is missing")]
-    [InlineData("print", $$$"""{"title":"{{{Secret}}}","message":"m"}""", "'content' is missing")]
-    [InlineData("print", "{}", "'content' is missing")]
-    [InlineData("print", null, "'content' is missing")]
-    [InlineData("print", """{"content":null}""", "'content' is missing")]
+    [InlineData("print", $$$"""{"body":"{{{Secret}}}"}""", "'content' or 'text' is missing")]
+    [InlineData("print", $$$"""{"title":"{{{Secret}}}","message":"m"}""", "'content' or 'text' is missing")]
+    [InlineData("print", "{}", "'content' or 'text' is missing")]
+    [InlineData("print", null, "'content' or 'text' is missing")]
+    [InlineData("print", """{"content":null}""", "'content' or 'text' is missing")]
     [InlineData("print_note", $$$"""{"content":[{"type":"Text","content":"{{{Secret}}}"}]}""", "'title' and 'message' are missing")]
     [InlineData("print_note", $$$"""{"text":"{{{Secret}}}"}""", "'title' and 'message' are missing")]
     [InlineData("print_note", $$$"""{"title":"{{{Secret}}}"}""", "'message' is missing")]
@@ -293,7 +293,7 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
     [Fact]
     public async Task ToolsCall_PrintWrongShape_PointsToPrintNote()
     {
-        var (_, text) = await _client.CallToolAsync("print", """{"text":"hello"}""");
+        var (_, text) = await _client.CallToolAsync("print", """{"message":"hello"}""");
 
         Assert.EndsWith($"For a plain note use print_note: {PrinterTools.PrintNoteExample}", text);
     }

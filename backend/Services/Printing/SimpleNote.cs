@@ -39,9 +39,9 @@ internal static class SimpleNote
     {
         List<PrintContent> content =
         [
-            Text(WordWrap.Wrap(name, HeaderColumns), PrintStyle.Bold, Alignment.Center),
+            Text(WordWrap.Wrap(name, HeaderColumns), Alignment.Center, PrintStyle.Bold),
             Separator(),
-            Text(WordWrap.Wrap(message, BodyColumns), PrintStyle.FontB, Alignment.Center),
+            Text(WordWrap.Wrap(message, BodyColumns), Alignment.Center, PrintStyle.FontB),
             Separator()
         ];
 
@@ -66,17 +66,19 @@ internal static class SimpleNote
     internal static string DateText(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);
 
     // The last text line of a strip in the house style: the date line here, the signature line in template mode.
-    internal static PrintContent DateLine(string text) => Text(text, PrintStyle.FontB, Alignment.Right);
+    internal static PrintContent DateLine(string text) => Text(text, Alignment.Right, PrintStyle.FontB);
 
-    private static PrintContent Separator()
-        => new() { Type = ContentType.Separator, SeparatorChar = "=", SeparatorLength = SeparatorLength };
+    // Also the rule of text mode (StripMarkup).
+    internal static PrintContent Separator(string character = "=")
+        => new() { Type = ContentType.Separator, SeparatorChar = character, SeparatorLength = SeparatorLength };
 
-    private static PrintContent Text(string text, PrintStyle style, Alignment alignment) => new()
+    // One text line of the style. Also the lines of text mode (StripMarkup).
+    internal static PrintContent Text(string text, Alignment alignment, params PrintStyle[] styles) => new()
     {
         Type = ContentType.Text,
         Content = text,
         Alignment = alignment,
-        Style = [style],
+        Style = [.. styles],
         Size = new TextSize { Width = Width, Height = Height }
     };
 }

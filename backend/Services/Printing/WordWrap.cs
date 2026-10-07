@@ -6,12 +6,17 @@ namespace ThermalPrinterWeb.Services.Printing;
 // The one word wrap of the server: simple mode (SimpleNote) and a Text block with "wrap": true (issue #55).
 internal static class WordWrap
 {
+    // "-", "->", "(": a word of this length at most can be kept with the word before it.
+    private const int MaxPunctuationLength = 2;
+
     private static readonly Encoding DefaultEncoding = CodePages.GetEncoding(CodePages.DefaultName);
 
     // The printer wraps in the middle of a word. This breaks a line at a space; a word longer than
     // the line breaks at the column limit. The line breaks of the caller stay, and a line that fits is not changed.
     // The columns are those of the default code page: a job with another code page can get a line over the limit.
-    internal static string Wrap(string text, int columns)
+    // keepPunctuation (text mode, issue #53): a word of 1 or 2 punctuation characters does not start a line that the wrap makes;
+    // the word before it goes to the new line with it. Off for simple mode and "wrap": true: their bytes do not change.
+    internal static string Wrap(string text, int columns, bool keepPunctuation = false)
     {
         // The request body can hold 30 MB of text. A text over the limit of a Text block is not read here:
         // the block is rejected for its length, before any work on the text.
@@ -26,13 +31,13 @@ internal static class WordWrap
             if (!first)
                 wrapped.Append('\n');
             first = false;
-            AppendWrapped(wrapped, line, columns);
+            AppendWrapped(wrapped, line, columns, keepPunctuation);
         }
 
         return wrapped.ToString();
     }
 
-    private static void AppendWrapped(StringBuilder wrapped, ReadOnlySpan<char> line, int columns)
+    private static void AppendWrapped(StringBuilder wrapped, ReadOnlySpan<char> line, int columns, bool keepPunctuation)
     {
         var width = 0;
         var at = 0;
@@ -56,7 +61,8 @@ internal static class WordWrap
 
             // The spaces at a break are not printed. Spaces at the start of a line go too when the word does not fit after them.
             var wordColumns = ColumnsOf(word);
-            if (width + gap.Length + wordColumns > columns)
+            if (width + gap.Length + wordColumns > columns
+                || (keepPunctuation && width > 0 && PunctuationWouldStartALine(line[at..], width + gap.Length + wordColumns, wordColumns, columns)))
             {
                 if (width > 0)
                     wrapped.Append('\n');
@@ -89,6 +95,30 @@ internal static class WordWrap
                 width += runeColumns;
             }
         }
+    }
+
+    // True when the word after this one is 1 or 2 punctuation characters that do not fit in the line and do fit after this word in a new line.
+    // It reads at most the spaces and 3 characters of the rest.
+    private static bool PunctuationWouldStartALine(ReadOnlySpan<char> rest, int widthWithWord, int wordColumns, int columns)
+    {
+        var start = 0;
+        while (start < rest.Length && IsSpace(rest[start]))
+            start++;
+        var end = start;
+        while (end < rest.Length && end - start <= MaxPunctuationLength && !IsSpace(rest[end]))
+            end++;
+
+        var next = rest[start..end];
+        if (next.IsEmpty || next.Length > MaxPunctuationLength)
+            return false;
+        foreach (var character in next)
+        {
+            if (!char.IsPunctuation(character) && !char.IsSymbol(character))
+                return false;
+        }
+
+        var tail = start + ColumnsOf(next);
+        return widthWithWord + tail > columns && wordColumns + tail <= columns;
     }
 
     private static bool IsSpace(char character) => character is ' ' or '\t';

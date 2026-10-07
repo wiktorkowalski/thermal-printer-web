@@ -10,6 +10,8 @@ namespace ThermalPrinterWeb.Controllers;
 [Route("api/[controller]")]
 public class PrinterController(IPrinterService printerService, PrintJobLog jobLog) : ControllerBase
 {
+    internal const string NoJobError = "Request must have Content array, Text or both Name and Message";
+
     internal static readonly string InvalidModeError = $"mode must be {SignalCommand.ModeNames}";
 
     [HttpPost]
@@ -23,7 +25,22 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         List<PrintContent>? content;
         PrintResult result;
 
-        if (request.Content != null && request.Content.Count > 0)
+        if (!string.IsNullOrEmpty(request.Text))
+        {
+            if (HasAnotherMode(request))
+                return Reject(request, StripMarkup.ConflictError);
+            if (!StripMarkup.TryParseAlign(request.Align, out var align))
+                return Reject(request, StripMarkup.AlignError);
+
+            var compiled = StripMarkup.Compile(request.Text, align);
+            // Spaces only: no line to print. Without this the job is an empty strip and a success.
+            if (compiled.Count == 0)
+                return Reject(request, NoJobError);
+
+            // As template mode: options.sign adds the signature line after the last line of the text.
+            (result, content) = await signature.PrintAsync(compiled, request.Options);
+        }
+        else if (request.Content != null && request.Content.Count > 0)
         {
             // Template mode: options.sign adds the signature line. The journal gets the blocks that SignatureLine gives back.
             (result, content) = await signature.PrintAsync(request.Content, request.Options);
@@ -36,15 +53,28 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
         }
         else
         {
-            // No job to send, but the caller is known: the same line, so a broken client shows up by name.
-            var rejected = PrintResult.Invalid("Request must have Content array or both Name and Message");
-            jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected, content: null, request.Options);
-            return BadRequest(new PrintResponse(false, rejected.Error, PrintResponse.ValidationType));
+            return Reject(request, NoJobError);
         }
 
         jobLog.Write(PrintJobLog.HttpTransport, request.Source, result, content, request.Options);
 
         return this.ToResponse(result);
+    }
+
+    // Text mode goes alone: a field of another mode would not be printed, and the caller would not know.
+    private static bool HasAnotherMode(PrintRequest request)
+        => request.Content is { Count: > 0 }
+            || !string.IsNullOrEmpty(request.Name)
+            || !string.IsNullOrEmpty(request.Message)
+            || !string.IsNullOrEmpty(request.ImageBase64);
+
+    // No job to send, but the caller is known: the same line, so a broken client shows up by name.
+    // The error is a fixed text: no caller content.
+    private BadRequestObjectResult Reject(PrintRequest request, string error)
+    {
+        var rejected = PrintResult.Invalid(error);
+        jobLog.Write(PrintJobLog.HttpTransport, request.Source, rejected, content: null, request.Options);
+        return BadRequest(new PrintResponse(false, rejected.Error, PrintResponse.ValidationType));
     }
 
     [HttpGet("status")]

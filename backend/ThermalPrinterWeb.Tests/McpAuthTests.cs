@@ -229,7 +229,7 @@ public sealed class McpAuthTests
 
         // Accepted: a print, and a call that the argument filter rejects (also a journal row).
         var (isError, printed) = await client.CallToolAsync("print", TestHttp.PrintJson);
-        var (_, wrongShape) = await client.CallToolAsync("print", """{"text":"x"}""");
+        var (_, wrongShape) = await client.CallToolAsync("print", """{"body":"x"}""");
         // A client that sends the key to the open HTTP API too.
         var (http, httpBody) = await client.SendJsonAsync(HttpMethod.Post, PrintUrl, TestHttp.PrintJson, authorization: TestHttp.McpAuthorization);
         // Rejected: a wrong key, and the right key in the wrong form.

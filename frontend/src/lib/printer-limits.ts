@@ -6,6 +6,9 @@
 export const TEXT_MAX_LENGTH = 10_000;
 export const TEXT_MAX_LINES = 500;
 
+// backend/Services/Printing/StripMarkup.cs: MaxLength (the `text` field of text mode; the web UI does not send it)
+export const TEXT_MODE_MAX_LENGTH = TEXT_MAX_LENGTH;
+
 // backend/Models/TextSize.cs: Min, Max (the width and the height multiplier of a text)
 export const TEXT_SIZE_MIN = 1;
 export const TEXT_SIZE_MAX = 8;

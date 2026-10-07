@@ -28,7 +28,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # BarcodeWidth, PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand, CutFeed, SignatureLine
+│   │   └── Printing/           # BarcodeWidth, PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, StripMarkup (text mode), WordWrap, SignalCommand, CutFeed, SignatureLine
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -66,7 +66,7 @@ Located in `backend/` directory.
 **Core Components**:
 - `backend/Program.cs` - Entry point, configures services and middleware, sets up CORS for React frontend (dev only)
 - `backend/Controllers/PrinterController.cs` - REST API:
-  - `POST /api/printer` - Handles both simple printing (name + message) and template printing (content array)
+  - `POST /api/printer` - Handles simple printing (name + message), template printing (content array) and text mode (text with line markers)
   - `GET /api/printer/status` - Printer readiness
   - `POST /api/printer/beep` - Sounds the buzzer or flashes the error light (see Signals)
 - `backend/Controllers/PrintJobsController.cs` - the print journal over HTTP (see Journal):
@@ -186,7 +186,7 @@ The Dockerfile (.NET `sdk:10.0` and `aspnet:10.0` images):
 
 ## Print API
 
-The `POST /api/printer` endpoint accepts print jobs in two modes:
+The `POST /api/printer` endpoint accepts print jobs in three modes:
 
 **Simple mode** (name + message):
 ```json
@@ -198,7 +198,12 @@ The `POST /api/printer` endpoint accepts print jobs in two modes:
 { "content": [...], "options": {...} }
 ```
 
-Both modes take an optional `source`: a short name of the caller, for the log and the journal. It is not printed.
+**Text mode** (plain text with line markers; see Text mode):
+```json
+{ "text": "# TITLE\n===\nProse as it is.\n[ ] step", "align": "Left", "options": {...} }
+```
+
+Every mode takes an optional `source`: a short name of the caller, for the log and the journal. It is not printed. A request with no mode is a 400: `Request must have Content array, Text or both Name and Message` (`PrinterController.NoJobError`).
 
 **Simple mode prints the house style** (`Services/Printing/SimpleNote.cs`; the MCP tool `print_note` builds the same blocks):
 
@@ -240,6 +245,39 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 - Only a Text block reads the flag. A Separator does not wrap.
 - Journal: `Blocks` holds the block as sent (the flag, the text with no break of the server), so a reprint wraps again. `PlainText`, `Title` and the search text are the text as sent too. Simple mode is different: its blocks are built wrapped, so its stored text is the text on the paper.
 - The web editor has no control for the flag. It keeps the flag of an imported template; the paper and a tray thumbnail show such a text with a break in the middle of a word, and the inspector says "The printer breaks the line mid-word". The checks of the editor count the text as sent, so such a block near a limit can pass the editor and get a 400 from the server.
+
+**Text mode** (issue #53, `Services/Printing/StripMarkup.cs`): the caller sends the strip as plain text in `text`. `StripMarkup.Compile` makes the blocks of the house style from it; the blocks go through `PrinterService.PrintAsync` like every job.
+- A marker is read at the start of a line only. A line that fits no marker is body text: no line is a syntax error.
+
+| Line | Block | Style, size 2x3 | Alignment | Characters per line |
+|------|-------|-----------------|-----------|---------------------|
+| `# text` | Text | Bold (Font A) | Center | 24 |
+| `## text`, or the whole line `**text**` | Text | FontB, Bold | `align` | 32 |
+| The whole line `==text==` | Text | FontB, ReverseMode | `align` | 32 |
+| 3 or more `=`, or 3 or more `-`, and no other character | Separator of that character, 48 long, 1x1 | | Center | |
+| `- `, `* `, `1. `, `1) ` (1 to 3 digits), `[ ] `, `[x] `, or a bullet then a check box (`- [ ] `), then text | Text | FontB | Left | 32, hanging indent |
+| A line that starts with a space or a tab | Text | FontB | Left | 32, hanging indent |
+| `qr: data` (letter case aside) | QRCode with the default options; the data is not wrapped | | Center | |
+| Empty line, or spaces only | LineFeed of 1 line | | | |
+| `\` then text | Text: the rest of the line with no marker read (`\# text` prints `# text`). A line of `\` alone is an empty line. | FontB | `align` | 32 |
+| Any other line | Text | FontB | `align` | 32 |
+
+- A marker ends with a space: a tab or another Unicode space after `#` or `qr:` makes the line body text. A marker needs text after it: `- ` alone is the body text `-`.
+- A whole-line fence holds no fence inside and no third fence character at an end: `**a** and **b**` and `=== title ===` are body text.
+- `align` is `Left`, `Center` or `Right`, letter case aside; default Center (owner decision). Any other text is a 400: `align must be Left, Center or Right`. It moves the body lines only. Without `text` it is not read.
+- `text` goes alone. With a `content` array that holds a block, `name`, `message` or `imageBase64` the answer is a 400: `text cannot go with content, name, message or imageBase64: send text alone`. An empty `text` is no text: the other modes apply. A `text` of spaces, tabs and line breaks that makes no block is a 400 with the text of a request with no mode (MCP: `'content' or 'text' is missing`): it would print an empty strip.
+- The server wraps every Text line with `WordWrap.Wrap`, as simple mode does, with one more rule (`keepPunctuation`): a word of 1 or 2 punctuation characters (`-`, `->`) does not start a line that the wrap makes; the word before it goes to the new line too (exception: that word is short punctuation too; it then starts the line). Simple mode and `"wrap": true` do not use this rule: their bytes do not change.
+- Hanging indent: each line that the wrap adds starts under the text of the item (after the indent and the marker). An indent with its marker over 16 columns (`StripMarkup.MaxHangColumns`) gets no hanging indent. A tab in the indent is one space.
+- Spaces at the end of a line are not printed. The line break at the end of the text adds no line. Every line ending of the encoder counts (CR, CRLF, LF, FF, NEL, LS, PS).
+- **One line of the text is one block, in order.** So `Block N` in an error is line N + 1 of the text, and the block limit of 500 is a limit of 500 lines (`block count 501 is over the limit of 500`). The compile stops after block 501 (502 when an empty line comes right before it): a text of 10,000 line breaks makes 501 blocks, and the count in the error is that stop, not the line count of the text. So the journal row of the rejected job stays small. No error text repeats caller content.
+- The limits of a Text block (10,000 characters, 500 lines) count one line of the text after the wrap, with the hanging indent. The error has the plain text (`text length N`, `text line count N`) and N is not the number that the caller sent: one word of 10,000 characters is `text length 10312`; a list item with an indent of 16 columns grows up to 2.8 times. Such a line is one paragraph of over 3,600 characters.
+- Limit: 10,000 characters (`StripMarkup.MaxLength`, the limit of a Text block). A longer text is not compiled: it goes to one Text block as it is, and that block is rejected for its length (`Block 0 (Text): text length N is over the limit of 10000`). So the compile reads at most 10,000 characters, each a fixed number of times, with no regex and no recursion. Measured (compile and document build, 14 worst-case texts at the limit): 40 ms at most, 15 ms or less after the first call.
+- The markup makes Text, Separator, LineFeed and QRCode blocks only. No marker makes an Image, a Barcode, a Signal, a Cut or a CodePage block, and none reads a file, a URL or the journal. For those blocks use template mode. `options` apply as in template mode (auto-cut, feed before the cut, code page).
+- No marker adds a date or a signature. `options.sign` does, as in template mode (see Signature line): the line comes after the last line of the text, so `Block N` is still line N + 1. The line is one block: with `options.sign` a text holds 499 lines. Over HTTP and in `print` the text path calls `SignatureLine.PrintAsync`. The columns are those of the default code page, as for `wrap`.
+- Journal: `Request` holds the text as it came. `Blocks` holds the compiled blocks, so `GET /jobs/{id}`, the tray and a reprint need no compile: a reprint sends the stored blocks. `Title`, `PlainText` and the search text are the text as it is on the paper (wrapped), as in simple mode. The transport is `http` or `mcp:print`: no new value.
+- Papercut ledger: `# PAPERCUT` as the first line is the header of a papercut strip. A subject on the header line (`# PAPERCUT: text`) is cut at the first wrap of the headline (24 characters per line).
+- Not in text mode (issue #53, "Not solved"): columns, a size other than 2x3, images, barcodes, underline, a style inside a line.
+- `StripMarkupTests` pins the table, the limits, the bytes (the same as the same blocks in template mode), the journal row and the ledger.
 
 **Alignment**: Left, Center (default), Right
 
@@ -299,7 +337,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
   - A row with no field (no `options`, or `"feedLinesAfterPrint":null`) that ends with a LineFeed block of 3 lines keeps its bytes: simple mode, `print_note`, the house style.
   - A row with no field that ends with text printed with the cut command alone. Its reprint now feeds 3 lines and its new row counts 87 dots more (accepted by the owner).
 
-**Signature line**: `"options": { "sign": "Claude" }` in a template-mode job or an MCP `print` call (issue #54). The server adds one last text line `2026-10-07 * Claude`: the date, ` * `, the name.
+**Signature line**: `"options": { "sign": "Claude" }` in a template-mode job, a text-mode job or an MCP `print` call (issue #54). The server adds one last text line `2026-10-07 * Claude`: the date, ` * `, the name.
 - Opt-in. A job with no `sign` (left out, `null`, empty, or white space only: `string.IsNullOrWhiteSpace`, so also a lone tab or line break) sends the bytes from before the field. The name prints as sent: the server does not trim it. `SignatureLineTests` pins these bytes. The issue asks for the default `Claude` in a text mode (issue #53): no code has that default.
 - Style: the date line of simple mode (Font B, size 2x3, Right). One builder makes both lines (`SimpleNote.DateLine`).
 - Date: `SimpleNote.Today`, the clock and the zone of simple mode (`Europe/Warsaw`, UTC when the host has no such zone). The caller sends no date.
@@ -469,6 +507,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | `options.feedLinesAfterPrint` | 0-255 lines; the paper limit counts them. Not sent: 3 lines less the LineFeed lines right before the cut (not a limit; it counts as paper) | `PrinterService.MaxFeedBeforeCut`, `CutFeed.DefaultLines` |
 | `options.sign` | 19 columns, one line, no control character | `SignatureLine.MaxSignColumns` |
 | Text block | 10,000 characters, 500 lines; with `wrap` both count the text after the wrap | `TextBlockHandler.MaxLength`, `MaxLines` |
+| `text` of text mode | 10,000 characters; 500 lines (one line is one block) | `StripMarkup.MaxLength`, `PrinterService.MaxBlocks` |
 | Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
 | LineFeed lines | 100 | `LineFeedBlockHandler.MaxLines` |
@@ -578,7 +617,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 |------|-----------|
 | `get_status` | none |
 | `print_note` | `title`, `message` (both needed), `imageBase64`, `source` |
-| `print` | `content` (needed), `options`, `source` |
+| `print` | `content` or `text` (one of them is needed), `align`, `options`, `source` |
 | `beep` | `count`, `duration` (1-9, default 1), `mode` (`Sound`, `Light` or `SoundAndLight`; default `Sound`) |
 | `list_jobs` | `limit` (1-20, default 10), `before`, `query` (2-100 characters: search) |
 | `get_job` | `id` (needed) |
@@ -590,6 +629,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
+- `print` takes `text` in place of `content`: text mode, the same compile as HTTP (see Text mode). `align` is read with `text` only. `content` and `text` in one call, or an `align` that is not a name, is a wrong-arguments answer; an empty `text` counts as not sent. The description holds the grammar (`PrinterTools.TextModeRule`) and a second example (`PrintTextExample`); `ServerInstructions` names the three ways to print. `StripMarkupTests` pins the numbers of these texts to the constants.
 - A Text block of `print` takes `"wrap": true` (see Text wrap). The `print` description and `ServerInstructions` say both things: without the flag a longer line wraps in the middle of a word, with the flag the server breaks the lines.
 - `print` takes `options.sign` (see Signature line). The `print` description and `ServerInstructions` hold `PrinterTools.SignRule`: set a name, the server adds the dated line, do not type a date line.
 - `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.` (N is the count after the clamp); a `mode` that is not a name is a wrong-arguments answer that lists the names.

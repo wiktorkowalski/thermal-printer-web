@@ -879,7 +879,7 @@ public sealed class PayloadErrorHttpTests(ClosedPortApp app) : IClassFixture<Clo
     {
         var body = await PostBadRequestAsync("{}");
 
-        Assert.Equal("Request must have Content array or both Name and Message", body.Error);
+        Assert.Equal(PrinterController.NoJobError, body.Error);
     }
 
     [Theory]
