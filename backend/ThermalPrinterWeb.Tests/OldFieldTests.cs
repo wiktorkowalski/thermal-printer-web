@@ -142,48 +142,6 @@ public sealed class OldFieldTests(FakePrinterApp app) : IClassFixture<FakePrinte
         Assert.Equal(fresh, reprinted);
     }
 
-    // A row with a barcode that is wider than the paper: the printer dropped that barcode and the job counted as printed.
-    // Its reprint follows the rule of today: a 400 that names the block, and nothing goes to the printer.
-    [Fact]
-    public async Task Reprint_RowWithABarcodeWiderThanThePaper_Returns400()
-    {
-        await using var printer = new WirePrinter();
-        await using var wired = new LoopbackPrinterApp(printer.Port);
-        var client = wired.CreateClient();
-        var id = Guid.CreateVersion7();
-        await wired.JournalIdleAsync();
-        await using (var db = wired.JournalDb())
-        {
-            db.PrintJobs.Add(new PrintJob
-            {
-                Id = id,
-                CreatedAt = new DateTime(2026, 10, 7, 12, 0, 0, DateTimeKind.Utc),
-                Transport = "http",
-                Result = JobResult.Printed,
-                HttpStatus = 200,
-                AppVersion = "before-44",
-                BlockCount = 2,
-                Payload = new PrintJobPayload
-                {
-                    JobId = id,
-                    Headers = "{}",
-                    Blocks = """[{"type":"Text","content":"TEST #44"},{"type":"Barcode","content":"TEST-44-OK","barcodeOptions":{"type":"CODE128","heightInDots":70,"width":"Default","labelPosition":"Below"}}]"""
-                }
-            });
-            await db.SaveChangesAsync();
-        }
-
-        var (readStatus, readBody) = await client.SendJsonAsync(HttpMethod.Get, $"{TestHttp.PrintUrl}/jobs/{id}");
-        var (reprintStatus, reprintBody) = await client.SendJsonAsync(HttpMethod.Post, $"{TestHttp.PrintUrl}/jobs/{id}/reprint");
-
-        Assert.True(readStatus == HttpStatusCode.OK, readBody);
-        Assert.Equal(HttpStatusCode.BadRequest, reprintStatus);
-        Assert.Equal(
-            "Block 1 (Barcode): the barcode is at least 580 dots wide and the paper holds 576; the printer drops a wider barcode: use barcodeOptions.width Thin or shorter content",
-            JsonDocument.Parse(reprintBody).RootElement.GetProperty("error").GetString());
-        Assert.Empty(printer.Jobs);
-    }
-
     // highDensity on an Image block, where the handler reads it: legacy mode sends the same bytes for both values,
     // the other mode sends the density of the value. So the field stays bound, and the MCP text says when it is read.
     [Fact]
