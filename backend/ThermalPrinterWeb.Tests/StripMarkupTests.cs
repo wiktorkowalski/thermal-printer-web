@@ -103,6 +103,10 @@ public sealed class StripMarkupTests
         { "", [] },
         // Every line ending of the encoder.
         { "a\r\nb\rc", [Body("a"), Body("b"), Body("c")] },
+        { "a\fb\u0085c\u2028d\u2029e", [Body("a"), Body("b"), Body("c"), Body("d"), Body("e")] },
+        // A last line of spaces with no line break after it is no line.
+        { "a\n  ", [Body("a")] },
+        { " \t ", [] },
         // Spaces at the end of a line are not printed.
         { "tekst   \t", [Body("tekst")] },
         // The escape: the rest of the line is body text.
@@ -121,6 +125,9 @@ public sealed class StripMarkupTests
         { "[x] gotowe", [Left("[x] gotowe")] },
         { "[X] gotowe", [Left("[X] gotowe")] },
         { "- [ ] krok", [Left("- [ ] krok")] },
+        { "- [x] gotowe", [Left("- [x] gotowe")] },
+        { "1. [ ] krok", [Left("1. [ ] krok")] },
+        { "1. [ ] aaaaaaaaaa bbbbbbbbbb cccccccccc", [Left("1. [ ] aaaaaaaaaa bbbbbbbbbb\n       cccccccccc")] },
         { "  - pod spodem", [Left("  - pod spodem")] },
         { "    wcięty wiersz", [Left("    wcięty wiersz")] },
         { "\twcięty tabulatorem", [Left(" wcięty tabulatorem")] },
@@ -144,6 +151,16 @@ public sealed class StripMarkupTests
         { "**", [Body("**")] },
         { "****", [Body("****")] },
         { "**a** i **b** dalej", [Body("**a** i **b** dalej")] },
+        // A fence inside the line, or one more fence character at an end: not a whole-line fence.
+        { "**a** i **b**", [Body("**a** i **b**")] },
+        { "**a**b**", [Body("**a**b**")] },
+        { "==a== b ==c==", [Body("==a== b ==c==")] },
+        { "=== TITLE ===", [Body("=== TITLE ===")] },
+        { "***x***", [Body("***x***")] },
+        // A marker ends with a space, not with a tab or another Unicode space.
+        { "#\ttytuł", [Body("#\ttytuł")] },
+        { "qr:\tdane", [Body("qr:\tdane")] },
+        { "- ", [Body("-")] },
         { "-- x", [Body("-- x")] },
         { "-x", [Body("-x")] },
         { "= = =", [Body("= = =")] },
@@ -242,6 +259,8 @@ public sealed class StripMarkupTests
     // Three characters are a word, and a letter is no punctuation.
     [InlineData("aaaa bbbb ... c", 10, "aaaa bbbb\n... c")]
     [InlineData("aaaa bbbb i cc", 10, "aaaa bbbb\ni cc")]
+    // The exception: the word before is short punctuation too. It goes to the new line and starts it.
+    [InlineData("aaaaa b - -", 9, "aaaaa b\n- -")]
     public void Wrap_KeepPunctuation_DoesNotStartALineWithShortPunctuation(string text, int columns, string expected)
     {
         Assert.Equal(expected, WordWrap.Wrap(text, columns, keepPunctuation: true));
@@ -305,11 +324,15 @@ public sealed class StripMarkupTests
     [Fact]
     public async Task Compile_TextOneCharacterOverTheLimit_IsRejected()
     {
+        // One word: each break of the wrap adds a character, and the Text block counts the text after the wrap.
         var atLimit = await NewService().PrintAsync(StripMarkup.Compile(new string('x', StripMarkup.MaxLength - 400)));
+        var wrappedOver = await NewService().PrintAsync(StripMarkup.Compile(new string('x', StripMarkup.MaxLength)));
         var over = await NewService().PrintAsync(StripMarkup.Compile(new string('x', StripMarkup.MaxLength + 1)));
 
         Assert.Equal(TextBlockHandler.MaxLength, StripMarkup.MaxLength);
         Assert.Equal(PrintResult.Ok, atLimit);
+        // The number is not the length that the caller sent: CLAUDE.md and the tool text say so.
+        Assert.Equal(PrintResult.Invalid($"Block 0 (Text): text length 10312 is over the limit of {StripMarkup.MaxLength}"), wrappedOver);
         Assert.Equal(PrintResult.Invalid($"Block 0 (Text): text length {StripMarkup.MaxLength + 1} is over the limit of {StripMarkup.MaxLength}"), over);
     }
 
@@ -324,6 +347,20 @@ public sealed class StripMarkupTests
 
         Assert.Equal(PrintResult.Ok, fits);
         Assert.Equal(PrintResult.Invalid($"block count {PrinterService.MaxBlocks + 1} is over the limit of {PrinterService.MaxBlocks}"), over);
+    }
+
+    // The compile stops one block over the limit: the journal row of the rejected job stays small.
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("a\n")]
+    public async Task Compile_TextOfTenThousandLines_StopsOneBlockOverTheLimit(string line)
+    {
+        var blocks = StripMarkup.Compile(string.Concat(Enumerable.Repeat(line, StripMarkup.MaxLength / line.Length)));
+
+        var result = await NewService().PrintAsync(blocks);
+
+        Assert.Equal(PrinterService.MaxBlocks + 1, blocks.Count);
+        Assert.Equal(PrintResult.Invalid($"block count {PrinterService.MaxBlocks + 1} is over the limit of {PrinterService.MaxBlocks}"), result);
     }
 
     // An error names a block, and the block number is the line number less one.
@@ -448,7 +485,10 @@ public sealed class StripMarkupTests
         { Json(new { text = "x", align = "99" }), StripMarkup.AlignError },
         // An empty text is no text.
         { Json(new { text = "" }), PrinterController.NoJobError },
-        { Json(new { text = "", align = "left" }), PrinterController.NoJobError }
+        { Json(new { text = "", align = "left" }), PrinterController.NoJobError },
+        // Spaces only: no line to print, not an empty strip.
+        { Json(new { text = " " }), PrinterController.NoJobError },
+        { Json(new { text = " \t " }), PrinterController.NoJobError }
     };
 
     [Theory]
@@ -548,6 +588,8 @@ public sealed class StripMarkupTests
     [InlineData($$$"""{"text":"{{{Secret}}}","content":[{"type":"Text","content":"x"}]}""", "'content' and 'text' are both sent: send one of them")]
     [InlineData($$$"""{"text":"x","align":"{{{Secret}}}"}""", "'align' must be Left, Center or Right")]
     [InlineData("""{"text":""}""", "'content' or 'text' is missing")]
+    [InlineData("""{"text":" \t "}""", "'content' or 'text' is missing")]
+    [InlineData("""{"align":"left"}""", "'content' or 'text' is missing")]
     [InlineData($$$"""{"text":["{{{Secret}}}"]}""", "'text' has the wrong JSON type")]
     public async Task PrintTool_TextWithAWrongCall_AnswersWithTheCorrectShape(string arguments, string expectedProblem)
     {
@@ -603,12 +645,14 @@ public sealed class StripMarkupTests
         Assert.Contains($"a headline (Bold at {size}, {SimpleNote.HeaderColumns} characters per line, centered)", PrinterTools.TextModeRule);
         Assert.Contains($"FontB at {size}, {SimpleNote.BodyColumns} characters per line", PrinterTools.TextModeRule);
         Assert.Contains($"a line of {StripMarkup.MinRuleLength} or more '=' or of {StripMarkup.MinRuleLength} or more '-' a rule of {SimpleNote.SeparatorLength} characters", PrinterTools.TextModeRule);
-        Assert.Contains($"text holds at most {StripMarkup.MaxLength} characters.", PrinterTools.TextModeRule);
+        Assert.Contains($"text holds at most {StripMarkup.MaxLength} characters and {PrinterService.MaxBlocks} lines.", PrinterTools.TextModeRule);
+        Assert.Contains("counts that line with the line breaks that the server adds", PrinterTools.TextModeRule);
         Assert.Contains("'Block N' in an error is line N + 1 of text", PrinterTools.TextModeRule);
         Assert.Contains($"At most {StripMarkup.MaxLength} characters.", arguments.GetProperty("text").GetProperty("description").GetString());
         Assert.Contains(BlockEnums.Names<Alignment>(), arguments.GetProperty("align").GetProperty("description").GetString());
         // Text mode offers no sound and no light.
-        Assert.Contains("text makes no image, no barcode and no Signal block", PrinterTools.TextModeRule);
+        Assert.Contains("text never makes a sound or a light.", PrinterTools.TextModeRule);
+        Assert.DoesNotContain("Signal", PrinterTools.TextModeRule);
         Assert.Contains("""{"text":"# TITLE\n===\nProse as it is.\n[ ] step"}""", PrinterTools.ServerInstructions);
     }
 }

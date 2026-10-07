@@ -45,8 +45,9 @@ public static class PrinterTools
         + "a backslash at the start of a line prints the rest of the line as body text with no marker. "
         + "Every other line is body text: FontB at size 2x3, 32 characters per line, centered unless align is Left or Right. "
         + "A marker in the middle of a line is plain text, and no line is a syntax error. "
-        + "text holds at most 10000 characters. One line of text is one block, so 'Block N' in an error is line N + 1 of text. "
-        + "text makes no image, no barcode and no Signal block: use content for those. Send text or content, never both.";
+        + "text holds at most 10000 characters and 500 lines. One line of text is one block, so 'Block N' in an error is line N + 1 of text; "
+        + "a text length or a line count in such an error counts that line with the line breaks that the server adds. "
+        + "text makes no image and no barcode: use content for those. text never makes a sound or a light. Send text or content, never both.";
 
     internal const string SourceDescription =
         "Optional. Short name of the caller, for example 'claude-code'. It goes to the server log and the print journal; it is not printed.";
@@ -195,9 +196,12 @@ public static class PrinterTools
             if (content is { Count: > 0 })
                 throw new ToolArgumentException(PrintName, "'content' and 'text' are both sent: send one of them");
             if (!StripMarkup.TryParseAlign(align, out var bodyAlignment))
-                throw new ToolArgumentException(PrintName, $"'align' must be {BlockEnums.Names<Alignment>()}");
+                throw new ToolArgumentException(PrintName, $"'align' {StripMarkup.AlignProblem}");
 
+            // Spaces only: no line to print, so the text counts as missing.
             content = StripMarkup.Compile(text, bodyAlignment);
+            if (content.Count == 0)
+                content = null;
         }
 
         if (content is null)

@@ -32,6 +32,9 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
                 return Reject(request, StripMarkup.AlignError);
 
             content = StripMarkup.Compile(request.Text, align);
+            // Spaces only: no line to print. Without this the job is an empty strip and a success.
+            if (content.Count == 0)
+                return Reject(request, NoJobError);
         }
         else if (request.Content != null && request.Content.Count > 0)
         {

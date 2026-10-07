@@ -23,7 +23,12 @@ internal static class StripMarkup
 
     internal const string ConflictError = "text cannot go with content, name, message or imageBase64: send text alone";
 
-    internal static readonly string AlignError = $"align must be {BlockEnums.Names<Alignment>()}";
+    // "align must be Left, Center or Right": the same problem text over HTTP and in the MCP answer.
+    internal static readonly string AlignProblem = $"must be {BlockEnums.Names<Alignment>()}";
+    internal static readonly string AlignError = $"align {AlignProblem}";
+
+    // A space or a tab: the one meaning of "space" in the markup. Another Unicode space is text.
+    private static ReadOnlySpan<char> Blanks => [' ', '\t'];
 
     private const string HeaderMarker = "# ";
     private const string BoldMarker = "## ";
@@ -63,11 +68,16 @@ internal static class StripMarkup
         var pendingEmptyLine = false;
         foreach (var raw in text.AsSpan().EnumerateLines())
         {
+            // One block over the limit is enough for the print path to reject the job. A text of 10,000 line breaks
+            // must not make 10,000 blocks: the journal row of a rejected job holds its blocks.
+            if (blocks.Count > PrinterService.MaxBlocks)
+                break;
+
             // The empty line after the last line break of the text is not a line.
             if (pendingEmptyLine)
                 blocks.Add(EmptyLine());
 
-            var line = raw.TrimEnd([' ', '\t']);
+            var line = raw.TrimEnd(Blanks);
             pendingEmptyLine = line.IsEmpty;
             if (!pendingEmptyLine)
                 blocks.Add(CompileLine(line, align));
@@ -85,10 +95,10 @@ internal static class StripMarkup
             return line.Length == 1 ? EmptyLine() : Body(line[1..], align);
 
         if (line.StartsWith(HeaderMarker))
-            return SimpleNote.Text(Wrap(line[HeaderMarker.Length..].TrimStart(), SimpleNote.HeaderColumns), Alignment.Center, PrintStyle.Bold);
+            return SimpleNote.Text(Wrap(line[HeaderMarker.Length..].TrimStart(Blanks), SimpleNote.HeaderColumns), Alignment.Center, PrintStyle.Bold);
 
         if (line.StartsWith(BoldMarker))
-            return Body(line[BoldMarker.Length..].TrimStart(), align, PrintStyle.Bold);
+            return Body(line[BoldMarker.Length..].TrimStart(Blanks), align, PrintStyle.Bold);
 
         if (IsRule(line, '='))
             return SimpleNote.Separator("=");
@@ -101,7 +111,7 @@ internal static class StripMarkup
             return Body(reverse, align, PrintStyle.ReverseMode);
 
         if (line.StartsWith(QRCodeMarker, StringComparison.OrdinalIgnoreCase))
-            return new() { Type = ContentType.QRCode, Content = line[QRCodeMarker.Length..].TrimStart().ToString() };
+            return new() { Type = ContentType.QRCode, Content = line[QRCodeMarker.Length..].TrimStart(Blanks).ToString() };
 
         var hang = HangColumns(line);
         return hang > 0 ? Hanging(line, hang) : Body(line, align);
@@ -117,13 +127,18 @@ internal static class StripMarkup
         => line.Length >= MinRuleLength && !line.ContainsAnyExcept(character);
 
     // "**text**" or "==text==": the whole line, with text between the two fences.
+    // Not "**a** and **b**" and not "=== title ===": a line with a fence inside, or with one more fence character at an end, is body text.
     private static bool Fenced(ReadOnlySpan<char> line, string fence, out ReadOnlySpan<char> inner)
     {
         inner = default;
         if (line.Length <= 2 * fence.Length || !line.StartsWith(fence) || !line.EndsWith(fence))
             return false;
 
-        inner = line[fence.Length..^fence.Length].Trim([' ', '\t']);
+        inner = line[fence.Length..^fence.Length];
+        if (inner[0] == fence[0] || inner[^1] == fence[0] || inner.Contains(fence, StringComparison.Ordinal))
+            return false;
+
+        inner = inner.Trim(Blanks);
         return !inner.IsEmpty;
     }
 
@@ -162,7 +177,7 @@ internal static class StripMarkup
     {
         // A tab prints as a space.
         var prefix = line[..hang].ToString().Replace('\t', ' ');
-        var text = line[hang..].TrimStart([' ', '\t']);
+        var text = line[hang..].TrimStart(Blanks);
         if (hang > MaxHangColumns)
             return SimpleNote.Text(Wrap(string.Concat(prefix, text), SimpleNote.BodyColumns), Alignment.Left, PrintStyle.FontB);
 
