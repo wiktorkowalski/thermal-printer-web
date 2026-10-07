@@ -69,7 +69,7 @@ internal static class StripMarkup
         foreach (var raw in text.AsSpan().EnumerateLines())
         {
             // One block over the limit (two, with an empty line before it) is enough for the print path to reject the job. A text of 10,000 line breaks
-            // must not make 10,000 blocks: the journal row of a rejected job holds its blocks.
+            // must not make 10,000 blocks: the job is rejected for its count, and its journal row holds no blocks (PrintJobEntry.ToRow).
             if (blocks.Count > PrinterService.MaxBlocks)
                 break;
 
