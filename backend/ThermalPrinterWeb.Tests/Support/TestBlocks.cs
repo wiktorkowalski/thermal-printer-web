@@ -49,6 +49,10 @@ internal static class TestBlocks
         new ServiceCollection().AddLogging().AddPrinterBlockHandlers().BuildServiceProvider().GetServices<IBlockHandler>(),
         NoPrinter.Options);
 
+    // What a controller that is built by hand needs for its Print call.
+    public static SignatureLine NewSignature(IPrinterService printer, TimeProvider? clock = null)
+        => new(printer, clock ?? TimeProvider.System, NullLogger<SignatureLine>.Instance);
+
     // One job as the printer gets it.
     public static async Task<byte[]> JobBytesAsync(List<PrintContent> content, PrintOptions? options = null)
         => ByteSplicer.Combine([.. await NewService().BuildDocumentAsync(content, options)]);

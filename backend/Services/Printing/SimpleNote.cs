@@ -26,6 +26,8 @@ internal static class SimpleNote
     // The note ends with the default gap as a LineFeed block, so its Cut block adds no line (CutFeed).
     internal const int FeedLines = CutFeed.DefaultLines;
 
+    internal const string DateFormat = "yyyy-MM-dd";
+
     // The date on the strip is the date at the printer, not the UTC date of the container.
     private static readonly TimeZoneInfo StripZone =
         TimeZoneInfo.TryFindSystemTimeZoneById("Europe/Warsaw", out var zone) ? zone : TimeZoneInfo.Utc;
@@ -53,12 +55,18 @@ internal static class SimpleNote
             content.Add(Separator());
         }
 
-        content.Add(Text(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), PrintStyle.FontB, Alignment.Right));
+        content.Add(DateLine(DateText(date)));
         content.Add(new() { Type = ContentType.LineFeed, Lines = FeedLines });
         content.Add(new() { Type = ContentType.Cut });
 
         return content;
     }
+
+    // The date as it prints. The signature line of template mode starts with it (SignatureLine).
+    internal static string DateText(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);
+
+    // The last text line of a strip in the house style: the date line here, the signature line in template mode.
+    internal static PrintContent DateLine(string text) => Text(text, PrintStyle.FontB, Alignment.Right);
 
     private static PrintContent Separator()
         => new() { Type = ContentType.Separator, SeparatorChar = "=", SeparatorLength = SeparatorLength };
