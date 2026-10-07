@@ -62,6 +62,12 @@ public static class PrinterTools
         + "the lines of a LineFeed block right before the cut count toward the 3, so add no LineFeed block for the cut. "
         + "Set options.feedLinesAfterPrint only for another gap: that number of lines is added as sent, 0 adds none.";
 
+    // In ServerInstructions and in the print description. The 19 is SignatureLine.MaxSignColumns: a test pins it.
+    internal const string SignRule =
+        "For a signature set options.sign of " + PrintName + " to a name, for example {\"sign\":\"Claude\"}: "
+        + "the server adds the last text line \"yyyy-MM-dd * name\" with its own date, FontB with size 2x3 at the right, before the empty lines and the cut. "
+        + "So do not type a date line yourself. The name holds at most 19 characters. Without options.sign the server adds no line.";
+
     // In the print description. The numbers are BarcodeWidth: a test pins them.
     internal const string BarcodeWidthRule =
         "A Barcode wider than the paper (576 dots) rejects the document, because the printer drops such a barcode with no error: "
@@ -79,6 +85,7 @@ public static class PrinterTools
         + "House style: headline Bold with size 2x3 (24 characters per line), body FontB with size 2x3 (32 characters per line), "
         + $"a 48-character Separator between them; {PrintNoteName} prints this style and breaks the lines for you. "
         + $"{CutFeedRule} "
+        + $"{SignRule} "
         + "Polish letters print, emoji print as '?'. "
         + $"The printer has a buzzer and an error light: {BeepName} and a Signal block in {PrintName} use them. {SignalRule} "
         + $"The server keeps a journal of every print: {JournalTools.ListJobsName} lists or searches it, {JournalTools.GetJobName} reads one job, "
@@ -173,6 +180,7 @@ public static class PrinterTools
         + "or set \"wrap\":true on the Text block: then the server breaks each longer line at a space (a longer word breaks at the limit) and keeps each \\n. "
         + "Blocks are centered unless alignment says otherwise. The paper is cut after the last block unless options.autoCut is false. "
         + CutFeedRule + " "
+        + SignRule + " "
         + "Polish letters print; emoji print as '?'. "
         + "A control character in QRCode or Barcode content rejects the document; a QRCode takes \\n line breaks (CRLF counts as \\n). "
         + BarcodeWidthRule + " "
@@ -182,12 +190,12 @@ public static class PrinterTools
         + "No other block and no option makes a sound. " + SignalRule + " "
         + "Example: " + PrintExample)]
     public static async Task<string> PrintAsync(
-        IPrinterService printer,
+        SignatureLine signature,
         PrintJobLog jobLog,
         [Description("Ordered content blocks to print, top to bottom. Needed unless text is sent.")] List<PrintContent>? content = null,
         [Description("The strip as plain text with line markers, in place of content: '# ' headline, '## ' bold line, '===' rule, '[ ] ' step, 'qr: ' QR code; the server breaks the lines. At most 10000 characters.")] string? text = null,
         [Description("Optional, with text only: Left, Center or Right for the body lines. Default Center. Headline, rules and QR codes stay centered; list items stay at the left.")] string? align = null,
-        [Description("Optional print options: code page, line spacing, auto-cut, empty lines before a cut.")] PrintOptions? options = null,
+        [Description("Optional print options: code page, line spacing, auto-cut, empty lines before a cut, signature line.")] PrintOptions? options = null,
         [Description(SourceDescription)] string? source = null)
     {
         if (!string.IsNullOrEmpty(text))
@@ -207,8 +215,9 @@ public static class PrinterTools
         if (content is null)
             throw new ToolArgumentException(PrintName, "'content' or 'text' is missing");
 
-        var result = await printer.PrintAsync(content, options);
-        jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result, content, options);
+        // options.sign adds the signature line. The journal gets the blocks that SignatureLine gives back.
+        var (result, printed) = await signature.PrintAsync(content, options);
+        jobLog.Write(PrintJobLog.McpTransport(PrintName), source, result, printed, options);
         return Answer(result);
     }
 

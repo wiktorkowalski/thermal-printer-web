@@ -68,7 +68,7 @@ internal static class StripMarkup
         var pendingEmptyLine = false;
         foreach (var raw in text.AsSpan().EnumerateLines())
         {
-            // One block over the limit is enough for the print path to reject the job. A text of 10,000 line breaks
+            // One block over the limit (two, with an empty line before it) is enough for the print path to reject the job. A text of 10,000 line breaks
             // must not make 10,000 blocks: the journal row of a rejected job holds its blocks.
             if (blocks.Count > PrinterService.MaxBlocks)
                 break;

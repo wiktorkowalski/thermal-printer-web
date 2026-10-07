@@ -123,7 +123,8 @@ internal static class WordWrap
 
     private static bool IsSpace(char character) => character is ' ' or '\t';
 
-    private static int ColumnsOf(ReadOnlySpan<char> word)
+    // The columns of a text with no line break, in the default code page.
+    internal static int ColumnsOf(ReadOnlySpan<char> word)
     {
         var columns = 0;
         foreach (var rune in word.EnumerateRunes())

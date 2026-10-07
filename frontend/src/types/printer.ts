@@ -159,6 +159,12 @@ export interface PrintOptions {
    * the server keeps 3 empty lines before the cut and counts the LineFeed blocks right before it (backend/Services/Printing/CutFeed.cs).
    */
   feedLinesAfterPrint?: number | null;
+  /**
+   * A name, at most MAX_SIGN_COLUMNS characters on one line: the server adds the last text line "yyyy-MM-dd * name" with its own date
+   * (backend/Services/Printing/SignatureLine.cs). Left out, null or empty: no line. The editor does not send it: the date is the clock of the server.
+   * A stored job holds the line as a Text block in its blocks, so the tray and the journal page show it with no code for this field.
+   */
+  sign?: string | null;
 }
 
 /**

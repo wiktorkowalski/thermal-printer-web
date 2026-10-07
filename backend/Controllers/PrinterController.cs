@@ -20,9 +20,10 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status415UnsupportedMediaType)]
     [ProducesResponseType(typeof(PrintResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> Print([FromBody] PrintRequest request, [FromServices] TimeProvider clock)
+    public async Task<IActionResult> Print([FromBody] PrintRequest request, [FromServices] TimeProvider clock, [FromServices] SignatureLine signature)
     {
-        List<PrintContent> content;
+        List<PrintContent>? content;
+        PrintResult result;
 
         if (!string.IsNullOrEmpty(request.Text))
         {
@@ -31,25 +32,30 @@ public class PrinterController(IPrinterService printerService, PrintJobLog jobLo
             if (!StripMarkup.TryParseAlign(request.Align, out var align))
                 return Reject(request, StripMarkup.AlignError);
 
-            content = StripMarkup.Compile(request.Text, align);
+            var compiled = StripMarkup.Compile(request.Text, align);
             // Spaces only: no line to print. Without this the job is an empty strip and a success.
-            if (content.Count == 0)
+            if (compiled.Count == 0)
                 return Reject(request, NoJobError);
+
+            // As template mode: options.sign adds the signature line after the last line of the text.
+            (result, content) = await signature.PrintAsync(compiled, request.Options);
         }
         else if (request.Content != null && request.Content.Count > 0)
         {
-            content = request.Content;
+            // Template mode: options.sign adds the signature line. The journal gets the blocks that SignatureLine gives back.
+            (result, content) = await signature.PrintAsync(request.Content, request.Options);
         }
         else if (!string.IsNullOrEmpty(request.Name) && !string.IsNullOrEmpty(request.Message))
         {
+            // Simple mode has its date line: it does not read options.sign.
             content = SimpleNote.Build(request.Name, request.Message, SimpleNote.Today(clock), request.ImageBase64);
+            result = await printerService.PrintAsync(content, request.Options);
         }
         else
         {
             return Reject(request, NoJobError);
         }
 
-        var result = await printerService.PrintAsync(content, request.Options);
         jobLog.Write(PrintJobLog.HttpTransport, request.Source, result, content, request.Options);
 
         return this.ToResponse(result);

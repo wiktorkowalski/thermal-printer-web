@@ -68,6 +68,8 @@ export const MAX_FEED_BEFORE_CUT = 255;
 // the lines of the LineFeed blocks right before the cut count toward them (defaultFeedBeforeCut in lib/paper.ts).
 // The editor always sends a number, so this is its start value and the value of an imported file with no such field.
 export const DEFAULT_FEED_BEFORE_CUT = 3;
+// backend/Services/Printing/SignatureLine.cs: MaxSignColumns. The name in options.sign; the editor does not send the field.
+export const MAX_SIGN_COLUMNS = 19;
 export const MAX_LINE_SPACING = 255;
 export const MAX_REQUEST_BYTES = 30_000_000;
 

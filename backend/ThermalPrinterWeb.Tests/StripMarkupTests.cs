@@ -474,6 +474,30 @@ public sealed class StripMarkupTests
         Assert.Equal(3, job.Payload.Blocks!.Split("\"alignment\":\"Left\"").Length - 1);
     }
 
+    // options.sign (#54) works as in template mode: one line after the last line of the text.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Print_TextWithASign_AddsTheSignatureLineAfterTheText(bool overMcp)
+    {
+        await using var app = new NoPrinterApp();
+        var client = app.CreateClient();
+        var json = Json(new { text = "# T\nbody", options = new { sign = "Claude" } });
+
+        if (overMcp)
+            Assert.Equal("Printed.", (await client.CallToolAsync("print", json)).Text);
+        else
+            Assert.Equal(HttpStatusCode.OK, (await client.SendJsonAsync(HttpMethod.Post, PrintUrl, json)).Status);
+        var job = Assert.Single(await app.JournalRowsAsync());
+
+        var blocks = JsonDocument.Parse(job.Payload.Blocks!).RootElement;
+        Assert.Equal(3, blocks.GetArrayLength());
+        Assert.Equal("T", blocks[0].GetProperty("content").GetString());
+        Assert.Equal("body", blocks[1].GetProperty("content").GetString());
+        Assert.EndsWith(" * Claude", blocks[2].GetProperty("content").GetString());
+        Assert.Equal("Right", blocks[2].GetProperty("alignment").GetString());
+    }
+
     public static TheoryData<string, string> RejectedRequests => new()
     {
         { Json(new { text = Secret, content = new object[] { new { type = "Text", content = "x" } } }), StripMarkup.ConflictError },

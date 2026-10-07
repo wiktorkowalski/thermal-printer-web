@@ -29,6 +29,9 @@ public abstract class TestApp(string environment) : WebApplicationFactory<Progra
     // What the host answers for "is the journal directory on the container layer". Set before the first request.
     public bool InContainerLayer { get; init; }
 
+    // Takes the place of the system clock: the date of a signature line. Set before the first request.
+    public TimeProvider? Clock { get; init; }
+
     protected virtual string JournalPathSetting => "Journal:DataPath";
 
     public static string NewJournalDirectory() => Path.Combine(Path.GetTempPath(), "thermal-printer-web-tests", Guid.NewGuid().ToString("N"));
@@ -44,6 +47,11 @@ public abstract class TestApp(string environment) : WebApplicationFactory<Progra
             // The same log on every machine: no "not a volume" warning unless a test asks for it.
             services.RemoveAll<ContainerLayerCheck>();
             services.AddSingleton<ContainerLayerCheck>(_ => InContainerLayer);
+            if (Clock is not null)
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(Clock);
+            }
         });
         ConfigurePrinter(builder);
     }
@@ -77,6 +85,14 @@ public abstract class TestApp(string environment) : WebApplicationFactory<Progra
             Directory.Delete(JournalDirectory, recursive: true);
         GC.SuppressFinalize(this);
     }
+}
+
+// A clock that a test sets.
+public sealed class TestClock(DateTimeOffset now) : TimeProvider
+{
+    public DateTimeOffset Now { get; set; } = now;
+
+    public override DateTimeOffset GetUtcNow() => Now;
 }
 
 // The printer replaced: no test reaches the network.
