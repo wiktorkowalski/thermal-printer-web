@@ -208,12 +208,14 @@ public sealed class DecodeQueueBusyTests(ClosedPortApp app) : IClassFixture<Clos
     [Fact]
     public async Task Print_BusyFailure_Returns503WithRetryAfter()
     {
-        var controller = new PrinterController(new RecordingPrinter { Result = PrintResult.Busy }, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()))
+        var printer = new RecordingPrinter { Result = PrintResult.Busy };
+        var controller = new PrinterController(printer, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
 
-        var response = Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [TestBlocks.ImageBlock(PngBase64())] }, TimeProvider.System));
+        var response = Assert.IsAssignableFrom<ObjectResult>(await controller.Print(
+            new PrintRequest { Content = [TestBlocks.ImageBlock(PngBase64())] }, TimeProvider.System, TestBlocks.NewSignature(printer)));
 
         Assert.Equal(503, response.StatusCode);
         Assert.Equal(new PrintResponse(false, PrintResult.Busy.Error, "busy"), response.Value);

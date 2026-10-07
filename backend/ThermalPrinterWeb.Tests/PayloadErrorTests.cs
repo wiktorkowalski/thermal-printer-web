@@ -555,8 +555,10 @@ public sealed class PayloadErrorTests
 
     private static async Task<ObjectResult> PrintViaControllerAsync(PrintResult result)
     {
-        var controller = new PrinterController(new RecordingPrinter { Result = result }, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()));
-        return Assert.IsAssignableFrom<ObjectResult>(await controller.Print(new PrintRequest { Content = [Text()] }, TimeProvider.System));
+        var printer = new RecordingPrinter { Result = result };
+        var controller = new PrinterController(printer, new PrintJobLog(NullLogger<PrintJobLog>.Instance, new HttpContextAccessor()));
+        return Assert.IsAssignableFrom<ObjectResult>(await controller.Print(
+            new PrintRequest { Content = [Text()] }, TimeProvider.System, TestBlocks.NewSignature(printer)));
     }
 
     [Fact]

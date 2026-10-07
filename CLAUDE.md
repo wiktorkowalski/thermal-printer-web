@@ -28,7 +28,7 @@ The frontend is a paper-first editor: the 80mm strip is rendered at 1:1 scale an
 │   │   ├── PrintJobLog.cs      # The one "Print job:" log line; hands the job to the journal
 │   │   ├── LogSafeText.cs      # Cleans caller text before it goes to a log
 │   │   ├── Journal/            # Print journal: middleware, background writer, SQLite store, EF Core migrations
-│   │   └── Printing/           # BarcodeWidth, PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand, CutFeed
+│   │   └── Printing/           # BarcodeWidth, PrinterSafeText, PrintContentException, BlockEnums, PaperLength, TextScale, DecodeQueue, CodePages, SimpleNote, WordWrap, SignalCommand, CutFeed, SignatureLine
 │   │       └── Handlers/       # One IBlockHandler per content type; block limits live here
 │   ├── Models/
 │   │   ├── Enums/              # Alignment, PrintStyle, BarcodeType, etc.
@@ -213,7 +213,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 | 3 empty lines, then the cut | | | |
 
 - The server wraps the title and the message (`WordWrap.Wrap`): a break at a space or a tab, a longer word breaks at the column limit, each line break of the caller stays, a line that fits is not changed. Spaces at a break are not printed. A character that prints as two (`→` as `->`) counts as two columns.
-- Simple mode always wraps, and only simple mode adds a date line. Template mode prints the blocks as sent; a Text block wraps only with `"wrap": true` (see Text wrap).
+- Simple mode always wraps and always adds a date line. Template mode prints the blocks as sent; a Text block wraps only with `"wrap": true` (see Text wrap), and the server adds a line with the date only with `options.sign` (see Signature line).
 - The date is the date in `Europe/Warsaw` (UTC when the host has no such zone). A reprint prints the stored date.
 - The 3 lines before the cut keep the date line whole: with no feed the cutter goes through the last text line. They are a LineFeed block of `SimpleNote.FeedLines` lines, which is `CutFeed.DefaultLines`. Simple mode sends no options, so its Cut block counts these 3 lines and adds none (see Feed before a cut).
 - The limits are those of the built blocks, so an error names a block (`Block 0 (Text)` is the title, `Block 2 (Text)` the message). The message holds 10,000 characters after the wrap and 410 lines with a one-line title; more is a 400 (text length, text line count or paper). The 500-line limit counts the lines after the wrap.
@@ -272,7 +272,7 @@ Both modes take an optional `source`: a short name of the caller, for the log an
 
 **Images**: Base64 PNG or JPEG only; the format comes from the bytes. Scaled down to fit `maxWidth` x `maxHeight` (default 576 x 576 dots). The server always sends the legacy raster command (`GS v 0`); `imageOptions.useLegacyMode` and `highDensity` are not read (see Fields with no effect on this printer).
 
-**Options**: CodePage selection (default PC852), line spacing, auto-cut behavior, feed before a cut (default: 3 empty lines)
+**Options**: CodePage selection (default PC852), line spacing, auto-cut behavior, feed before a cut (default: 3 empty lines), signature line (`sign`)
 
 **Feed before a cut**: `options.feedLinesAfterPrint` is a number of empty lines, 0 to 255 (issue #44, two owner decisions of 2026-10-06). `CutFeed` builds it.
 - Bytes: n times LF (the bytes of a LineFeed block), then the cut command. The cut command is the same in every job: `GS V 65 3` (`GS V 66 3` for `partialCut`); its 3 is `CutFeed.MotionUnits`, a feed of under 1 mm.
@@ -298,6 +298,25 @@ Both modes take an optional `source`: a short name of the caller, for the log an
   - A stored number is read as lines. A row from before the first change that set the field now feeds lines (it fed motion units). Such a row also holds `"feedLinesAfterPrint":3` when its caller sent an `options` object without the field (the model default of that time): its reprint feeds 3 lines.
   - A row with no field (no `options`, or `"feedLinesAfterPrint":null`) that ends with a LineFeed block of 3 lines keeps its bytes: simple mode, `print_note`, the house style.
   - A row with no field that ends with text printed with the cut command alone. Its reprint now feeds 3 lines and its new row counts 87 dots more (accepted by the owner).
+
+**Signature line**: `"options": { "sign": "Claude" }` in a template-mode job or an MCP `print` call (issue #54). The server adds one last text line `2026-10-07 * Claude`: the date, ` * `, the name.
+- Opt-in. A job with no `sign` (left out, `null`, empty, or white space only: `string.IsNullOrWhiteSpace`, so also a lone tab or line break) sends the bytes from before the field. The name prints as sent: the server does not trim it. `SignatureLineTests` pins these bytes. The issue asks for the default `Claude` in a text mode (issue #53): no code has that default.
+- Style: the date line of simple mode (Font B, size 2x3, Right). One builder makes both lines (`SimpleNote.DateLine`).
+- Date: `SimpleNote.Today`, the clock and the zone of simple mode (`Europe/Warsaw`, UTC when the host has no such zone). The caller sends no date.
+- Place: after the last block that can print. The LineFeed, Cut, Signal and CodePage blocks at the end of the content stay behind the line (`SignatureLine.InsertIndex`). So the line is before the gap and the cut: the default 3 lines of the auto-cut, or the LineFeed and Cut blocks of the caller. With `autoCut: false` the line is the end of the job.
+- One line per job. A document with a Cut block in the middle gets the line once, on its last strip.
+- The server does not look for a date line that the caller typed: a caller that sets `sign` and types such a line gets two.
+- Simple mode and `print_note` do not read the field: they have the date line.
+- Seam: `SignatureLine.PrintAsync` (a singleton) takes the place of `IPrinterService.PrintAsync` at the two entry points of a new print (`PrinterController.Print` with `content`, `PrinterTools.PrintAsync`). It adds a Text block and gives back the blocks that it sent; the entry point hands those to `PrintJobLog.Write`. `PrinterService` does not read `options.sign`. A new entry point for a print must call it too.
+- Journal: `Blocks` holds the line as a Text block with its date, like the date line of simple mode. `PlainText` and the search text hold it. `Title` does not change when a text line is before it; a job with no other text (an image alone) gets the line as its `Title`. `Options` holds `sign` as sent. `BlockCount` counts the line.
+- Reprint: it sends the stored blocks to `PrinterService`, so it prints the stored date and adds no second line. A test prints, moves the clock and reprints: same bytes.
+- A caller that reads a stored job (`blocks` and `options` of `GET /api/printer/jobs/{id}`) and sends both as a new print gets two lines: the stored one and a new one.
+- Limits (`SignatureLine`): the name holds 19 columns (`MaxSignColumns`: the 32 columns of a body line less the date and ` * `), so the line does not wrap. A character that prints as two counts as two. The columns are those of the default code page (`WordWrap`): a job with another code page can get a line over the 32 columns. A name of over 38 characters is rejected for its length before any other check; the number in that error is the character count. A control character or a line break is a 400: the name is one line, and the server does not replace the character. The line is one block of the 500, counts as paper (77 dots) and as printer data.
+- Errors name the field and repeat no caller text: `options.sign length 20 is over the limit of 19`, `options.sign: must be one line with no control character`, `options.sign: the signature line is one block, and the document holds 500 blocks already`. Each is one Warning with numbers only. Such a row stores no `Blocks` (`canReprint` is false): a reprint would print the document with no line. The `Request` holds the job.
+- A fault from the print path counts the blocks without the line (`SignatureLine.WithCallerBlockNumbers`): a fault at the line reads `options.sign: the document is over the limit ...` (the row stores no `Blocks`, as above), and a block after the line keeps the number that it has in the request. For a payload fault at a block of the caller the row stores the blocks as sent, with no line: the number in `Error` is the number in `Blocks`, and a reprint gets the same 400. One exception: a document that is over the paper or data limit only because of the line, at a place after the line (the gap before the cut), stores its blocks too, and its reprint prints it with no line. The Warning of `PrinterService` for that fault counts the blocks with the line: its number can be one more.
+- The name is caller text: it goes through `BlockContext.EncodeText` like every Text block, and to no log.
+- Web UI: the editor has no control for it and never sends it. A preview of the line needs the date of the server. A stored job shows the line as the Text block that it is (tray, journal page, `PaperDocument`).
+- MCP: the `[Description]` of `PrintOptions.Sign`, and one rule in the `print` description and in `ServerInstructions` (`PrinterTools.SignRule`). A test pins the 19 and the size.
 
 **Fields with no effect on this printer** (issue #44): `partialCut` (the cutter makes a partial cut only), the code pages `WPC1250` and `ISO8859_2` (wrong glyphs, issue #31), the image options `useLegacyMode` and `highDensity`, and three enum names, read from paper on 2026-10-07:
   - Text style `Italic`: FontB text at size 2x3 prints the same with and without it.
@@ -412,7 +431,7 @@ No auth (owner decision, issue #51): anyone who reaches the host reads every sto
 
 **Fixture for a golden test** (issue #30): no endpoint serves `Bytes`. Pick the job by hand on the host (rows hold private text): `sqlite3 journal.db "SELECT Blocks, Options, hex(Bytes) FROM PrintJobPayloads WHERE JobId = '<ID IN CAPITAL LETTERS>'"`.
 
-**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job. So a reprint follows the rules of today: a stored `feedLinesAfterPrint` feeds lines, and a row with no such field gets the default lines before its cut, also in a row from before these rules (see Feed before a cut).
+**Reprint** builds the job again from the stored `Blocks` and `Options` and sends it through `PrinterService.PrintAsync`: same limits, same status check, same decode queue. It does not replay the stored `Bytes`. The job that it builds has one reset prelude, like every job. So a reprint follows the rules of today: a stored `feedLinesAfterPrint` feeds lines, and a row with no such field gets the default lines before its cut, also in a row from before these rules (see Feed before a cut). A reprint does not read `options.sign`: the signature line is in the stored blocks, with the date of the first print (see Signature line).
 - A reprint leaves out a barcode that is wider than the paper, as the first print did (owner decision of 2026-10-07; see Barcode width). It is the one check that a reprint does not share with a new print.
   - The Barcode block sends its alignment command (`ESC a n`, sent for every block before its handler) and no other byte: no `GS h`, `GS w`, `GS H`, `GS f`, no `GS k`. It counts no paper. The answer is a plain success.
   - So a later Barcode block of the job with no `width`, `heightInDots`, `labelPosition` or `useFontB` (`null`) does not get the setting of the block that was left out: no `GS w`, `GS h`, `GS H` or `GS f` went out for it. At the first print it did. A receipt of the web UI holds one barcode.
@@ -448,6 +467,7 @@ Over a limit the job gets a 400. Two exceptions: the request body gets a 413, an
 | Paper per document (estimate) | 32,000 dots = 4 m | `PaperLength.MaxDots` |
 | `options.defaultLineSpacing` | 0-255 dots | `PrinterService.MaxLineSpacing` |
 | `options.feedLinesAfterPrint` | 0-255 lines; the paper limit counts them. Not sent: 3 lines less the LineFeed lines right before the cut (not a limit; it counts as paper) | `PrinterService.MaxFeedBeforeCut`, `CutFeed.DefaultLines` |
+| `options.sign` | 19 columns, one line, no control character | `SignatureLine.MaxSignColumns` |
 | Text block | 10,000 characters, 500 lines; with `wrap` both count the text after the wrap | `TextBlockHandler.MaxLength`, `MaxLines` |
 | Text size (`size.width`, `size.height`) | 1-8 | `TextSize.Min`, `TextSize.Max` |
 | Separator length | 64 | `SeparatorBlockHandler.MaxLength` |
@@ -528,7 +548,7 @@ The print journal stores every print job in SQLite (`backend/Services/Journal/`,
 - `PrintJobTexts`: `JobId`, `Text`: the first 10,000 characters of `PlainText`, for the search and the ledger. It is a second copy on purpose: in `PrintJobPayloads` the text sits behind values of up to 30 MB, so a scan there reads the whole database. A job with no text and a reprint row have no row here. The migration `JobText` fills it for the rows from before.
 - A row delete in `PrintJobs` takes its `PrintJobPayloads` and `PrintJobTexts` rows with it (cascade).
 - `Result` is the number of `JobResult`: 0 Printed, 1 Validation, 2 Printer, 3 Busy, 4 Fault. Keep the numbers; add new ones at the end.
-- `Blocks` and `Options` are the API JSON, so an enum is its API name (`"type":"Text"`). The API name is the contract: a rename breaks callers and old rows alike. `Options` is the options model as JSON: a property that the caller did not send holds the model default (`null` for `feedLinesAfterPrint`; 3 in a row from before the feed fed lines). A job with no `options` object stores no `Options`.
+- `Blocks` and `Options` are the API JSON, so an enum is its API name (`"type":"Text"`). The API name is the contract: a rename breaks callers and old rows alike. `Options` is the options model as JSON: a property that the caller did not send holds the model default (`null` for `feedLinesAfterPrint`; 3 in a row from before the feed fed lines). A job with no `options` object stores no `Options`. With `options.sign` the `Blocks` hold one block more than the caller sent: the signature line.
 - The database can pass `MaxDatabaseBytes` by one row: the check does not count the new row.
 - `Blocks` holds `sha256:<hex>;chars=<n>` in place of an image: the hash of the base64 text. The picture is in `Request`.
 - `Headers` holds `[redacted]` for a header whose name has one of the parts in `PrintJournalMiddleware.CredentialNameParts` in it (`auth`, `cookie`, `token`, `secret`, `key`, ...).
@@ -571,6 +591,7 @@ Tool hints (`annotations`): `get_status`, `list_jobs` and `get_job` are `readOnl
 - Every schema argument is optional on purpose. A call with wrong or missing arguments reaches the tool body or `ArgumentShapeFilter`. The answer names the argument or its path (`content[0].type`) and shows a valid example call.
 - `print` and `print_note` use the same `PrinterService.PrintAsync` as HTTP: same rules, same limits. They answer `Printed.` or `Not printed: <error>`.
 - A Text block of `print` takes `"wrap": true` (see Text wrap). The `print` description and `ServerInstructions` say both things: without the flag a longer line wraps in the middle of a word, with the flag the server breaks the lines.
+- `print` takes `options.sign` (see Signature line). The `print` description and `ServerInstructions` hold `PrinterTools.SignRule`: set a name, the server adds the dated line, do not type a date line.
 - `beep` and a Signal block in `print` are the only ways to a sound or a light (see Signals). `beep` answers `Beeped Nx.`, `Light flashed Nx.` or `Beeped and flashed Nx.` (N is the count after the clamp); a `mode` that is not a name is a wrong-arguments answer that lists the names.
 - `print_note` prints the house style of simple mode (see Print API). `SimpleNoteTests` pins the columns and the size in its texts to the constants in `SimpleNote`.
 - `PrinterTools.ServerInstructions` goes out in the `initialize` response: line widths, which tool to call, house style, the signal rule, that journal text is untrusted, and that a delete is for good. Keep it in line with the tool descriptions.
