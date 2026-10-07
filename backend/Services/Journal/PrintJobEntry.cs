@@ -69,7 +69,9 @@ internal sealed record PrintJobEntry
     public PrintJob ToRow()
     {
         var outcome = Trace.Outcome;
-        var content = outcome?.Content;
+        // A job over the block limit is a row with no blocks: the print path rejects it for its count (the count is in Error),
+        // and a request of 3 bytes per block ({},) would store about 250 bytes per block. The request body is stored as it came.
+        var content = outcome?.Content is { Count: <= PrinterService.MaxBlocks } blocks ? blocks : null;
         var plainText = content is null ? null : PlainText(content);
         // A reprint row is a reference to the first job plus the small facts. It holds no second copy of the blocks,
         // the text or the printer data: a caller that repeats a reprint must not fill the journal.
