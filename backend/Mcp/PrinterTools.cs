@@ -53,7 +53,6 @@ public static class PrinterTools
         "Optional. Short name of the caller, for example 'claude-code'. It goes to the server log and the print journal; it is not printed.";
 
     // In every text that offers the buzzer or the light. No code path sends a signal that the caller did not ask for.
-    // The urgent exception matches the owner's thermal-printer skill (decision of 2026-11-22).
     internal const string SignalRule =
         "Nothing beeps or lights by itself. Send a sound or a light when the user asks for one, "
         + "or on your own only for something urgent that cannot wait for the user to come back: "
