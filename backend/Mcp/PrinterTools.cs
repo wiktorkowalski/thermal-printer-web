@@ -54,7 +54,10 @@ public static class PrinterTools
 
     // In every text that offers the buzzer or the light. No code path sends a signal that the caller did not ask for.
     internal const string SignalRule =
-        "Nothing beeps or lights by itself. Send a sound or a light only when the user asks for one, never on your own for a print, an error or a finished task.";
+        "Nothing beeps or lights by itself. Send a sound or a light when the user asks for one, "
+        + "or on your own only for something urgent that cannot wait for the user to come back: "
+        + "production is down, a deploy is failing right now, an irreversible action needs a go or no-go now. "
+        + "Never on your own for a print, an error or a finished task. When unsure, do not beep.";
 
     // In ServerInstructions and in the print description. The 3 is CutFeed.DefaultLines: a test pins it.
     internal const string CutFeedRule =
