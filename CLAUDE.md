@@ -376,7 +376,7 @@ Every mode takes an optional `source`: a short name of the caller, for the log a
 
 **Rule: nothing beeps or lights by itself.** A signal goes out only when the caller asks for it: a beep call, or a Signal block that the caller put in the document.
 - No code path adds a signal: not simple mode, not `print_note`, not a print error, not the web UI. A reprint sends the stored blocks, so it repeats a Signal block of the first job and adds none.
-- The MCP texts tell a model the same: use a signal only when the user asks for a sound or a light (`PrinterTools.SignalRule`, in the `beep` and `print` descriptions and in `ServerInstructions`; the `[Description]` of `type` and `signalOptions`). `McpToolTests` and `SignalTests` pin the rule.
+- The MCP texts tell a model when to use a signal: when the user asks for a sound or a light, or on its own only for something urgent that cannot wait for the user (production down, a deploy failing now, an irreversible action that needs a go or no-go now); never on its own for a print, an error or a finished task; when unsure, no signal. This matches the owner's `thermal-printer` skill (decision of 2026-11-22). (`PrinterTools.SignalRule`, in the `beep` and `print` descriptions and in `ServerInstructions`; the `[Description]` of `type` and `signalOptions`). `McpToolTests` and `SignalTests` pin the rule.
 - Do not add an automatic signal. A change to this rule needs the owner.
 
 **Modes** (`SignalMode`, the JSON names; the numbers 1, 2, 3 are the `n` values of `ESC C`, and `Sound` is sent as `ESC B`):

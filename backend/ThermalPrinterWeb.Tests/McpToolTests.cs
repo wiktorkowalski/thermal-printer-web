@@ -172,18 +172,19 @@ public sealed class McpToolTests(FakePrinterApp app) : IClassFixture<FakePrinter
 
     // Nothing beeps or lights by itself (#48): every text that offers the signal says when to use it.
     [Fact]
-    public async Task ToolsList_EveryTextThatOffersASignal_SaysOnlyWhenTheUserAsks()
+    public async Task ToolsList_EveryTextThatOffersASignal_SaysWhenToUseIt()
     {
-        const string rule = "Nothing beeps or lights by itself. Send a sound or a light only when the user asks for one";
+        const string rule = "Nothing beeps or lights by itself. Send a sound or a light when the user asks for one, or on your own only for something urgent";
         Assert.StartsWith(rule, PrinterTools.SignalRule);
+        Assert.EndsWith("When unsure, do not beep.", PrinterTools.SignalRule);
         var print = await ToolAsync("print");
         var block = print.GetProperty("inputSchema").GetProperty("properties").GetProperty("content").GetProperty("items").GetProperty("properties");
 
         Assert.Contains(PrinterTools.SignalRule, (await ToolAsync("beep")).GetProperty("description").GetString());
         Assert.Contains(PrinterTools.SignalRule, print.GetProperty("description").GetString());
         Assert.Contains(PrinterTools.SignalRule, PrinterTools.ServerInstructions);
-        Assert.Contains("add a Signal block only when the user asks for a sound or a light", block.GetProperty("signalOptions").GetProperty("description").GetString());
-        Assert.Contains("add it only when the user asks for a sound or a light", block.GetProperty("type").GetProperty("description").GetString());
+        Assert.Contains("add a Signal block only when the user asks for a sound or a light, or on your own only for something urgent", block.GetProperty("signalOptions").GetProperty("description").GetString());
+        Assert.Contains("add it only when the user asks for a sound or a light, or on your own only for something urgent", block.GetProperty("type").GetProperty("description").GetString());
         // No text offers the signal as a way to get attention: that invites a beep nobody asked for.
         Assert.DoesNotContain("attention", (await ToolAsync("beep")).GetProperty("description").GetString());
         Assert.DoesNotContain("attention", PrinterTools.ServerInstructions);
